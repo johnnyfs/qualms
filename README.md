@@ -9,7 +9,7 @@ Dark Qualms is a story-first bounty-hunter game prototype. The project is now or
 - `godot/`: unmaintained 2D orbital-flight prototype; kept for possible future interface work.
 - `examples/`: valid older story datasets kept for reference.
 
-The story model currently defines systems, star types, graph hops, orbitals (`Planet`, `Moon`, `Station`), recursive local destinations, and details that can be examined or taken.
+The story model currently defines systems, star types, graph hops, orbitals (`Planet`, `Moon`, `Station`), recursive local destinations, and objects that support interactions such as examine, take, or use.
 
 ## Run
 
@@ -76,8 +76,8 @@ Dump the defined narrative surface:
 - System screen: add an orbital by type (`Planet`, `Moon`, `Station`) with a name and description.
 - Leave-system screen: add a linked system by compass direction, name, and description.
 - Destination screen: add a child destination under the current destination.
-- Inside a destination, `A` opens a menu: add destination or add detail.
-- Inside a destination, `D` asks for a detail number to delete.
+- Inside a destination, `A` opens a menu: add destination or add object.
+- Inside a destination, `D` deletes a local detail: an object or child destination.
 
 `D` also deletes orbitals from the system screen. Moons block deletion of their parent until the child orbital is deleted.
 
@@ -102,11 +102,11 @@ A destination is deliberately explicit:
       "kind": "Bar",
       "name": "Blue Anchor",
       "description": "Bounty clerks and dockhands keep separate corners.",
-      "details": [
+      "objects": [
         {
-          "kind": "Examine",
           "name": "Admire the decor",
-          "description": "A specific thing to notice."
+          "description": "A specific thing to notice.",
+          "interactions": ["Examine"]
         }
       ],
       "destinations": []
@@ -115,7 +115,7 @@ A destination is deliberately explicit:
 }
 ```
 
-The loader validates required fields, destination types, detail types, duplicate IDs, moon parents, and at most 9 choices per menu. Landing destinations may contain nested `destinations`, forming a recursive graph, and `details`, which currently open description modals.
+The loader validates required fields, destination types, object interactions, duplicate IDs, moon parents, and at most 9 choices per menu. Landing destinations may contain nested `destinations`, forming a recursive graph, and `objects`. Objects are denormalized in the menu by interaction, so one poster with `["Examine", "Take"]` appears as two numbered choices.
 
 Systems also define graph data:
 

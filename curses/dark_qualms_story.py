@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_PATH = PROJECT_ROOT / "stories" / "stellar" / "story_systems.json"
 ORBITAL_TYPES = {"Planet", "Moon", "Station"}
 OPTION_KINDS = {"Bar", "Tourist Destination", "Destination"}
-DETAIL_KINDS = {"Examine", "Take"}
+OBJECT_INTERACTIONS = {"Examine", "Take", "Use"}
 MAX_HOP_DISTANCE_AU = 350000.0
 MAP_WIDTH = 58
 MAP_HEIGHT = 17
@@ -24,10 +24,10 @@ DEFAULT_HOP_DISTANCE_AU = 200000.0
 
 
 @dataclass(frozen=True)
-class Detail:
-    kind: str
+class StoryObject:
     name: str
     description: str
+    interactions: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -35,7 +35,7 @@ class LandingOption:
     kind: str
     name: str
     description: str
-    details: tuple[Detail, ...] = ()
+    objects: tuple[StoryObject, ...] = ()
     destinations: tuple[LandingOption, ...] = ()
 
 
@@ -81,7 +81,7 @@ class GameState:
     orbital_id: str | None = None
     docked_path: list[int] = field(default_factory=list)
     destination_path: list[int] = field(default_factory=list)
-    detail_index: int | None = None
+    object_interaction_index: int | None = None
     last_system_id: str | None = None
     last_orbital_by_system: dict[str, str] = field(default_factory=dict)
     message: str = ""
@@ -172,42 +172,70 @@ def load_landing_options(raw_options: list, context: str) -> tuple[LandingOption
         child_raws = option_raw.get("destinations", [])
         if not isinstance(child_raws, list):
             raise ValueError(f"{option_context}.destinations must be a list")
-        detail_raws = option_raw.get("details", [])
-        if not isinstance(detail_raws, list):
-            raise ValueError(f"{option_context}.details must be a list")
+        object_raws = option_raw.get("objects", option_raw.get("details", []))
+        if not isinstance(object_raws, list):
+            raise ValueError(f"{option_context}.objects must be a list")
+
+        objects = load_objects(object_raws, f"{option_context}.objects")
+        destinations = load_landing_options(child_raws, f"{option_context}.destinations")
+        if object_interaction_count(objects) + len(destinations) > 9:
+            raise ValueError(f"{option_context} must contain no more than 9 numbered choices")
 
         options.append(
             LandingOption(
                 kind=kind,
                 name=require_string(option_raw, "name", option_context),
                 description=require_string(option_raw, "description", option_context),
-                details=load_details(detail_raws, f"{option_context}.details"),
-                destinations=load_landing_options(child_raws, f"{option_context}.destinations"),
+                objects=objects,
+                destinations=destinations,
             )
         )
     return tuple(options)
 
 
-def load_details(raw_details: list, context: str) -> tuple[Detail, ...]:
-    if len(raw_details) > 9:
-        raise ValueError(f"{context} must contain no more than 9 details")
+def load_objects(raw_objects: list, context: str) -> tuple[StoryObject, ...]:
+    if len(raw_objects) > 9:
+        raise ValueError(f"{context} must contain no more than 9 objects")
 
-    details: list[Detail] = []
-    for detail_index, detail_raw in enumerate(raw_details):
-        detail_context = f"{context}[{detail_index}]"
-        if not isinstance(detail_raw, dict):
-            raise ValueError(f"{detail_context} must be an object")
-        kind = require_string(detail_raw, "kind", detail_context)
-        if kind not in DETAIL_KINDS:
-            raise ValueError(f"{detail_context}.kind must be one of {sorted(DETAIL_KINDS)}")
-        details.append(
-            Detail(
-                kind=kind,
-                name=require_string(detail_raw, "name", detail_context),
-                description=require_string(detail_raw, "description", detail_context),
+    objects: list[StoryObject] = []
+    for object_index, object_raw in enumerate(raw_objects):
+        object_context = f"{context}[{object_index}]"
+        if not isinstance(object_raw, dict):
+            raise ValueError(f"{object_context} must be an object")
+        interactions = load_object_interactions(object_raw, object_context)
+        objects.append(
+            StoryObject(
+                name=require_string(object_raw, "name", object_context),
+                description=require_string(object_raw, "description", object_context),
+                interactions=interactions,
             )
         )
-    return tuple(details)
+    return tuple(objects)
+
+
+def load_object_interactions(object_raw: dict, context: str) -> tuple[str, ...]:
+    if "interactions" not in object_raw and "kind" in object_raw:
+        kind = require_string(object_raw, "kind", context)
+        if kind not in OBJECT_INTERACTIONS:
+            raise ValueError(f"{context}.kind must be one of {sorted(OBJECT_INTERACTIONS)}")
+        return (kind,)
+
+    raw_interactions = require_list(object_raw, "interactions", context)
+    if not raw_interactions:
+        raise ValueError(f"{context}.interactions must not be empty")
+
+    interactions: list[str] = []
+    for index, interaction in enumerate(raw_interactions):
+        value = require_string({"interaction": interaction}, "interaction", f"{context}.interactions[{index}]")
+        if value not in OBJECT_INTERACTIONS:
+            raise ValueError(f"{context}.interactions[{index}] must be one of {sorted(OBJECT_INTERACTIONS)}")
+        if value not in interactions:
+            interactions.append(value)
+    return tuple(interactions)
+
+
+def object_interaction_count(objects: tuple[StoryObject, ...]) -> int:
+    return sum(len(story_object.interactions) for story_object in objects)
 
 
 def load_world(path: Path = DATA_PATH) -> StoryWorld:
@@ -359,13 +387,13 @@ def landing_option_to_raw(option: LandingOption) -> dict:
         "kind": option.kind,
         "name": option.name,
         "description": option.description,
-        "details": [
+        "objects": [
             {
-                "kind": detail.kind,
-                "name": detail.name,
-                "description": detail.description,
+                "name": story_object.name,
+                "description": story_object.description,
+                "interactions": list(story_object.interactions),
             }
-            for detail in option.details
+            for story_object in option.objects
         ],
         "destinations": [landing_option_to_raw(child) for child in option.destinations],
     }
@@ -486,13 +514,31 @@ def add_landing_destination(
             "kind": "Destination",
             "name": name,
             "description": description,
+            "objects": [],
             "destinations": [],
         }
     )
     return save_and_reload(path, raw)
 
 
-def add_detail(
+def delete_landing_destination(
+    world: StoryWorld,
+    path: Path,
+    system_id: str,
+    orbital_id: str,
+    parent_path: list[int],
+    destination_index: int,
+) -> StoryWorld:
+    raw = world_to_raw(world)
+    orbital_raw = orbital_raw_by_id(system_raw_by_id(raw, system_id), orbital_id)
+    destinations = landing_destination_list_raw(orbital_raw, parent_path)
+    if destination_index < 0 or destination_index >= len(destinations):
+        raise ValueError("destination number is out of range")
+    del destinations[destination_index]
+    return save_and_reload(path, raw)
+
+
+def add_object(
     world: StoryWorld,
     path: Path,
     system_id: str,
@@ -500,38 +546,50 @@ def add_detail(
     destination_path: list[int],
     name: str,
     description: str,
+    interactions: tuple[str, ...],
 ) -> StoryWorld:
     raw = world_to_raw(world)
     orbital_raw = orbital_raw_by_id(system_raw_by_id(raw, system_id), orbital_id)
     destination_raw = landing_destination_raw(orbital_raw, destination_path)
-    details = destination_raw.setdefault("details", [])
-    if len(details) >= 9:
-        raise ValueError("destination already has 9 details")
-    details.append(
+    objects = destination_raw.setdefault("objects", [])
+    if len(objects) >= 9:
+        raise ValueError("destination already has 9 objects")
+    if not interactions:
+        raise ValueError("object must support at least one interaction")
+    for interaction in interactions:
+        if interaction not in OBJECT_INTERACTIONS:
+            raise ValueError(f"interaction must be one of {sorted(OBJECT_INTERACTIONS)}")
+    current_choice_count = sum(len(story_object.get("interactions", [story_object.get("kind", "Examine")])) for story_object in objects)
+    current_choice_count += len(destination_raw.setdefault("destinations", []))
+    if current_choice_count + len(interactions) > 9:
+        raise ValueError("destination already has 9 numbered choices")
+    objects.append(
         {
-            "kind": "Examine",
             "name": name,
             "description": description,
+            "interactions": list(interactions),
         }
     )
+    destination_raw.pop("details", None)
     return save_and_reload(path, raw)
 
 
-def delete_detail(
+def delete_object(
     world: StoryWorld,
     path: Path,
     system_id: str,
     orbital_id: str,
     destination_path: list[int],
-    detail_index: int,
+    object_index: int,
 ) -> StoryWorld:
     raw = world_to_raw(world)
     orbital_raw = orbital_raw_by_id(system_raw_by_id(raw, system_id), orbital_id)
     destination_raw = landing_destination_raw(orbital_raw, destination_path)
-    details = destination_raw.setdefault("details", [])
-    if detail_index < 0 or detail_index >= len(details):
-        raise ValueError("detail number is out of range")
-    del details[detail_index]
+    objects = destination_raw.setdefault("objects", [])
+    if object_index < 0 or object_index >= len(objects):
+        raise ValueError("object number is out of range")
+    del objects[object_index]
+    destination_raw.pop("details", None)
     return save_and_reload(path, raw)
 
 
@@ -757,6 +815,7 @@ def prompt_text(
     prompt: str,
     context_lines: Iterable[str] = (),
     max_length: int = 64,
+    default: str | None = None,
 ) -> str | None:
     curses.echo()
     try:
@@ -766,10 +825,11 @@ def prompt_text(
 
     stdscr.erase()
     context = list(context_lines)
-    top, left, _content_width, rendered_lines = centered_window(stdscr, 72, [title, "", *context, prompt])
+    prompt_line = prompt_label(prompt, default)
+    top, left, _content_width, rendered_lines = centered_window(stdscr, 72, [title, "", *context, prompt_line])
     rows, cols = stdscr.getmaxyx()
     input_y = top + 2 + len(rendered_lines) - 1
-    input_x = left + 2 + len(prompt) + 1
+    input_x = left + 2 + len(prompt_line) + 1
     max_input_length = max(1, min(max_length, cols - input_x - 2))
     try:
         stdscr.move(input_y, input_x)
@@ -784,7 +844,7 @@ def prompt_text(
             pass
 
     value = raw.decode("utf-8", errors="ignore").strip()
-    return value or None
+    return value or default
 
 
 def prompt_multiline_text(
@@ -792,9 +852,14 @@ def prompt_multiline_text(
     title: str,
     prompt: str,
     context_lines: Iterable[str] = (),
+    default: str | None = None,
 ) -> str | None:
     text = ""
-    context = [*context_lines, "Type freely. Ctrl-D saves. Ctrl-C cancels.", ""]
+    save_help = "Type freely. Enter keeps the default when blank. Ctrl-D saves. Ctrl-C cancels."
+    if default is None:
+        save_help = "Type freely. Ctrl-D saves. Ctrl-C cancels."
+    context = [*context_lines, save_help, ""]
+    prompt_line = prompt_label(prompt, default)
 
     try:
         curses.curs_set(1)
@@ -805,7 +870,7 @@ def prompt_multiline_text(
         stdscr.erase()
         rows, cols = stdscr.getmaxyx()
         content_width = max(10, min(72, cols - 4) - 4)
-        display_lines = [title, "", *context, f"{prompt}:", *text_area_lines(text, content_width)]
+        display_lines = [title, "", *context, prompt_line, *text_area_lines(text, content_width)]
         top, left, _width, rendered_lines = centered_window(stdscr, 72, display_lines)
         cursor_y, cursor_x = text_cursor_position(top, left, rendered_lines, text, content_width)
         try:
@@ -820,7 +885,7 @@ def prompt_multiline_text(
                 curses.curs_set(0)
             except curses.error:
                 pass
-            return text.strip() or None
+            return text.strip() or default
         if key == ascii.ETX:
             try:
                 curses.curs_set(0)
@@ -831,10 +896,34 @@ def prompt_multiline_text(
             text = text[:-1]
             continue
         if key in (curses.KEY_ENTER, 10, 13):
+            if default is not None and not text.strip():
+                try:
+                    curses.curs_set(0)
+                except curses.error:
+                    pass
+                return default
             text += "\n"
             continue
         if 0 <= key < 256 and chr(key).isprintable():
             text += chr(key)
+
+
+def prompt_label(prompt: str, default: str | None = None) -> str:
+    if default is None:
+        return prompt
+    base = prompt.strip()
+    if base.endswith(":"):
+        base = base[:-1].rstrip()
+    return f"{base} [{preview_text(default)}]:"
+
+
+def preview_text(value: str, max_length: int = 32) -> str:
+    preview = re.sub(r"\s+", " ", value).strip()
+    if not preview:
+        return "empty"
+    if len(preview) <= max_length:
+        return preview
+    return preview[: max_length - 3].rstrip() + "..."
 
 
 def text_area_lines(value: str, width: int) -> list[str]:
@@ -884,18 +973,11 @@ def prompt_name_description(
     current_description: str | None = None,
 ) -> tuple[str, str] | None:
     context = []
-    label_width = len("Current description:")
-    if current_name is not None:
-        context.append(f"{'Current name:':<{label_width}} {current_name}")
-    if current_description is not None:
-        context.append(f"{'Current description:':<{label_width}} {current_description.replace(chr(10), ' / ')}")
-    if context:
-        context.append("")
 
-    name = prompt_text(stdscr, title, "Name:", context)
+    name = prompt_text(stdscr, title, "Name:", context, default=current_name)
     if name is None:
         return None
-    description = prompt_multiline_text(stdscr, title, "Description", context)
+    description = prompt_multiline_text(stdscr, title, "Description", context, default=current_description)
     if description is None:
         return None
     return name, description
@@ -989,10 +1071,11 @@ def draw_option(stdscr: curses.window, state: GameState, orbital: Orbital, optio
         "",
     ]
     choice_number = 1
-    if option.details:
-        lines.append("Details:")
-        for detail in option.details:
-            lines.append(f"{choice_number}. {detail.name} [{detail.kind}]")
+    object_choices = object_interaction_choices(option)
+    if object_choices:
+        lines.append("Objects:")
+        for story_object, interaction in object_choices:
+            lines.append(f"{choice_number}. {story_object.name} [{interaction}]")
             choice_number += 1
         lines.append("")
 
@@ -1013,7 +1096,7 @@ def draw_option(stdscr: curses.window, state: GameState, orbital: Orbital, optio
 
 
 def editor_commands_for_state(state: GameState) -> list[str]:
-    if not state.editor_enabled or state.detail_index is not None or state.view == "map":
+    if not state.editor_enabled or state.object_interaction_index is not None or state.view == "map":
         return []
     if state.view == "jump":
         return ["A: add system"]
@@ -1058,13 +1141,19 @@ def draw_editor_box(stdscr: curses.window, state: GameState) -> None:
     bottom_window(stdscr, 72, lines)
 
 
-def draw_detail(stdscr: curses.window, orbital: Orbital, destination: LandingOption, detail: Detail) -> None:
+def draw_object_interaction(
+    stdscr: curses.window,
+    orbital: Orbital,
+    destination: LandingOption,
+    story_object: StoryObject,
+    interaction: str,
+) -> None:
     lines = [
         f"{orbital.name}: {destination.name}",
         "",
-        detail.name,
+        f"{interaction}: {story_object.name}",
         "",
-        detail.description,
+        story_object.description,
         "",
         "B: back",
         "Q: quit",
@@ -1092,9 +1181,10 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
         else:
             orbital = orbital_by_id(system, state.orbital_id)
             selected_destination = destination_at_path(orbital, state.destination_path)
-            selected_detail = detail_at_state(selected_destination, state.detail_index)
-            if selected_destination is not None and selected_detail is not None:
-                draw_detail(stdscr, orbital, selected_destination, selected_detail)
+            selected_object_interaction = object_interaction_at_state(selected_destination, state.object_interaction_index)
+            if selected_destination is not None and selected_object_interaction is not None:
+                story_object, interaction = selected_object_interaction
+                draw_object_interaction(stdscr, orbital, selected_destination, story_object, interaction)
             elif selected_destination is not None:
                 draw_option(stdscr, state, orbital, selected_destination)
             else:
@@ -1123,7 +1213,7 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
                 state.orbital_id = None
                 state.docked_path.clear()
                 state.destination_path.clear()
-                state.detail_index = None
+                state.object_interaction_index = None
             elif key in (ord("b"), ord("B")):
                 state.view = "system"
             elif key in (ord("m"), ord("M")):
@@ -1140,22 +1230,23 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
             selected_destination = destination_at_path(orbital, state.destination_path)
             if selected_destination is None:
                 state.destination_path.clear()
-                state.detail_index = None
+                state.object_interaction_index = None
                 continue
-            if state.detail_index is not None:
+            if state.object_interaction_index is not None:
                 if key in (ord("b"), ord("B")):
-                    state.detail_index = None
+                    state.object_interaction_index = None
                 continue
             index = key - ord("1")
-            if 0 <= index < len(selected_destination.details):
-                state.detail_index = index
-            elif 0 <= index - len(selected_destination.details) < len(selected_destination.destinations):
-                state.destination_path.append(index - len(selected_destination.details))
+            object_choices = object_interaction_choices(selected_destination)
+            if 0 <= index < len(object_choices):
+                state.object_interaction_index = index
+            elif 0 <= index - len(object_choices) < len(selected_destination.destinations):
+                state.destination_path.append(index - len(object_choices))
             elif key in (ord("t"), ord("T")) and state.destination_path == state.docked_path:
                 state.last_orbital_by_system[state.system_id] = state.orbital_id
                 state.docked_path.clear()
                 state.destination_path.clear()
-                state.detail_index = None
+                state.object_interaction_index = None
             elif key in (ord("b"), ord("B")):
                 if state.destination_path != state.docked_path:
                     state.destination_path.pop()
@@ -1187,6 +1278,7 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
                 state.orbital_id = system.orbitals[index].id
                 state.docked_path.clear()
                 state.destination_path.clear()
+                state.object_interaction_index = None
             elif state.editor_enabled and key in (ord("a"), ord("A")):
                 added = prompt_add_orbital(stdscr, world, data_path, state.system_id)
                 if added is not None:
@@ -1217,11 +1309,11 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
             if len(orbital.landing_options) == 1:
                 state.docked_path = [0]
                 state.destination_path = [0]
-                state.detail_index = None
+                state.object_interaction_index = None
             elif len(orbital.landing_options) > 1:
                 state.docked_path = [0]
                 state.destination_path = [0]
-                state.detail_index = None
+                state.object_interaction_index = None
         elif state.editor_enabled and key in (ord("e"), ord("E")):
             edited = prompt_edit_orbital(stdscr, world, data_path, state.system_id, state.orbital_id)
             if edited is not None:
@@ -1230,7 +1322,7 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
             state.orbital_id = None
             state.docked_path.clear()
             state.destination_path.clear()
-            state.detail_index = None
+            state.object_interaction_index = None
 
 
 def destination_at_path(orbital: Orbital, destination_path: list[int]) -> LandingOption | None:
@@ -1246,12 +1338,24 @@ def destination_at_path(orbital: Orbital, destination_path: list[int]) -> Landin
     return current
 
 
-def detail_at_state(destination: LandingOption | None, detail_index: int | None) -> Detail | None:
-    if destination is None or detail_index is None:
+def object_interaction_choices(destination: LandingOption) -> list[tuple[StoryObject, str]]:
+    choices: list[tuple[StoryObject, str]] = []
+    for story_object in destination.objects:
+        for interaction in story_object.interactions:
+            choices.append((story_object, interaction))
+    return choices
+
+
+def object_interaction_at_state(
+    destination: LandingOption | None,
+    object_interaction_index: int | None,
+) -> tuple[StoryObject, str] | None:
+    if destination is None or object_interaction_index is None:
         return None
-    if detail_index < 0 or detail_index >= len(destination.details):
+    choices = object_interaction_choices(destination)
+    if object_interaction_index < 0 or object_interaction_index >= len(choices):
         return None
-    return destination.details[detail_index]
+    return choices[object_interaction_index]
 
 
 def prompt_add_orbital(
@@ -1332,15 +1436,15 @@ def prompt_add_inside_destination(
     orbital_id: str,
     destination_path: list[int],
 ) -> tuple[StoryWorld, str] | None:
-    choice = prompt_menu(stdscr, "Add", ["Add destination", "Add detail"])
+    choice = prompt_menu(stdscr, "Add", ["Add destination", "Add object"])
     if choice == 0:
         return prompt_add_landing_destination(stdscr, world, data_path, system_id, orbital_id, destination_path)
     if choice == 1:
-        return prompt_add_detail(stdscr, world, data_path, system_id, orbital_id, destination_path)
+        return prompt_add_object(stdscr, world, data_path, system_id, orbital_id, destination_path)
     return None
 
 
-def prompt_add_detail(
+def prompt_add_object(
     stdscr: curses.window,
     world: StoryWorld,
     data_path: Path,
@@ -1348,14 +1452,33 @@ def prompt_add_detail(
     orbital_id: str,
     destination_path: list[int],
 ) -> tuple[StoryWorld, str] | None:
-    values = prompt_name_description(stdscr, "Add Detail")
+    values = prompt_name_description(stdscr, "Add Object")
     if values is None:
         return None
     name, description = values
+    interaction_text = prompt_text(stdscr, "Add Object", "Interactions (Examine, Take, Use):", default="Examine")
+    if interaction_text is None:
+        return None
     try:
-        return add_detail(world, data_path, system_id, orbital_id, destination_path, name, description), f"Added detail: {name}"
+        interactions = parse_interactions(interaction_text)
+        return add_object(world, data_path, system_id, orbital_id, destination_path, name, description, interactions), f"Added object: {name}"
     except ValueError as error:
         return world, str(error)
+
+
+def parse_interactions(value: str) -> tuple[str, ...]:
+    interactions: list[str] = []
+    for raw_interaction in re.split(r"[,/]+", value):
+        interaction = raw_interaction.strip().title()
+        if not interaction:
+            continue
+        if interaction not in OBJECT_INTERACTIONS:
+            raise ValueError(f"interaction must be one of {sorted(OBJECT_INTERACTIONS)}")
+        if interaction not in interactions:
+            interactions.append(interaction)
+    if not interactions:
+        raise ValueError("object must support at least one interaction")
+    return tuple(interactions)
 
 
 def prompt_delete_detail(
@@ -1367,23 +1490,80 @@ def prompt_delete_detail(
     destination_path: list[int],
     destination: LandingOption,
 ) -> tuple[StoryWorld, str] | None:
-    if not destination.details:
+    has_objects = bool(destination.objects)
+    has_destinations = bool(destination.destinations)
+    if not has_objects and not has_destinations:
         return world, "No details to delete"
 
-    lines = ["Delete Detail", ""]
-    for index, detail in enumerate(destination.details, start=1):
-        lines.append(f"{index}. {detail.name} [{detail.kind}]")
-    choice = prompt_text(stdscr, "Delete Detail", "Number:", lines)
+    if has_objects and has_destinations:
+        choice = prompt_menu(stdscr, "Delete Detail", ["Object", "Destination"])
+        if choice is None:
+            return None
+        if choice == 0:
+            return prompt_delete_object(stdscr, world, data_path, system_id, orbital_id, destination_path, destination)
+        return prompt_delete_child_destination(stdscr, world, data_path, system_id, orbital_id, destination_path, destination)
+
+    if has_objects:
+        return prompt_delete_object(stdscr, world, data_path, system_id, orbital_id, destination_path, destination)
+    return prompt_delete_child_destination(stdscr, world, data_path, system_id, orbital_id, destination_path, destination)
+
+
+def prompt_delete_object(
+    stdscr: curses.window,
+    world: StoryWorld,
+    data_path: Path,
+    system_id: str,
+    orbital_id: str,
+    destination_path: list[int],
+    destination: LandingOption,
+) -> tuple[StoryWorld, str] | None:
+    if not destination.objects:
+        return world, "No objects to delete"
+
+    lines = ["Delete Object", ""]
+    for index, story_object in enumerate(destination.objects, start=1):
+        lines.append(f"{index}. {story_object.name} [{', '.join(story_object.interactions)}]")
+    choice = prompt_text(stdscr, "Delete Object", "Number:", lines)
     if choice is None:
         return None
     try:
-        detail_index = int(choice) - 1
+        object_index = int(choice) - 1
     except ValueError:
-        return world, "Enter a detail number"
+        return world, "Enter an object number"
 
     try:
-        name = destination.details[detail_index].name
-        return delete_detail(world, data_path, system_id, orbital_id, destination_path, detail_index), f"Deleted detail: {name}"
+        name = destination.objects[object_index].name
+        return delete_object(world, data_path, system_id, orbital_id, destination_path, object_index), f"Deleted object: {name}"
+    except (IndexError, ValueError) as error:
+        return world, str(error)
+
+
+def prompt_delete_child_destination(
+    stdscr: curses.window,
+    world: StoryWorld,
+    data_path: Path,
+    system_id: str,
+    orbital_id: str,
+    destination_path: list[int],
+    destination: LandingOption,
+) -> tuple[StoryWorld, str] | None:
+    if not destination.destinations:
+        return world, "No destinations to delete"
+
+    lines = ["Delete Destination", ""]
+    for index, child in enumerate(destination.destinations, start=1):
+        lines.append(f"{index}. {child.name} [{child.kind}]")
+    choice = prompt_text(stdscr, "Delete Destination", "Number:", lines)
+    if choice is None:
+        return None
+    try:
+        child_index = int(choice) - 1
+    except ValueError:
+        return world, "Enter a destination number"
+
+    try:
+        name = destination.destinations[child_index].name
+        return delete_landing_destination(world, data_path, system_id, orbital_id, destination_path, child_index), f"Deleted destination: {name}"
     except (IndexError, ValueError) as error:
         return world, str(error)
 
@@ -1546,8 +1726,8 @@ def dump_world(world: StoryWorld) -> str:
 
 def dump_destination(option: LandingOption, lines: list[str], prefix: str) -> None:
     lines.append(f"{prefix} {option.name} [{option.kind}]: {option.description}")
-    for index, detail in enumerate(option.details, start=1):
-        lines.append(f"      {prefix}d{index}. {detail.name} [{detail.kind}]: {detail.description}")
+    for index, story_object in enumerate(option.objects, start=1):
+        lines.append(f"      {prefix}o{index}. {story_object.name} [{', '.join(story_object.interactions)}]: {story_object.description}")
     for index, child in enumerate(option.destinations, start=1):
         dump_destination(child, lines, f"   {prefix}{index}.")
 

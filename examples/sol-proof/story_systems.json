@@ -24,17 +24,20 @@
             {
               "kind": "Bar",
               "name": "Terminus Bar",
-              "description": "Miners trade heat-sick rumors under shielded glass."
+              "description": "Miners trade heat-sick rumors under shielded glass.",
+              "objects": []
             },
             {
               "kind": "Tourist Destination",
               "name": "Caloris Rim",
-              "description": "A crater overlook where the horizon bends hard."
+              "description": "A crater overlook where the horizon bends hard.",
+              "objects": []
             },
             {
               "kind": "Destination",
               "name": "Fire Pits",
-              "description": "A galactically notorious extremophile fight club."
+              "description": "A galactically notorious extremophile fight club.",
+              "objects": []
             }
           ]
         },
@@ -47,12 +50,14 @@
             {
               "kind": "Bar",
               "name": "Pearl Room",
-              "description": "Pilots drink under windows full of yellow stormlight."
+              "description": "Pilots drink under windows full of yellow stormlight.",
+              "objects": []
             },
             {
               "kind": "Tourist Destination",
               "name": "Cloud Deck",
-              "description": "A public rail above the sulfur haze."
+              "description": "A public rail above the sulfur haze.",
+              "objects": []
             }
           ]
         },
@@ -65,17 +70,20 @@
             {
               "kind": "Bar",
               "name": "Blue Anchor",
-              "description": "Bounty clerks and dockhands keep separate corners."
+              "description": "Bounty clerks and dockhands keep separate corners.",
+              "objects": []
             },
             {
               "kind": "Tourist Destination",
               "name": "Old Harbor",
-              "description": "A preserved coast under too many cameras."
+              "description": "A preserved coast under too many cameras.",
+              "objects": []
             },
             {
               "kind": "Destination",
               "name": "Statue of Liberty",
-              "description": "Quaint."
+              "description": "Quaint.",
+              "objects": []
             }
           ]
         },
@@ -89,12 +97,14 @@
             {
               "kind": "Bar",
               "name": "Gray Mare",
-              "description": "Quiet booths, cheap oxygen, expensive secrets."
+              "description": "Quiet booths, cheap oxygen, expensive secrets.",
+              "objects": []
             },
             {
               "kind": "Tourist Destination",
               "name": "Tranquility",
-              "description": "A fenced relic field watched by bored guards."
+              "description": "A fenced relic field watched by bored guards.",
+              "objects": []
             }
           ]
         },
@@ -107,12 +117,14 @@
             {
               "kind": "Bar",
               "name": "Rust Choir",
-              "description": "A loud cellar where warrants change hands."
+              "description": "A loud cellar where warrants change hands.",
+              "objects": []
             },
             {
               "kind": "Tourist Destination",
               "name": "Valles Gate",
-              "description": "A canyon lift descending into red shadow."
+              "description": "A canyon lift descending into red shadow.",
+              "objects": []
             }
           ]
         },
@@ -125,12 +137,14 @@
             {
               "kind": "Bar",
               "name": "Stone Cup",
-              "description": "Belters argue routes over bitter recycled gin."
+              "description": "Belters argue routes over bitter recycled gin.",
+              "objects": []
             },
             {
               "kind": "Tourist Destination",
               "name": "Dawn Vault",
-              "description": "An old probe shrine behind pressure glass."
+              "description": "An old probe shrine behind pressure glass.",
+              "objects": []
             }
           ]
         },
@@ -143,25 +157,29 @@
             {
               "kind": "Bar",
               "name": "Ledger Bar",
-              "description": "Every table has a broker, a debtor, or both."
+              "description": "Every table has a broker, a debtor, or both.",
+              "objects": []
             },
             {
               "kind": "Tourist Destination",
               "name": "Spin Garden",
-              "description": "Three trees grown under contractual sunlight."
+              "description": "Three trees grown under contractual sunlight.",
+              "objects": []
             },
             {
               "kind": "Destination",
               "name": "Rig Manager's Office",
               "description": "A cramped office with rig schedules, stale coffee, and art on the wall.",
-              "details": [
+              "destinations": [],
+              "objects": [
                 {
-                  "kind": "Examine",
                   "name": "Admire the decor",
-                  "description": "A poster pin-up of a scantily clad Antarran \"actress\", complete with blue lipstick kiss. \"From one hometown spawn to another -- Adira Kiwalanali\"."
+                  "description": "A poster pin-up of a scantily clad Antarran \"actress\", complete with blue lipstick kiss. \"From one hometown spawn to another -- Adira Kiwalanali\".",
+                  "interactions": [
+                    "Examine"
+                  ]
                 }
-              ],
-              "destinations": []
+              ]
             }
           ]
         },
@@ -174,12 +192,14 @@
             {
               "kind": "Bar",
               "name": "Red Spotter",
-              "description": "Storm tourists and repo crews share the rail."
+              "description": "Storm tourists and repo crews share the rail.",
+              "objects": []
             },
             {
               "kind": "Tourist Destination",
               "name": "Amalthea View",
-              "description": "A shielded balcony facing the inner moons."
+              "description": "A shielded balcony facing the inner moons.",
+              "objects": []
             }
           ]
         },
@@ -193,12 +213,14 @@
             {
               "kind": "Bar",
               "name": "Ice Cellar",
-              "description": "Warm lamps, cold walls, no open weapons."
+              "description": "Warm lamps, cold walls, no open weapons.",
+              "objects": []
             },
             {
               "kind": "Tourist Destination",
               "name": "Green Dome",
-              "description": "A farm arcology smelling faintly of soil."
+              "description": "A farm arcology smelling faintly of soil.",
+              "objects": []
             }
           ]
         }
@@ -227,12 +249,14 @@
             {
               "kind": "Bar",
               "name": "Red Wick",
-              "description": "Shift bosses drink beside silent bounty crews."
+              "description": "Shift bosses drink beside silent bounty crews.",
+              "objects": []
             },
             {
               "kind": "Tourist Destination",
               "name": "Ash Flats",
-              "description": "A rust-black plain under a dim red sun."
+              "description": "A rust-black plain under a dim red sun.",
+              "objects": []
             }
           ]
         },
@@ -245,12 +269,14 @@
             {
               "kind": "Bar",
               "name": "Lock Nine",
-              "description": "Inspectors pretend not to hear useful things."
+              "description": "Inspectors pretend not to hear useful things.",
+              "objects": []
             },
             {
               "kind": "Tourist Destination",
               "name": "Mirror Walk",
-              "description": "A viewport ring facing old traffic scars."
+              "description": "A viewport ring facing old traffic scars.",
+              "objects": []
             }
           ]
         }
@@ -279,12 +305,14 @@
             {
               "kind": "Bar",
               "name": "Blue Knife",
-              "description": "Couriers trade sealed favors over clear liquor."
+              "description": "Couriers trade sealed favors over clear liquor.",
+              "objects": []
             },
             {
               "kind": "Tourist Destination",
               "name": "Dazzle Deck",
-              "description": "Filtered glass against a punishing white star."
+              "description": "Filtered glass against a punishing white star.",
+              "objects": []
             }
           ]
         },
@@ -297,12 +325,14 @@
             {
               "kind": "Bar",
               "name": "Gold Room",
-              "description": "Everything costs too much, including names."
+              "description": "Everything costs too much, including names.",
+              "objects": []
             },
             {
               "kind": "Tourist Destination",
               "name": "Core Lift",
-              "description": "A glass descent through exhausted strata."
+              "description": "A glass descent through exhausted strata.",
+              "objects": []
             }
           ]
         }
@@ -330,12 +360,14 @@
             {
               "kind": "Bar",
               "name": "The Shutter",
-              "description": "Patrons count storms between unpaid debts."
+              "description": "Patrons count storms between unpaid debts.",
+              "objects": []
             },
             {
               "kind": "Tourist Destination",
               "name": "Storm Blind",
-              "description": "A bunker window opened only between flares."
+              "description": "A bunker window opened only between flares.",
+              "objects": []
             }
           ]
         }
@@ -363,12 +395,14 @@
             {
               "kind": "Bar",
               "name": "Spindle",
-              "description": "Locals pause when strangers use real names."
+              "description": "Locals pause when strangers use real names.",
+              "objects": []
             },
             {
               "kind": "Tourist Destination",
               "name": "Tether View",
-              "description": "A cable vanishing into orange light."
+              "description": "A cable vanishing into orange light.",
+              "objects": []
             }
           ]
         }
