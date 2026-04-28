@@ -1,0 +1,209 @@
+{
+  "name": "Sol Proof",
+  "description": "A compact, Earth-like proof-of-concept system for Dark Qualms.",
+  "root": {
+    "id": "sun",
+    "name": "Sun",
+    "type": "star",
+    "radius_km": 696340,
+    "color": "#ffd166",
+    "children": [
+      {
+        "id": "mercury",
+        "name": "Mercury",
+        "type": "planet",
+        "orbital_distance_au": 0.387,
+        "eccentricity": 0.2056,
+        "major_axis_degrees": 77.5,
+        "radius_km": 2440,
+        "phase_degrees": 18,
+        "color": "#a99a88"
+      },
+      {
+        "id": "venus",
+        "name": "Venus",
+        "type": "planet",
+        "orbital_distance_au": 0.723,
+        "eccentricity": 0.0068,
+        "major_axis_degrees": 131.6,
+        "radius_km": 6052,
+        "phase_degrees": 128,
+        "color": "#d8b36a"
+      },
+      {
+        "id": "earth",
+        "name": "Earth",
+        "type": "planet",
+        "orbital_distance_au": 1.0,
+        "eccentricity": 0.0167,
+        "major_axis_degrees": 102.9,
+        "radius_km": 6371,
+        "phase_degrees": 255,
+        "color": "#4f8bd6",
+        "children": [
+          {
+            "id": "luna",
+            "name": "Luna",
+            "type": "moon",
+            "orbital_distance_au": 0.00257,
+            "eccentricity": 0.0549,
+            "major_axis_degrees": 318.2,
+            "radius_km": 1737,
+            "phase_degrees": 42,
+            "color": "#c8c6bd"
+          }
+        ]
+      },
+      {
+        "id": "mars",
+        "name": "Mars",
+        "type": "planet",
+        "orbital_distance_au": 1.524,
+        "eccentricity": 0.0934,
+        "major_axis_degrees": 336.1,
+        "radius_km": 3390,
+        "phase_degrees": 318,
+        "color": "#c7674a",
+        "children": [
+          {
+            "id": "phobos",
+            "name": "Phobos",
+            "type": "moon",
+            "orbital_distance_au": 0.000063,
+            "eccentricity": 0.0151,
+            "major_axis_degrees": 150,
+            "radius_km": 11,
+            "phase_degrees": 90,
+            "color": "#9b8c7f"
+          },
+          {
+            "id": "deimos",
+            "name": "Deimos",
+            "type": "moon",
+            "orbital_distance_au": 0.000157,
+            "eccentricity": 0.0002,
+            "major_axis_degrees": 260,
+            "radius_km": 6,
+            "phase_degrees": 235,
+            "color": "#9f968c"
+          }
+        ]
+      },
+      {
+        "id": "ceres",
+        "name": "Ceres",
+        "type": "planet",
+        "orbital_distance_au": 2.77,
+        "eccentricity": 0.0785,
+        "major_axis_degrees": 73.6,
+        "radius_km": 473,
+        "phase_degrees": 75,
+        "color": "#8d8a80"
+      },
+      {
+        "id": "belt-exchange",
+        "name": "Belt Exchange",
+        "type": "station",
+        "orbital_distance_au": 3.18,
+        "eccentricity": 0.14,
+        "major_axis_degrees": 18,
+        "radius_km": 180,
+        "phase_degrees": 300,
+        "color": "#d7f75f"
+      },
+      {
+        "id": "jupiter",
+        "name": "Jupiter",
+        "type": "planet",
+        "orbital_distance_au": 5.204,
+        "eccentricity": 0.0489,
+        "major_axis_degrees": 14.8,
+        "radius_km": 69911,
+        "phase_degrees": 12,
+        "color": "#d0a579",
+        "children": [
+          {
+            "id": "ganymede",
+            "name": "Ganymede",
+            "type": "moon",
+            "orbital_distance_au": 0.00716,
+            "eccentricity": 0.0013,
+            "major_axis_degrees": 30,
+            "radius_km": 2634,
+            "phase_degrees": 166,
+            "color": "#b3a089"
+          },
+          {
+            "id": "callisto",
+            "name": "Callisto",
+            "type": "moon",
+            "orbital_distance_au": 0.01258,
+            "eccentricity": 0.0074,
+            "major_axis_degrees": 55,
+            "radius_km": 2410,
+            "phase_degrees": 290,
+            "color": "#827d75"
+          }
+        ]
+      },
+      {
+        "id": "saturn",
+        "name": "Saturn",
+        "type": "planet",
+        "orbital_distance_au": 9.58,
+        "eccentricity": 0.0565,
+        "major_axis_degrees": 92.4,
+        "radius_km": 58232,
+        "phase_degrees": 190,
+        "color": "#d9c58e",
+        "rings": true
+      },
+      {
+        "id": "uranus",
+        "name": "Uranus",
+        "type": "planet",
+        "orbital_distance_au": 19.2,
+        "eccentricity": 0.0457,
+        "major_axis_degrees": 170.9,
+        "radius_km": 25362,
+        "phase_degrees": 252,
+        "color": "#8dcbd7"
+      },
+      {
+        "id": "neptune",
+        "name": "Neptune",
+        "type": "planet",
+        "orbital_distance_au": 30.05,
+        "eccentricity": 0.0113,
+        "major_axis_degrees": 44.9,
+        "radius_km": 24622,
+        "phase_degrees": 305,
+        "color": "#5473d8"
+      },
+      {
+        "id": "pluto",
+        "name": "Pluto",
+        "type": "planet",
+        "orbital_distance_au": 39.48,
+        "eccentricity": 0.2488,
+        "major_axis_degrees": 224.1,
+        "radius_km": 1188,
+        "phase_degrees": 147,
+        "color": "#b9a48d",
+        "children": [
+          {
+            "id": "charon",
+            "name": "Charon",
+            "type": "moon",
+            "orbital_distance_au": 0.000131,
+            "eccentricity": 0.0002,
+            "major_axis_degrees": 80,
+            "radius_km": 606,
+            "phase_degrees": 15,
+            "color": "#a7a19c"
+          }
+        ]
+      }
+    ]
+  }
+}

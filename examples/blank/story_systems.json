@@ -1,0 +1,17 @@
+{
+  "start_system": "empty-system",
+  "systems": [
+    {
+      "id": "empty-system",
+      "name": "Empty System",
+      "star_type": "Unspecified",
+      "description": "Nothing has been defined here yet.",
+      "position_au": [
+        0,
+        0
+      ],
+      "hops": [],
+      "orbitals": []
+    }
+  ]
+}

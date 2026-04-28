@@ -1,0 +1,78 @@
+{
+  "start_system": "empty-system",
+  "systems": [
+    {
+      "id": "empty-system",
+      "name": "Vexas",
+      "star_type": "Unspecified",
+      "description": "A mined-out husk, a century past its prime.",
+      "position_au": [
+        0.0,
+        0.0
+      ],
+      "hops": [],
+      "orbitals": [
+        {
+          "id": "bolorus",
+          "name": "Bolorus",
+          "type": "Planet",
+          "description": "A once-vibrant gas giant, now strip mined down to a ball of exhaust.",
+          "landing_options": [
+            {
+              "kind": "Destination",
+              "name": "Abandoned Mining Platform",
+              "description": "Solar-powered maintenance drones keep it minimally operational, but it could sink into the clouds any day now.",
+              "details": [],
+              "destinations": [
+                {
+                  "kind": "Destination",
+                  "name": "Rig Manager's Office",
+                  "description": "Strangely clean, given how long it's been abandoned. There's no life here to generate dust, you guess. There is however some truly sophisticated art over the desk.",
+                  "details": [
+                    {
+                      "kind": "Examine",
+                      "name": "Sophisticated decor",
+                      "description": "It's an old-fashioned paper pinup of a scantily-clad Antarran \"Actress.\" Under a blue lipstick print is a signature and the inscription: \"From one hometown spawn to another -- stay inscrutable, <3 Andira Manara.\""
+                    }
+                  ],
+                  "destinations": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "rainbow",
+          "name": "Rainbow",
+          "type": "Moon",
+          "description": "The ugliest moon in the galaxy, it's name is a bit of a joke -- partly a reference to its iridium mines, partly a reference to its once beautiful view of the gas giant below.",
+          "parent": "bolorus",
+          "landing_options": [
+            {
+              "kind": "Destination",
+              "name": "Mining Colony 5",
+              "description": "Home sweet home. Sometimes you wonder what happened to colonies one through four. If life here is any indication, they must have died of boredom.",
+              "details": [],
+              "destinations": [
+                {
+                  "kind": "Destination",
+                  "name": "Pointless Bar",
+                  "description": "Alcohol is a depressant.",
+                  "details": [],
+                  "destinations": []
+                },
+                {
+                  "kind": "Destination",
+                  "name": "Pointless Store",
+                  "description": "There's nothing here anyone could want.",
+                  "details": [],
+                  "destinations": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
