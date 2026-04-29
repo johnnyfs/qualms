@@ -9,7 +9,7 @@ Dark Qualms is a story-first bounty-hunter game prototype. The project is now or
 - `godot/`: unmaintained 2D orbital-flight prototype; kept for possible future interface work.
 - `examples/`: valid older story datasets kept for reference.
 
-The story model currently defines systems, star types, graph hops, orbitals (`Planet`, `Moon`, `Station`), recursive local destinations, and objects that support interactions such as examine, take, or use.
+The story model currently defines systems, star types, graph hops, orbitals (`Planet`, `Moon`, `Station`), recursive local destinations, objects that support interactions such as examine, take, or use, NPCs that support examine and talk, destination sequences, and simple fact-gated before rules.
 
 ## Run
 
@@ -45,6 +45,8 @@ The game reads and writes `story_systems.json` inside that directory. You can al
 
 If the data path is missing, empty, or contains `{}`, the game creates a blank world with one empty system so you can start authoring in-game.
 
+Stories can optionally define `start_location` with a starting orbital and destination ID path. The current story starts docked at Mining Colony 5 on Blemish.
+
 Validate story data without launching curses:
 
 ```sh
@@ -61,6 +63,7 @@ Dump the defined narrative surface:
 ## Controls
 
 - Number: travel to a destination or choose a local destination
+- `I`: open inventory
 - `L`: leave system from the system screen; land from orbit or station approach
 - `T`: take off from the docked destination or return to the system destination list from orbit
 - `B`: back one level in a local destination graph
@@ -76,8 +79,9 @@ Dump the defined narrative surface:
 - System screen: add an orbital by type (`Planet`, `Moon`, `Station`) with a name and description.
 - Leave-system screen: add a linked system by compass direction, name, and description.
 - Destination screen: add a child destination under the current destination.
-- Inside a destination, `A` opens a menu: add destination or add object.
-- Inside a destination, `D` deletes a local detail: an object or child destination.
+- Inside a destination, `A` opens a menu: add destination, add object, or add NPC.
+- Inside a destination, `D` deletes a local detail: an object, NPC, or child destination.
+- `R` reloads story data from disk while preserving the current location and in-memory state.
 
 `D` also deletes orbitals from the system screen. Moons block deletion of their parent until the child orbital is deleted.
 
@@ -104,9 +108,33 @@ A destination is deliberately explicit:
       "description": "Bounty clerks and dockhands keep separate corners.",
       "objects": [
         {
+          "id": "decor",
           "name": "Admire the decor",
           "description": "A specific thing to notice.",
-          "interactions": ["Examine"]
+          "interactions": ["Examine", "Take"],
+          "collectable": true,
+          "before": [
+            {
+              "interaction": "Take",
+              "unless": ["sequence:example:complete"],
+              "message": "Leave it where it is."
+            }
+          ]
+        }
+      ],
+      "npcs": [
+        {
+          "id": "bartender",
+          "name": "Bartender",
+          "description": "The bartender watches the room.",
+          "examine_description": "Nothing gets past her.",
+          "interactions": ["Examine", "Talk"],
+          "before": [
+            {
+              "interaction": "Talk",
+              "message": "She is busy."
+            }
+          ]
         }
       ],
       "destinations": []
@@ -115,7 +143,9 @@ A destination is deliberately explicit:
 }
 ```
 
-The loader validates required fields, destination types, object interactions, duplicate IDs, moon parents, and at most 9 choices per menu. Landing destinations may contain nested `destinations`, forming a recursive graph, and `objects`. Objects are denormalized in the menu by interaction, so one poster with `["Examine", "Take"]` appears as two numbered choices.
+The loader validates required fields, destination types, object and NPC interactions, duplicate IDs, moon parents, and at most 9 choices per menu. Landing destinations may contain nested `destinations`, forming a recursive graph, plus `objects`, `npcs`, and `sequences`. Objects and NPCs are denormalized in the menu by interaction, so one poster with `["Examine", "Take"]` appears as two numbered choices. Sequences and before rules can use `when` and `unless` fact lists.
+
+Inventory opens with `I`. Inventory items can be examined with `X`; equippable items define an `equipment_slot` and can be equipped with `E`, replacing any item already in that slot. Rules can test equipment slots with facts like `equipped:slot:Exosuit`.
 
 Systems also define graph data:
 

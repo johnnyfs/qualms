@@ -17,6 +17,8 @@ DATA_PATH = PROJECT_ROOT / "stories" / "stellar" / "story_systems.json"
 ORBITAL_TYPES = {"Planet", "Moon", "Station"}
 OPTION_KINDS = {"Bar", "Tourist Destination", "Destination"}
 OBJECT_INTERACTIONS = {"Examine", "Take", "Use"}
+NPC_INTERACTIONS = {"Examine", "Talk"}
+DESTINATION_INTERACTIONS = {"Enter"}
 MAX_HOP_DISTANCE_AU = 350000.0
 MAP_WIDTH = 58
 MAP_HEIGHT = 17
@@ -24,18 +26,60 @@ DEFAULT_HOP_DISTANCE_AU = 200000.0
 
 
 @dataclass(frozen=True)
+class BeforeRule:
+    interaction: str
+    message: str
+    when: tuple[str, ...] = ()
+    unless: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class Sequence:
+    id: str
+    when: tuple[str, ...]
+    unless: tuple[str, ...]
+    messages: tuple[str, ...]
+    on_complete: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class StoryObject:
+    id: str
     name: str
     description: str
     interactions: tuple[str, ...]
+    collectable: bool = False
+    equipment_slot: str | None = None
+    before: tuple[BeforeRule, ...] = ()
+
+
+@dataclass(frozen=True)
+class NPC:
+    id: str
+    name: str
+    description: str
+    examine_description: str
+    interactions: tuple[str, ...]
+    before: tuple[BeforeRule, ...] = ()
+
+
+@dataclass(frozen=True)
+class InteractionChoice:
+    kind: str
+    target: StoryObject | NPC
+    interaction: str
 
 
 @dataclass(frozen=True)
 class LandingOption:
+    id: str
     kind: str
     name: str
     description: str
     objects: tuple[StoryObject, ...] = ()
+    npcs: tuple[NPC, ...] = ()
+    before: tuple[BeforeRule, ...] = ()
+    sequences: tuple[Sequence, ...] = ()
     destinations: tuple[LandingOption, ...] = ()
 
 
@@ -64,6 +108,8 @@ class System:
 class StoryWorld:
     start_system: str
     systems: tuple[System, ...]
+    start_orbital_id: str | None = None
+    start_destination_ids: tuple[str, ...] = ()
 
     def system_by_id(self, system_id: str) -> System:
         for system in self.systems:
@@ -78,13 +124,25 @@ class GameState:
     editor_enabled: bool = False
     view: str = "system"
     map_return_view: str = "system"
+    inventory_return_view: str = "system"
     orbital_id: str | None = None
     docked_path: list[int] = field(default_factory=list)
     destination_path: list[int] = field(default_factory=list)
-    object_interaction_index: int | None = None
+    interaction_index: int | None = None
+    inventory_index: int = 0
+    inventory: dict[str, StoryObject] = field(default_factory=dict)
+    equipment: dict[str, str] = field(default_factory=dict)
+    object_locations: dict[str, str] = field(default_factory=dict)
+    notice_title: str = ""
+    notice_message: str = ""
+    sequence_messages: tuple[str, ...] = ()
+    sequence_index: int = 0
+    sequence_on_complete: tuple[str, ...] = ()
+    facts: set[str] = field(default_factory=set)
     last_system_id: str | None = None
     last_orbital_by_system: dict[str, str] = field(default_factory=dict)
     message: str = ""
+    editor_box_top: int | None = None
 
 
 def blank_world_raw() -> dict:
@@ -175,18 +233,31 @@ def load_landing_options(raw_options: list, context: str) -> tuple[LandingOption
         object_raws = option_raw.get("objects", option_raw.get("details", []))
         if not isinstance(object_raws, list):
             raise ValueError(f"{option_context}.objects must be a list")
+        npc_raws = option_raw.get("npcs", [])
+        if not isinstance(npc_raws, list):
+            raise ValueError(f"{option_context}.npcs must be a list")
+        sequence_raws = option_raw.get("sequences", [])
+        if not isinstance(sequence_raws, list):
+            raise ValueError(f"{option_context}.sequences must be a list")
 
         objects = load_objects(object_raws, f"{option_context}.objects")
+        npcs = load_npcs(npc_raws, f"{option_context}.npcs")
+        before = load_before_rules(option_raw.get("before", []), f"{option_context}.before", DESTINATION_INTERACTIONS)
+        sequences = load_sequences(sequence_raws, f"{option_context}.sequences")
         destinations = load_landing_options(child_raws, f"{option_context}.destinations")
-        if object_interaction_count(objects) + len(destinations) > 9:
+        if interaction_count(objects, npcs) + len(destinations) > 9:
             raise ValueError(f"{option_context} must contain no more than 9 numbered choices")
 
         options.append(
             LandingOption(
+                id=optional_id(option_raw, "destination"),
                 kind=kind,
                 name=require_string(option_raw, "name", option_context),
                 description=require_string(option_raw, "description", option_context),
                 objects=objects,
+                npcs=npcs,
+                before=before,
+                sequences=sequences,
                 destinations=destinations,
             )
         )
@@ -205,12 +276,39 @@ def load_objects(raw_objects: list, context: str) -> tuple[StoryObject, ...]:
         interactions = load_object_interactions(object_raw, object_context)
         objects.append(
             StoryObject(
+                id=optional_id(object_raw, "object"),
                 name=require_string(object_raw, "name", object_context),
                 description=require_string(object_raw, "description", object_context),
                 interactions=interactions,
+                collectable=object_collectable(object_raw, interactions),
+                equipment_slot=optional_string(object_raw, "equipment_slot", object_context),
+                before=load_before_rules(object_raw.get("before", []), f"{object_context}.before", OBJECT_INTERACTIONS),
             )
         )
     return tuple(objects)
+
+
+def load_npcs(raw_npcs: list, context: str) -> tuple[NPC, ...]:
+    if len(raw_npcs) > 9:
+        raise ValueError(f"{context} must contain no more than 9 NPCs")
+
+    npcs: list[NPC] = []
+    for npc_index, npc_raw in enumerate(raw_npcs):
+        npc_context = f"{context}[{npc_index}]"
+        if not isinstance(npc_raw, dict):
+            raise ValueError(f"{npc_context} must be an object")
+        interactions = load_interactions(npc_raw, npc_context, NPC_INTERACTIONS, ("Examine", "Talk"))
+        npcs.append(
+            NPC(
+                id=optional_id(npc_raw, "npc"),
+                name=require_string(npc_raw, "name", npc_context),
+                description=require_string(npc_raw, "description", npc_context),
+                examine_description=str(npc_raw.get("examine_description", require_string(npc_raw, "description", npc_context))),
+                interactions=interactions,
+                before=load_before_rules(npc_raw.get("before", []), f"{npc_context}.before", NPC_INTERACTIONS),
+            )
+        )
+    return tuple(npcs)
 
 
 def load_object_interactions(object_raw: dict, context: str) -> tuple[str, ...]:
@@ -220,22 +318,141 @@ def load_object_interactions(object_raw: dict, context: str) -> tuple[str, ...]:
             raise ValueError(f"{context}.kind must be one of {sorted(OBJECT_INTERACTIONS)}")
         return (kind,)
 
-    raw_interactions = require_list(object_raw, "interactions", context)
+    return load_interactions(object_raw, context, OBJECT_INTERACTIONS, ())
+
+
+def object_collectable(object_raw: dict, interactions: tuple[str, ...]) -> bool:
+    collectable = object_raw.get("collectable")
+    if isinstance(collectable, bool):
+        return collectable
+    return "Take" in interactions
+
+
+def optional_string(data: dict, field: str, context: str) -> str | None:
+    value = data.get(field)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{context}.{field} must be a non-empty string when present")
+    return value
+
+
+def load_interactions(
+    raw: dict,
+    context: str,
+    allowed_interactions: set[str],
+    default_interactions: tuple[str, ...],
+) -> tuple[str, ...]:
+    if "interactions" not in raw and default_interactions:
+        return default_interactions
+
+    raw_interactions = require_list(raw, "interactions", context)
     if not raw_interactions:
         raise ValueError(f"{context}.interactions must not be empty")
 
     interactions: list[str] = []
     for index, interaction in enumerate(raw_interactions):
         value = require_string({"interaction": interaction}, "interaction", f"{context}.interactions[{index}]")
-        if value not in OBJECT_INTERACTIONS:
-            raise ValueError(f"{context}.interactions[{index}] must be one of {sorted(OBJECT_INTERACTIONS)}")
+        if value not in allowed_interactions:
+            raise ValueError(f"{context}.interactions[{index}] must be one of {sorted(allowed_interactions)}")
         if value not in interactions:
             interactions.append(value)
     return tuple(interactions)
 
 
-def object_interaction_count(objects: tuple[StoryObject, ...]) -> int:
-    return sum(len(story_object.interactions) for story_object in objects)
+def load_before_rules(raw_rules: list, context: str, allowed_interactions: set[str]) -> tuple[BeforeRule, ...]:
+    if not isinstance(raw_rules, list):
+        raise ValueError(f"{context} must be a list")
+
+    rules: list[BeforeRule] = []
+    for rule_index, rule_raw in enumerate(raw_rules):
+        rule_context = f"{context}[{rule_index}]"
+        if not isinstance(rule_raw, dict):
+            raise ValueError(f"{rule_context} must be an object")
+        interaction = require_string(rule_raw, "interaction", rule_context)
+        if interaction not in allowed_interactions:
+            raise ValueError(f"{rule_context}.interaction must be one of {sorted(allowed_interactions)}")
+        rules.append(
+            BeforeRule(
+                interaction=interaction,
+                message=require_string(rule_raw, "message", rule_context),
+                when=load_fact_conditions(rule_raw.get("when", []), f"{rule_context}.when"),
+                unless=load_fact_conditions(rule_raw.get("unless", []), f"{rule_context}.unless"),
+            )
+        )
+    return tuple(rules)
+
+
+def load_sequences(raw_sequences: list, context: str) -> tuple[Sequence, ...]:
+    sequences: list[Sequence] = []
+    for sequence_index, sequence_raw in enumerate(raw_sequences):
+        sequence_context = f"{context}[{sequence_index}]"
+        if not isinstance(sequence_raw, dict):
+            raise ValueError(f"{sequence_context} must be an object")
+        sequence_id = require_string(sequence_raw, "id", sequence_context)
+        messages = load_fact_conditions(sequence_raw.get("messages", []), f"{sequence_context}.messages")
+        if not messages:
+            raise ValueError(f"{sequence_context}.messages must not be empty")
+        sequences.append(
+            Sequence(
+                id=sequence_id,
+                when=load_fact_conditions(sequence_raw.get("when", []), f"{sequence_context}.when"),
+                unless=load_fact_conditions(sequence_raw.get("unless", [f"sequence:{sequence_id}:complete"]), f"{sequence_context}.unless"),
+                messages=messages,
+                on_complete=load_fact_conditions(sequence_raw.get("on_complete", [f"sequence:{sequence_id}:complete"]), f"{sequence_context}.on_complete"),
+            )
+        )
+    return tuple(sequences)
+
+
+def load_fact_conditions(raw_facts: object, context: str) -> tuple[str, ...]:
+    if not isinstance(raw_facts, list):
+        raise ValueError(f"{context} must be a list")
+    facts: list[str] = []
+    for fact_index, fact in enumerate(raw_facts):
+        value = require_string({"fact": fact}, "fact", f"{context}[{fact_index}]")
+        if value not in facts:
+            facts.append(value)
+    return tuple(facts)
+
+
+def optional_id(raw: dict, fallback: str) -> str:
+    raw_id = raw.get("id")
+    if isinstance(raw_id, str) and raw_id.strip():
+        return raw_id
+    raw_name = raw.get("name")
+    if isinstance(raw_name, str):
+        return slugify(raw_name, fallback)
+    return fallback
+
+
+def interaction_count(objects: tuple[StoryObject, ...], npcs: tuple[NPC, ...]) -> int:
+    return sum(len(story_object.interactions) for story_object in objects) + sum(len(npc.interactions) for npc in npcs)
+
+
+def load_start_location(raw: dict, start_system: str) -> tuple[str | None, tuple[str, ...]]:
+    raw_location = raw.get("start_location", {})
+    if raw_location == {}:
+        return None, ()
+    if not isinstance(raw_location, dict):
+        raise ValueError("root.start_location must be an object")
+
+    system_id = raw_location.get("system_id", start_system)
+    if system_id != start_system:
+        raise ValueError("root.start_location.system_id must match root.start_system")
+
+    orbital_id = raw_location.get("orbital_id")
+    if orbital_id is not None and (not isinstance(orbital_id, str) or not orbital_id.strip()):
+        raise ValueError("root.start_location.orbital_id must be a non-empty string when present")
+
+    destination_ids = raw_location.get("destination_ids", [])
+    if not isinstance(destination_ids, list):
+        raise ValueError("root.start_location.destination_ids must be a list")
+
+    return orbital_id, tuple(
+        require_string({"destination_id": destination_id}, "destination_id", f"root.start_location.destination_ids[{index}]")
+        for index, destination_id in enumerate(destination_ids)
+    )
 
 
 def load_world(path: Path = DATA_PATH) -> StoryWorld:
@@ -300,7 +517,13 @@ def load_world(path: Path = DATA_PATH) -> StoryWorld:
             )
         )
 
-    world = StoryWorld(start_system=start_system, systems=tuple(systems))
+    start_orbital_id, start_destination_ids = load_start_location(raw, start_system)
+    world = StoryWorld(
+        start_system=start_system,
+        systems=tuple(systems),
+        start_orbital_id=start_orbital_id,
+        start_destination_ids=start_destination_ids,
+    )
     world.system_by_id(start_system)
     system_ids = {system.id for system in world.systems}
     if len(system_ids) != len(world.systems):
@@ -327,6 +550,7 @@ def load_world(path: Path = DATA_PATH) -> StoryWorld:
 
             if system_distance_au(system, hop_system) > MAX_HOP_DISTANCE_AU:
                 raise ValueError(f"{system.id}.hops to {hop_id} exceeds {MAX_HOP_DISTANCE_AU:.0f} AU")
+    validate_start_location(world)
     return world
 
 
@@ -335,6 +559,23 @@ def orbital_by_id(system: System, orbital_id: str) -> Orbital:
         if orbital.id == orbital_id:
             return orbital
     raise KeyError(orbital_id)
+
+
+def validate_start_location(world: StoryWorld) -> None:
+    if world.start_orbital_id is None:
+        if world.start_destination_ids:
+            raise ValueError("root.start_location.destination_ids requires orbital_id")
+        return
+
+    try:
+        orbital = orbital_by_id(world.system_by_id(world.start_system), world.start_orbital_id)
+    except KeyError as error:
+        raise ValueError(f"root.start_location.orbital_id references unknown orbital {world.start_orbital_id}") from error
+
+    try:
+        destination_path_by_ids(orbital, world.start_destination_ids)
+    except KeyError as error:
+        raise ValueError(f"root.start_location.destination_ids references unknown destination {error.args[0]}") from error
 
 
 def system_distance_au(first: System, second: System) -> float:
@@ -355,6 +596,17 @@ def sorted_hops(world: StoryWorld, system: System) -> list[System]:
 def world_to_raw(world: StoryWorld) -> dict:
     return {
         "start_system": world.start_system,
+        **(
+            {
+                "start_location": {
+                    "system_id": world.start_system,
+                    "orbital_id": world.start_orbital_id,
+                    "destination_ids": list(world.start_destination_ids),
+                }
+            }
+            if world.start_orbital_id
+            else {}
+        ),
         "systems": [
             {
                 "id": system.id,
@@ -384,19 +636,61 @@ def world_to_raw(world: StoryWorld) -> dict:
 
 def landing_option_to_raw(option: LandingOption) -> dict:
     return {
+        "id": option.id,
         "kind": option.kind,
         "name": option.name,
         "description": option.description,
         "objects": [
             {
+                "id": story_object.id,
                 "name": story_object.name,
                 "description": story_object.description,
                 "interactions": list(story_object.interactions),
+                "collectable": story_object.collectable,
+                **({"equipment_slot": story_object.equipment_slot} if story_object.equipment_slot else {}),
+                "before": before_rules_to_raw(story_object.before),
             }
             for story_object in option.objects
         ],
+        "npcs": [
+            {
+                "id": npc.id,
+                "name": npc.name,
+                "description": npc.description,
+                "examine_description": npc.examine_description,
+                "interactions": list(npc.interactions),
+                "before": before_rules_to_raw(npc.before),
+            }
+            for npc in option.npcs
+        ],
+        "before": before_rules_to_raw(option.before),
+        "sequences": [
+            {
+                "id": sequence.id,
+                "when": list(sequence.when),
+                "unless": list(sequence.unless),
+                "messages": list(sequence.messages),
+                "on_complete": list(sequence.on_complete),
+            }
+            for sequence in option.sequences
+        ],
         "destinations": [landing_option_to_raw(child) for child in option.destinations],
     }
+
+
+def before_rules_to_raw(rules: tuple[BeforeRule, ...]) -> list[dict]:
+    raw_rules = []
+    for rule in rules:
+        raw_rule = {
+            "interaction": rule.interaction,
+            "message": rule.message,
+        }
+        if rule.when:
+            raw_rule["when"] = list(rule.when)
+        if rule.unless:
+            raw_rule["unless"] = list(rule.unless)
+        raw_rules.append(raw_rule)
+    return raw_rules
 
 
 def save_and_reload(path: Path, raw: dict) -> StoryWorld:
@@ -511,10 +805,14 @@ def add_landing_destination(
         raise ValueError("destination already has 9 child destinations")
     destinations.append(
         {
+            "id": unique_id({destination.get("id") for destination in destinations if destination.get("id")}, slugify(name, "destination")),
             "kind": "Destination",
             "name": name,
             "description": description,
             "objects": [],
+            "npcs": [],
+            "before": [],
+            "sequences": [],
             "destinations": [],
         }
     )
@@ -560,17 +858,56 @@ def add_object(
         if interaction not in OBJECT_INTERACTIONS:
             raise ValueError(f"interaction must be one of {sorted(OBJECT_INTERACTIONS)}")
     current_choice_count = sum(len(story_object.get("interactions", [story_object.get("kind", "Examine")])) for story_object in objects)
+    current_choice_count += sum(len(npc.get("interactions", ["Examine", "Talk"])) for npc in destination_raw.setdefault("npcs", []))
     current_choice_count += len(destination_raw.setdefault("destinations", []))
     if current_choice_count + len(interactions) > 9:
         raise ValueError("destination already has 9 numbered choices")
     objects.append(
         {
+            "id": unique_id({story_object.get("id") for story_object in objects if story_object.get("id")}, slugify(name, "object")),
             "name": name,
             "description": description,
             "interactions": list(interactions),
+            "collectable": "Take" in interactions,
+            "before": [],
         }
     )
     destination_raw.pop("details", None)
+    return save_and_reload(path, raw)
+
+
+def add_npc(
+    world: StoryWorld,
+    path: Path,
+    system_id: str,
+    orbital_id: str,
+    destination_path: list[int],
+    name: str,
+    description: str,
+    examine_description: str,
+) -> StoryWorld:
+    raw = world_to_raw(world)
+    orbital_raw = orbital_raw_by_id(system_raw_by_id(raw, system_id), orbital_id)
+    destination_raw = landing_destination_raw(orbital_raw, destination_path)
+    npcs = destination_raw.setdefault("npcs", [])
+    if len(npcs) >= 9:
+        raise ValueError("destination already has 9 NPCs")
+    objects = destination_raw.setdefault("objects", [])
+    current_choice_count = sum(len(story_object.get("interactions", [story_object.get("kind", "Examine")])) for story_object in objects)
+    current_choice_count += sum(len(npc.get("interactions", ["Examine", "Talk"])) for npc in npcs)
+    current_choice_count += len(destination_raw.setdefault("destinations", []))
+    if current_choice_count + 2 > 9:
+        raise ValueError("destination already has 9 numbered choices")
+    npcs.append(
+        {
+            "id": unique_id({npc.get("id") for npc in npcs if npc.get("id")}, slugify(name, "npc")),
+            "name": name,
+            "description": description,
+            "examine_description": examine_description,
+            "interactions": ["Examine", "Talk"],
+            "before": [],
+        }
+    )
     return save_and_reload(path, raw)
 
 
@@ -590,6 +927,24 @@ def delete_object(
         raise ValueError("object number is out of range")
     del objects[object_index]
     destination_raw.pop("details", None)
+    return save_and_reload(path, raw)
+
+
+def delete_npc(
+    world: StoryWorld,
+    path: Path,
+    system_id: str,
+    orbital_id: str,
+    destination_path: list[int],
+    npc_index: int,
+) -> StoryWorld:
+    raw = world_to_raw(world)
+    orbital_raw = orbital_raw_by_id(system_raw_by_id(raw, system_id), orbital_id)
+    destination_raw = landing_destination_raw(orbital_raw, destination_path)
+    npcs = destination_raw.setdefault("npcs", [])
+    if npc_index < 0 or npc_index >= len(npcs):
+        raise ValueError("NPC number is out of range")
+    del npcs[npc_index]
     return save_and_reload(path, raw)
 
 
@@ -706,6 +1061,7 @@ def centered_window(
     width: int,
     lines: Iterable[str],
     bottom_margin: int = 0,
+    footer: str | None = None,
 ) -> tuple[int, int, int, list[str]]:
     rows, cols = stdscr.getmaxyx()
     available_rows = max(1, rows - bottom_margin)
@@ -730,6 +1086,11 @@ def centered_window(
         stdscr.addch(top, right, curses.ACS_URCORNER)
         stdscr.addch(bottom, left, curses.ACS_LLCORNER)
         stdscr.addch(bottom, right, curses.ACS_LRCORNER)
+        if footer:
+            label = f"[ {footer} ]"
+            footer_x = left + max(1, ((right - left + 1) - len(label)) // 2)
+            if footer_x + len(label) < right:
+                stdscr.addstr(bottom, footer_x, label, curses.color_pair(1))
     except curses.error:
         pass
 
@@ -746,13 +1107,16 @@ def centered_window(
     return top, left, content_width, text
 
 
-def bottom_window(stdscr: curses.window, width: int, lines: Iterable[str]) -> None:
+def bottom_window(stdscr: curses.window, width: int, lines: Iterable[str], top: int | None = None) -> None:
     rows, cols = stdscr.getmaxyx()
     width = min(width, cols)
     content_width = max(10, width - 4)
     text = wrap_lines(lines, content_width)
     height = len(text) + 4
-    top = max(0, rows - height - 1)
+    if top is None:
+        top = max(0, rows - height - 1)
+    else:
+        top = max(0, min(top, rows - height))
     left = max(0, (cols - width) // 2)
     bottom = min(rows - 1, top + height - 1)
     right = min(cols - 1, left + width - 1)
@@ -807,6 +1171,15 @@ def continuation_indent(line: str) -> int:
     if match:
         return len(match.group(1))
     return len(line) - len(line.lstrip(" "))
+
+
+def game_window(stdscr: curses.window, state: GameState, width: int, lines: Iterable[str]) -> None:
+    margin = editor_box_margin(stdscr, state)
+    top, _left, _content_width, text = centered_window(stdscr, width, lines, bottom_margin=margin)
+    if margin:
+        state.editor_box_top = top + len(text) + 5
+    else:
+        state.editor_box_top = None
 
 
 def prompt_text(
@@ -1015,8 +1388,8 @@ def draw_system(stdscr: curses.window, world: StoryWorld, state: GameState, syst
     for index, orbital in enumerate(system.orbitals, start=1):
         marker = "*" if orbital.id == last_orbital_id else " "
         lines.append(f"{index}. {marker} {orbital.name} [{orbital_type_label(system, orbital)}]")
-    lines.extend(["", "Number: travel", "L: leave system    M: map    Q: quit"])
-    centered_window(stdscr, 72, lines, bottom_margin=editor_box_margin(stdscr, state))
+    lines.extend(["", "Number: travel", "I: inventory", "L: leave system    M: map    Q: quit"])
+    game_window(stdscr, state, 72, lines)
 
 
 def draw_jump_list(stdscr: curses.window, world: StoryWorld, state: GameState, system: System) -> None:
@@ -1033,8 +1406,8 @@ def draw_jump_list(stdscr: curses.window, world: StoryWorld, state: GameState, s
         dy = hop.position_au[1]
         distance = system_distance_au(system, hop)
         lines.append(f"{index}. {hop.name} [{format_signed_au(dx)}, {format_signed_au(dy)}] {distance:.0f} AU")
-    lines.extend(["", "Number: jump", "B: back    M: map    Q: quit"])
-    centered_window(stdscr, 80, lines, bottom_margin=editor_box_margin(stdscr, state))
+    lines.extend(["", "Number: jump", "B: back    I: inventory    M: map    Q: quit"])
+    game_window(stdscr, state, 80, lines)
 
 
 def draw_map(stdscr: curses.window, world: StoryWorld, state: GameState, system: System) -> None:
@@ -1045,6 +1418,7 @@ def draw_map(stdscr: curses.window, world: StoryWorld, state: GameState, system:
         "",
         "@ current    * system    lines: available jumps",
         "B: back",
+        "I: inventory",
         "Q: quit",
     ]
     centered_window(stdscr, 76, lines)
@@ -1057,10 +1431,11 @@ def draw_orbit(stdscr: curses.window, state: GameState, orbital: Orbital) -> Non
         orbital.description,
         "",
         "L: land",
+        "I: inventory",
         "T: return to system",
         "Q: quit",
     ]
-    centered_window(stdscr, 72, lines, bottom_margin=editor_box_margin(stdscr, state))
+    game_window(stdscr, state, 72, lines)
 
 
 def draw_option(stdscr: curses.window, state: GameState, orbital: Orbital, option: LandingOption) -> None:
@@ -1071,11 +1446,21 @@ def draw_option(stdscr: curses.window, state: GameState, orbital: Orbital, optio
         "",
     ]
     choice_number = 1
-    object_choices = object_interaction_choices(option)
+    object_choices = object_choices_for_destination(state, option)
     if object_choices:
         lines.append("Objects:")
-        for story_object, interaction in object_choices:
-            lines.append(f"{choice_number}. {story_object.name} [{interaction}]")
+        for choice in object_choices:
+            lines.append(f"{choice_number}. {choice.target.name} [{choice.interaction}]")
+            choice_number += 1
+        lines.append("")
+
+    npc_choices = npc_choices_for_destination(option)
+    if npc_choices:
+        lines.append("People:")
+        for npc in option.npcs:
+            lines.append(npc.description)
+        for choice in npc_choices:
+            lines.append(f"{choice_number}. {choice.target.name} [{choice.interaction}]")
             choice_number += 1
         lines.append("")
 
@@ -1090,21 +1475,24 @@ def draw_option(stdscr: curses.window, state: GameState, orbital: Orbital, optio
     if state.destination_path != state.docked_path:
         lines.append("B: back")
     lines.extend([
+        "I: inventory",
         "Q: quit",
     ])
-    centered_window(stdscr, 72, lines, bottom_margin=editor_box_margin(stdscr, state))
+    game_window(stdscr, state, 72, lines)
 
 
 def editor_commands_for_state(state: GameState) -> list[str]:
-    if not state.editor_enabled or state.object_interaction_index is not None or state.view == "map":
+    if not state.editor_enabled:
         return []
+    if sequence_active(state) or state.interaction_index is not None or state.notice_message or state.view in {"map", "inventory"}:
+        return ["R: reload"]
     if state.view == "jump":
-        return ["A: add system"]
+        return ["A: add system", "R: reload"]
     if state.destination_path:
-        return ["A: add", "D: delete detail", "E: edit destination"]
+        return ["A: add", "D: delete detail", "E: edit destination", "R: reload"]
     if state.orbital_id is None:
-        return ["A: add orbital", "D: delete orbital", "E: edit system"]
-    return ["E: edit orbital"]
+        return ["A: add orbital", "D: delete orbital", "E: edit system", "R: reload"]
+    return ["E: edit orbital", "R: reload"]
 
 
 def editor_box_lines(state: GameState) -> list[str]:
@@ -1138,26 +1526,80 @@ def draw_editor_box(stdscr: curses.window, state: GameState) -> None:
     lines = editor_box_lines(state)
     if not lines:
         return
-    bottom_window(stdscr, 72, lines)
+    bottom_window(stdscr, 72, lines, top=state.editor_box_top)
 
 
 def draw_object_interaction(
     stdscr: curses.window,
     orbital: Orbital,
     destination: LandingOption,
-    story_object: StoryObject,
-    interaction: str,
+    choice: InteractionChoice,
 ) -> None:
+    target = choice.target
+    description = interaction_description(choice)
     lines = [
         f"{orbital.name}: {destination.name}",
         "",
-        f"{interaction}: {story_object.name}",
+        f"{choice.interaction}: {target.name}",
         "",
-        story_object.description,
+        description,
         "",
         "B: back",
         "Q: quit",
     ]
+    centered_window(stdscr, 72, lines)
+
+
+def draw_notice(stdscr: curses.window, state: GameState) -> None:
+    lines = [
+        state.notice_title,
+        "",
+        state.notice_message,
+        "",
+        "B: back",
+        "Q: quit",
+    ]
+    centered_window(stdscr, 72, lines)
+
+
+def draw_sequence(stdscr: curses.window, state: GameState) -> None:
+    message = state.sequence_messages[state.sequence_index] if sequence_active(state) else ""
+    centered_window(stdscr, 72, [message], footer="Press any key to continue")
+
+
+def draw_inventory(stdscr: curses.window, state: GameState) -> None:
+    items = inventory_items(state)
+    if state.inventory_index >= len(items):
+        state.inventory_index = max(0, len(items) - 1)
+
+    lines = ["Inventory", ""]
+    if not items:
+        lines.append("Nothing.")
+    else:
+        equipped_ids = set(state.equipment.values())
+        for index, item in enumerate(items, start=1):
+            marker = ">" if index - 1 == state.inventory_index else " "
+            equipped = " equipped" if item.id in equipped_ids else ""
+            slot = f" / {item.equipment_slot}" if item.equipment_slot else ""
+            lines.append(f"{index}. {marker} {item.name}{slot}{equipped}")
+
+    if state.equipment:
+        lines.extend(["", "Equipped:"])
+        for slot, item_id in sorted(state.equipment.items()):
+            item = state.inventory.get(item_id)
+            if item is not None:
+                lines.append(f"{slot}: {item.name}")
+
+    if state.message:
+        lines.extend(["", state.message])
+
+    lines.append("")
+    if items:
+        lines.extend(["Number: select", "X: examine"])
+        selected = items[state.inventory_index]
+        if selected.equipment_slot:
+            lines.append("E: equip")
+    lines.extend(["B: back", "Q: quit"])
     centered_window(stdscr, 72, lines)
 
 
@@ -1166,13 +1608,21 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
     curses.use_default_colors()
     curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_BLACK)
     stdscr.keypad(True)
-    state = GameState(system_id=world.start_system, editor_enabled=editor_enabled)
+    state = initial_game_state(world, editor_enabled)
 
     while True:
         stdscr.erase()
+        state.editor_box_top = None
         system = world.system_by_id(state.system_id)
 
-        if state.view == "jump":
+        if sequence_active(state):
+            draw_sequence(stdscr, state)
+        elif state.view == "inventory":
+            if state.notice_message:
+                draw_notice(stdscr, state)
+            else:
+                draw_inventory(stdscr, state)
+        elif state.view == "jump":
             draw_jump_list(stdscr, world, state, system)
         elif state.view == "map":
             draw_map(stdscr, world, state, system)
@@ -1181,22 +1631,52 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
         else:
             orbital = orbital_by_id(system, state.orbital_id)
             selected_destination = destination_at_path(orbital, state.destination_path)
-            selected_object_interaction = object_interaction_at_state(selected_destination, state.object_interaction_index)
-            if selected_destination is not None and selected_object_interaction is not None:
-                story_object, interaction = selected_object_interaction
-                draw_object_interaction(stdscr, orbital, selected_destination, story_object, interaction)
+            selected_interaction = interaction_at_state(state, selected_destination, state.interaction_index)
+            if selected_destination is not None and not state.notice_message and state.interaction_index is None:
+                enter_destination(state, selected_destination)
+            if sequence_active(state):
+                draw_sequence(stdscr, state)
+            elif selected_destination is not None and state.notice_message:
+                draw_notice(stdscr, state)
+            elif selected_destination is not None and selected_interaction is not None:
+                draw_object_interaction(stdscr, orbital, selected_destination, selected_interaction)
             elif selected_destination is not None:
                 draw_option(stdscr, state, orbital, selected_destination)
             else:
                 draw_orbit(stdscr, state, orbital)
 
-        draw_editor_box(stdscr, state)
+        if not sequence_active(state):
+            draw_editor_box(stdscr, state)
         stdscr.refresh()
         key = stdscr.getch()
-        if key in (ord("q"), ord("Q")):
-            return
         if not state.editor_enabled or key not in (ord("a"), ord("A")):
             state.message = ""
+
+        if state.editor_enabled and key in (ord("r"), ord("R")):
+            try:
+                world = reload_world_preserving_state(world, data_path, state)
+                state.message = f"Reloaded: {data_path}"
+            except (OSError, json.JSONDecodeError, ValueError, KeyError) as error:
+                state.message = f"Reload failed: {error}"
+            continue
+
+        if sequence_active(state):
+            advance_sequence(state)
+            continue
+
+        if key in (ord("q"), ord("Q")):
+            return
+
+        if state.view != "inventory" and key in (ord("i"), ord("I")):
+            state.inventory_return_view = state.view
+            state.view = "inventory"
+            state.interaction_index = None
+            clear_notice(state)
+            continue
+
+        if state.view == "inventory":
+            handle_inventory_input(state, key)
+            continue
 
         if state.view == "map":
             if key in (ord("b"), ord("B")):
@@ -1213,7 +1693,8 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
                 state.orbital_id = None
                 state.docked_path.clear()
                 state.destination_path.clear()
-                state.object_interaction_index = None
+                state.interaction_index = None
+                clear_notice(state)
             elif key in (ord("b"), ord("B")):
                 state.view = "system"
             elif key in (ord("m"), ord("M")):
@@ -1230,23 +1711,33 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
             selected_destination = destination_at_path(orbital, state.destination_path)
             if selected_destination is None:
                 state.destination_path.clear()
-                state.object_interaction_index = None
+                state.interaction_index = None
+                clear_notice(state)
                 continue
-            if state.object_interaction_index is not None:
+            if state.interaction_index is not None or state.notice_message:
                 if key in (ord("b"), ord("B")):
-                    state.object_interaction_index = None
+                    state.interaction_index = None
+                    clear_notice(state)
                 continue
             index = key - ord("1")
-            object_choices = object_interaction_choices(selected_destination)
-            if 0 <= index < len(object_choices):
-                state.object_interaction_index = index
-            elif 0 <= index - len(object_choices) < len(selected_destination.destinations):
-                state.destination_path.append(index - len(object_choices))
+            interaction_choices = destination_interaction_choices(state, selected_destination)
+            if 0 <= index < len(interaction_choices):
+                handle_interaction_choice(state, interaction_choices[index], index)
+            elif 0 <= index - len(interaction_choices) < len(selected_destination.destinations):
+                child_index = index - len(interaction_choices)
+                child_destination = selected_destination.destinations[child_index]
+                blocked_message = destination_before_rule_message(state, child_destination)
+                if blocked_message is not None:
+                    state.notice_title = child_destination.name
+                    state.notice_message = blocked_message
+                else:
+                    state.destination_path.append(child_index)
             elif key in (ord("t"), ord("T")) and state.destination_path == state.docked_path:
                 state.last_orbital_by_system[state.system_id] = state.orbital_id
                 state.docked_path.clear()
                 state.destination_path.clear()
-                state.object_interaction_index = None
+                state.interaction_index = None
+                clear_notice(state)
             elif key in (ord("b"), ord("B")):
                 if state.destination_path != state.docked_path:
                     state.destination_path.pop()
@@ -1278,7 +1769,8 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
                 state.orbital_id = system.orbitals[index].id
                 state.docked_path.clear()
                 state.destination_path.clear()
-                state.object_interaction_index = None
+                state.interaction_index = None
+                clear_notice(state)
             elif state.editor_enabled and key in (ord("a"), ord("A")):
                 added = prompt_add_orbital(stdscr, world, data_path, state.system_id)
                 if added is not None:
@@ -1309,11 +1801,13 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
             if len(orbital.landing_options) == 1:
                 state.docked_path = [0]
                 state.destination_path = [0]
-                state.object_interaction_index = None
+                state.interaction_index = None
+                clear_notice(state)
             elif len(orbital.landing_options) > 1:
                 state.docked_path = [0]
                 state.destination_path = [0]
-                state.object_interaction_index = None
+                state.interaction_index = None
+                clear_notice(state)
         elif state.editor_enabled and key in (ord("e"), ord("E")):
             edited = prompt_edit_orbital(stdscr, world, data_path, state.system_id, state.orbital_id)
             if edited is not None:
@@ -1322,7 +1816,135 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
             state.orbital_id = None
             state.docked_path.clear()
             state.destination_path.clear()
-            state.object_interaction_index = None
+            state.interaction_index = None
+            clear_notice(state)
+
+
+def handle_inventory_input(state: GameState, key: int) -> None:
+    if state.notice_message:
+        if key in (ord("b"), ord("B")):
+            clear_notice(state)
+        return
+
+    items = inventory_items(state)
+    index = key - ord("1")
+    if 0 <= index < len(items):
+        state.inventory_index = index
+        return
+
+    if key in (ord("b"), ord("B"), ord("i"), ord("I")):
+        state.view = state.inventory_return_view
+        clear_notice(state)
+        return
+
+    if not items:
+        return
+
+    if state.inventory_index >= len(items):
+        state.inventory_index = max(0, len(items) - 1)
+    selected = items[state.inventory_index]
+
+    if key in (ord("x"), ord("X")):
+        state.notice_title = selected.name
+        state.notice_message = selected.description
+        return
+
+    if key in (ord("e"), ord("E")):
+        if not selected.equipment_slot:
+            state.message = "You cannot equip that."
+            return
+        previous_id = state.equipment.get(selected.equipment_slot)
+        state.equipment[selected.equipment_slot] = selected.id
+        if previous_id and previous_id != selected.id:
+            previous = state.inventory.get(previous_id)
+            previous_name = previous.name if previous is not None else "previous equipment"
+            state.message = f"Equipped {selected.name}, replacing {previous_name}."
+        else:
+            state.message = f"Equipped {selected.name}."
+
+
+def inventory_items(state: GameState) -> list[StoryObject]:
+    return list(state.inventory.values())
+
+
+def reload_world_preserving_state(world: StoryWorld, data_path: Path, state: GameState) -> StoryWorld:
+    destination_ids = current_destination_ids(world, state.destination_path, state.system_id, state.orbital_id)
+    docked_destination_ids = current_destination_ids(world, state.docked_path, state.system_id, state.orbital_id)
+    new_world = load_world(data_path)
+    new_world.system_by_id(state.system_id)
+
+    new_destination_path: tuple[int, ...] = ()
+    new_docked_path: tuple[int, ...] = ()
+    if state.orbital_id is not None:
+        new_orbital = orbital_by_id(new_world.system_by_id(state.system_id), state.orbital_id)
+        new_destination_path = destination_path_by_ids(new_orbital, destination_ids)
+        new_docked_path = destination_path_by_ids(new_orbital, docked_destination_ids)
+
+    remapped_last_orbitals: dict[str, str] = {}
+    for system_id, orbital_id in state.last_orbital_by_system.items():
+        system = new_world.system_by_id(system_id)
+        orbital_by_id(system, orbital_id)
+        remapped_last_orbitals[system_id] = orbital_id
+
+    new_objects = objects_by_id(new_world)
+    state.inventory = {
+        object_id: new_objects.get(object_id, story_object)
+        for object_id, story_object in state.inventory.items()
+    }
+    state.destination_path = list(new_destination_path)
+    state.docked_path = list(new_docked_path)
+    state.last_orbital_by_system = remapped_last_orbitals
+    state.interaction_index = None
+    clear_notice(state)
+    return new_world
+
+
+def objects_by_id(world: StoryWorld) -> dict[str, StoryObject]:
+    objects: dict[str, StoryObject] = {}
+    for system in world.systems:
+        for orbital in system.orbitals:
+            collect_objects_by_id(orbital.landing_options, objects)
+    return objects
+
+
+def collect_objects_by_id(destinations: tuple[LandingOption, ...], objects: dict[str, StoryObject]) -> None:
+    for destination in destinations:
+        for story_object in destination.objects:
+            objects[story_object.id] = story_object
+        collect_objects_by_id(destination.destinations, objects)
+
+
+def current_destination_ids(
+    world: StoryWorld,
+    destination_path: list[int],
+    system_id: str,
+    orbital_id: str | None,
+) -> tuple[str, ...]:
+    if orbital_id is None or not destination_path:
+        return ()
+    orbital = orbital_by_id(world.system_by_id(system_id), orbital_id)
+    destination_ids: list[str] = []
+    destinations = orbital.landing_options
+    for index in destination_path:
+        if index < 0 or index >= len(destinations):
+            raise ValueError("current destination no longer exists")
+        destination = destinations[index]
+        destination_ids.append(destination.id)
+        destinations = destination.destinations
+    return tuple(destination_ids)
+
+
+def initial_game_state(world: StoryWorld, editor_enabled: bool) -> GameState:
+    state = GameState(system_id=world.start_system, editor_enabled=editor_enabled)
+    if world.start_orbital_id is None:
+        return state
+
+    state.orbital_id = world.start_orbital_id
+    orbital = orbital_by_id(world.system_by_id(world.start_system), world.start_orbital_id)
+    destination_path = destination_path_by_ids(orbital, world.start_destination_ids)
+    state.docked_path = list(destination_path)
+    state.destination_path = list(destination_path)
+    return state
 
 
 def destination_at_path(orbital: Orbital, destination_path: list[int]) -> LandingOption | None:
@@ -1338,24 +1960,171 @@ def destination_at_path(orbital: Orbital, destination_path: list[int]) -> Landin
     return current
 
 
-def object_interaction_choices(destination: LandingOption) -> list[tuple[StoryObject, str]]:
-    choices: list[tuple[StoryObject, str]] = []
-    for story_object in destination.objects:
+def destination_path_by_ids(orbital: Orbital, destination_ids: tuple[str, ...]) -> tuple[int, ...]:
+    destinations = orbital.landing_options
+    path: list[int] = []
+    for destination_id in destination_ids:
+        for index, destination in enumerate(destinations):
+            if destination.id == destination_id:
+                path.append(index)
+                destinations = destination.destinations
+                break
+        else:
+            raise KeyError(destination_id)
+    return tuple(path)
+
+
+def object_choices_for_destination(state: GameState, destination: LandingOption) -> list[InteractionChoice]:
+    choices: list[InteractionChoice] = []
+    for story_object in visible_objects_for_destination(state, destination):
         for interaction in story_object.interactions:
-            choices.append((story_object, interaction))
+            choices.append(InteractionChoice("object", story_object, interaction))
     return choices
 
 
-def object_interaction_at_state(
+def npc_choices_for_destination(destination: LandingOption) -> list[InteractionChoice]:
+    choices: list[InteractionChoice] = []
+    for npc in destination.npcs:
+        for interaction in npc.interactions:
+            choices.append(InteractionChoice("npc", npc, interaction))
+    return choices
+
+
+def visible_objects_for_destination(state: GameState, destination: LandingOption) -> list[StoryObject]:
+    return [story_object for story_object in destination.objects if object_is_at_authored_location(state, story_object)]
+
+
+def object_is_at_authored_location(state: GameState, story_object: StoryObject) -> bool:
+    if not story_object.collectable:
+        return True
+    return state.object_locations.get(story_object.id, "authored") == "authored"
+
+
+def destination_interaction_choices(state: GameState, destination: LandingOption) -> list[InteractionChoice]:
+    return [*object_choices_for_destination(state, destination), *npc_choices_for_destination(destination)]
+
+
+def interaction_at_state(
+    state: GameState,
     destination: LandingOption | None,
-    object_interaction_index: int | None,
-) -> tuple[StoryObject, str] | None:
-    if destination is None or object_interaction_index is None:
+    interaction_index: int | None,
+) -> InteractionChoice | None:
+    if destination is None or interaction_index is None:
         return None
-    choices = object_interaction_choices(destination)
-    if object_interaction_index < 0 or object_interaction_index >= len(choices):
+    choices = destination_interaction_choices(state, destination)
+    if interaction_index < 0 or interaction_index >= len(choices):
         return None
-    return choices[object_interaction_index]
+    return choices[interaction_index]
+
+
+def handle_interaction_choice(state: GameState, choice: InteractionChoice, choice_index: int) -> None:
+    blocked_message = before_rule_message(state, choice)
+    if blocked_message is not None:
+        state.notice_title = f"{choice.interaction}: {choice.target.name}"
+        state.notice_message = blocked_message
+        state.interaction_index = None
+        return
+    if choice.kind == "object" and choice.interaction == "Take":
+        story_object = choice.target
+        if isinstance(story_object, StoryObject):
+            if not story_object.collectable:
+                state.notice_title = f"Take: {story_object.name}"
+                state.notice_message = "You cannot take that."
+                state.interaction_index = None
+                return
+            if story_object.id in state.inventory:
+                state.notice_title = f"Take: {story_object.name}"
+                state.notice_message = "You already have that."
+                state.interaction_index = None
+                return
+            state.inventory[story_object.id] = story_object
+            state.object_locations[story_object.id] = "inventory"
+            state.inventory_index = len(state.inventory) - 1
+            state.notice_title = f"Take: {story_object.name}"
+            state.notice_message = f"Taken: {story_object.name}"
+            state.interaction_index = None
+            return
+    state.interaction_index = choice_index
+    clear_notice(state)
+
+
+def before_rule_message(state: GameState, choice: InteractionChoice) -> str | None:
+    for rule in choice.target.before:
+        if rule.interaction == choice.interaction and fact_conditions_met(state, rule.when, rule.unless):
+            return rule.message
+    return None
+
+
+def destination_before_rule_message(state: GameState, destination: LandingOption) -> str | None:
+    for rule in destination.before:
+        if rule.interaction == "Enter" and fact_conditions_met(state, rule.when, rule.unless):
+            return rule.message
+    return None
+
+
+def enter_destination(state: GameState, destination: LandingOption) -> None:
+    state.facts.add(visited_destination_fact(destination))
+    for sequence in destination.sequences:
+        if fact_conditions_met(state, sequence.when, sequence.unless):
+            start_sequence(state, sequence)
+            return
+
+
+def start_sequence(state: GameState, sequence: Sequence) -> None:
+    clear_notice(state)
+    state.interaction_index = None
+    state.sequence_messages = sequence.messages
+    state.sequence_index = 0
+    state.sequence_on_complete = sequence.on_complete
+
+
+def sequence_active(state: GameState) -> bool:
+    return bool(state.sequence_messages)
+
+
+def advance_sequence(state: GameState) -> None:
+    if not sequence_active(state):
+        return
+    if state.sequence_index < len(state.sequence_messages) - 1:
+        state.sequence_index += 1
+        return
+    state.facts.update(state.sequence_on_complete)
+    state.sequence_messages = ()
+    state.sequence_index = 0
+    state.sequence_on_complete = ()
+
+
+def visited_destination_fact(destination: LandingOption) -> str:
+    return f"visited:destination:{destination.id}"
+
+
+def fact_conditions_met(state: GameState, when: tuple[str, ...], unless: tuple[str, ...]) -> bool:
+    return all(state_has_fact(state, fact) for fact in when) and all(not state_has_fact(state, fact) for fact in unless)
+
+
+def state_has_fact(state: GameState, fact: str) -> bool:
+    if fact.startswith("equipped:slot:"):
+        slot = fact.removeprefix("equipped:slot:")
+        return slot in state.equipment
+    return fact in state.facts
+
+
+def clear_notice(state: GameState) -> None:
+    state.notice_title = ""
+    state.notice_message = ""
+
+
+def interaction_description(choice: InteractionChoice) -> str:
+    if isinstance(choice.target, NPC):
+        if choice.interaction == "Examine":
+            return choice.target.examine_description
+        if choice.interaction == "Talk":
+            return "They have nothing to say."
+    if choice.interaction == "Take":
+        if isinstance(choice.target, StoryObject) and not choice.target.collectable:
+            return "You cannot take that."
+        return f"Taken: {choice.target.name}"
+    return choice.target.description
 
 
 def prompt_add_orbital(
@@ -1436,11 +2205,13 @@ def prompt_add_inside_destination(
     orbital_id: str,
     destination_path: list[int],
 ) -> tuple[StoryWorld, str] | None:
-    choice = prompt_menu(stdscr, "Add", ["Add destination", "Add object"])
+    choice = prompt_menu(stdscr, "Add", ["Add destination", "Add object", "Add NPC"])
     if choice == 0:
         return prompt_add_landing_destination(stdscr, world, data_path, system_id, orbital_id, destination_path)
     if choice == 1:
         return prompt_add_object(stdscr, world, data_path, system_id, orbital_id, destination_path)
+    if choice == 2:
+        return prompt_add_npc(stdscr, world, data_path, system_id, orbital_id, destination_path)
     return None
 
 
@@ -1462,6 +2233,29 @@ def prompt_add_object(
     try:
         interactions = parse_interactions(interaction_text)
         return add_object(world, data_path, system_id, orbital_id, destination_path, name, description, interactions), f"Added object: {name}"
+    except ValueError as error:
+        return world, str(error)
+
+
+def prompt_add_npc(
+    stdscr: curses.window,
+    world: StoryWorld,
+    data_path: Path,
+    system_id: str,
+    orbital_id: str,
+    destination_path: list[int],
+) -> tuple[StoryWorld, str] | None:
+    name = prompt_text(stdscr, "Add NPC", "Name:")
+    if name is None:
+        return None
+    description = prompt_multiline_text(stdscr, "Add NPC", "Description")
+    if description is None:
+        return None
+    examine_description = prompt_multiline_text(stdscr, "Add NPC", "Examine description")
+    if examine_description is None:
+        return None
+    try:
+        return add_npc(world, data_path, system_id, orbital_id, destination_path, name, description, examine_description), f"Added NPC: {name}"
     except ValueError as error:
         return world, str(error)
 
@@ -1491,20 +2285,34 @@ def prompt_delete_detail(
     destination: LandingOption,
 ) -> tuple[StoryWorld, str] | None:
     has_objects = bool(destination.objects)
+    has_npcs = bool(destination.npcs)
     has_destinations = bool(destination.destinations)
-    if not has_objects and not has_destinations:
+    if not has_objects and not has_npcs and not has_destinations:
         return world, "No details to delete"
 
-    if has_objects and has_destinations:
-        choice = prompt_menu(stdscr, "Delete Detail", ["Object", "Destination"])
+    available_types: list[str] = []
+    if has_objects:
+        available_types.append("Object")
+    if has_npcs:
+        available_types.append("NPC")
+    if has_destinations:
+        available_types.append("Destination")
+
+    if len(available_types) > 1:
+        choice = prompt_menu(stdscr, "Delete Detail", available_types)
         if choice is None:
             return None
-        if choice == 0:
+        selected_type = available_types[choice]
+        if selected_type == "Object":
             return prompt_delete_object(stdscr, world, data_path, system_id, orbital_id, destination_path, destination)
+        if selected_type == "NPC":
+            return prompt_delete_npc(stdscr, world, data_path, system_id, orbital_id, destination_path, destination)
         return prompt_delete_child_destination(stdscr, world, data_path, system_id, orbital_id, destination_path, destination)
 
     if has_objects:
         return prompt_delete_object(stdscr, world, data_path, system_id, orbital_id, destination_path, destination)
+    if has_npcs:
+        return prompt_delete_npc(stdscr, world, data_path, system_id, orbital_id, destination_path, destination)
     return prompt_delete_child_destination(stdscr, world, data_path, system_id, orbital_id, destination_path, destination)
 
 
@@ -1564,6 +2372,36 @@ def prompt_delete_child_destination(
     try:
         name = destination.destinations[child_index].name
         return delete_landing_destination(world, data_path, system_id, orbital_id, destination_path, child_index), f"Deleted destination: {name}"
+    except (IndexError, ValueError) as error:
+        return world, str(error)
+
+
+def prompt_delete_npc(
+    stdscr: curses.window,
+    world: StoryWorld,
+    data_path: Path,
+    system_id: str,
+    orbital_id: str,
+    destination_path: list[int],
+    destination: LandingOption,
+) -> tuple[StoryWorld, str] | None:
+    if not destination.npcs:
+        return world, "No NPCs to delete"
+
+    lines = ["Delete NPC", ""]
+    for index, npc in enumerate(destination.npcs, start=1):
+        lines.append(f"{index}. {npc.name}")
+    choice = prompt_text(stdscr, "Delete NPC", "Number:", lines)
+    if choice is None:
+        return None
+    try:
+        npc_index = int(choice) - 1
+    except ValueError:
+        return world, "Enter an NPC number"
+
+    try:
+        name = destination.npcs[npc_index].name
+        return delete_npc(world, data_path, system_id, orbital_id, destination_path, npc_index), f"Deleted NPC: {name}"
     except (IndexError, ValueError) as error:
         return world, str(error)
 
@@ -1726,10 +2564,33 @@ def dump_world(world: StoryWorld) -> str:
 
 def dump_destination(option: LandingOption, lines: list[str], prefix: str) -> None:
     lines.append(f"{prefix} {option.name} [{option.kind}]: {option.description}")
+    for rule in option.before:
+        lines.append(f"      before {rule.interaction}{condition_suffix(rule.when, rule.unless)}: {rule.message}")
+    for sequence in option.sequences:
+        lines.append(f"      {prefix}s. sequence {sequence.id}{condition_suffix(sequence.when, sequence.unless)}")
+        for message in sequence.messages:
+            lines.append(f"         {message}")
     for index, story_object in enumerate(option.objects, start=1):
         lines.append(f"      {prefix}o{index}. {story_object.name} [{', '.join(story_object.interactions)}]: {story_object.description}")
+        for rule in story_object.before:
+            lines.append(f"         before {rule.interaction}{condition_suffix(rule.when, rule.unless)}: {rule.message}")
+    for index, npc in enumerate(option.npcs, start=1):
+        lines.append(f"      {prefix}n{index}. {npc.name} [{', '.join(npc.interactions)}]: {npc.description}")
+        for rule in npc.before:
+            lines.append(f"         before {rule.interaction}{condition_suffix(rule.when, rule.unless)}: {rule.message}")
     for index, child in enumerate(option.destinations, start=1):
         dump_destination(child, lines, f"   {prefix}{index}.")
+
+
+def condition_suffix(when: tuple[str, ...], unless: tuple[str, ...]) -> str:
+    pieces = []
+    if when:
+        pieces.append("when " + ", ".join(when))
+    if unless:
+        pieces.append("unless " + ", ".join(unless))
+    if not pieces:
+        return ""
+    return " (" + "; ".join(pieces) + ")"
 
 
 def main() -> int:
