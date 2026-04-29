@@ -18,6 +18,7 @@ ORBITAL_TYPES = {"Planet", "Moon", "Station"}
 OPTION_KINDS = {"Bar", "Tourist Destination", "Destination"}
 OBJECT_INTERACTIONS = {"Examine", "Take", "Use"}
 NPC_INTERACTIONS = {"Examine", "Talk"}
+SHIP_INTERACTIONS = {"Examine", "Board"}
 DESTINATION_INTERACTIONS = {"Enter"}
 MAX_HOP_DISTANCE_AU = 350000.0
 MAP_WIDTH = 58
@@ -51,6 +52,8 @@ class StoryObject:
     collectable: bool = False
     equipment_slot: str | None = None
     before: tuple[BeforeRule, ...] = ()
+    visible_when: tuple[str, ...] = ()
+    visible_unless: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -61,12 +64,35 @@ class NPC:
     examine_description: str
     interactions: tuple[str, ...]
     before: tuple[BeforeRule, ...] = ()
+    visible_when: tuple[str, ...] = ()
+    visible_unless: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ConditionalText:
+    text: str
+    when: tuple[str, ...] = ()
+    unless: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class Ship:
+    id: str
+    name: str
+    description: str
+    unlock: bool = False
+    equipment_slots: tuple[str, ...] = ()
+    abilities: tuple[str, ...] = ()
+    before: tuple[BeforeRule, ...] = ()
+    taglines: tuple[ConditionalText, ...] = ()
+    visible_when: tuple[str, ...] = ()
+    visible_unless: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class InteractionChoice:
     kind: str
-    target: StoryObject | NPC
+    target: StoryObject | NPC | Ship
     interaction: str
 
 
@@ -78,9 +104,13 @@ class LandingOption:
     description: str
     objects: tuple[StoryObject, ...] = ()
     npcs: tuple[NPC, ...] = ()
+    ships: tuple[Ship, ...] = ()
     before: tuple[BeforeRule, ...] = ()
     sequences: tuple[Sequence, ...] = ()
     destinations: tuple[LandingOption, ...] = ()
+    port: bool = False
+    visible_when: tuple[str, ...] = ()
+    visible_unless: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -91,6 +121,7 @@ class Orbital:
     description: str
     landing_options: tuple[LandingOption, ...]
     parent: str | None = None
+    default_landing_destination_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -129,12 +160,15 @@ class GameState:
     docked_path: list[int] = field(default_factory=list)
     destination_path: list[int] = field(default_factory=list)
     interaction_index: int | None = None
+    player_ship_id: str | None = None
+    boarded_ship_id: str | None = None
+    ships: dict[str, Ship] = field(default_factory=dict)
     inventory_index: int = 0
     inventory: dict[str, StoryObject] = field(default_factory=dict)
     equipment: dict[str, str] = field(default_factory=dict)
     object_locations: dict[str, str] = field(default_factory=dict)
-    notice_title: str = ""
-    notice_message: str = ""
+    ship_locations: dict[str, str] = field(default_factory=dict)
+    continue_message: str = ""
     sequence_messages: tuple[str, ...] = ()
     sequence_index: int = 0
     sequence_on_complete: tuple[str, ...] = ()
@@ -236,16 +270,20 @@ def load_landing_options(raw_options: list, context: str) -> tuple[LandingOption
         npc_raws = option_raw.get("npcs", [])
         if not isinstance(npc_raws, list):
             raise ValueError(f"{option_context}.npcs must be a list")
+        ship_raws = option_raw.get("ships", [])
+        if not isinstance(ship_raws, list):
+            raise ValueError(f"{option_context}.ships must be a list")
         sequence_raws = option_raw.get("sequences", [])
         if not isinstance(sequence_raws, list):
             raise ValueError(f"{option_context}.sequences must be a list")
 
         objects = load_objects(object_raws, f"{option_context}.objects")
         npcs = load_npcs(npc_raws, f"{option_context}.npcs")
+        ships = load_ships(ship_raws, f"{option_context}.ships")
         before = load_before_rules(option_raw.get("before", []), f"{option_context}.before", DESTINATION_INTERACTIONS)
         sequences = load_sequences(sequence_raws, f"{option_context}.sequences")
         destinations = load_landing_options(child_raws, f"{option_context}.destinations")
-        if interaction_count(objects, npcs) + len(destinations) > 9:
+        if interaction_count(objects, npcs, ships) + len(destinations) > 9:
             raise ValueError(f"{option_context} must contain no more than 9 numbered choices")
 
         options.append(
@@ -256,9 +294,13 @@ def load_landing_options(raw_options: list, context: str) -> tuple[LandingOption
                 description=require_string(option_raw, "description", option_context),
                 objects=objects,
                 npcs=npcs,
+                ships=ships,
                 before=before,
                 sequences=sequences,
                 destinations=destinations,
+                port=bool(option_raw.get("port", False)),
+                visible_when=load_fact_conditions(option_raw.get("visible_when", []), f"{option_context}.visible_when"),
+                visible_unless=load_fact_conditions(option_raw.get("visible_unless", []), f"{option_context}.visible_unless"),
             )
         )
     return tuple(options)
@@ -283,6 +325,8 @@ def load_objects(raw_objects: list, context: str) -> tuple[StoryObject, ...]:
                 collectable=object_collectable(object_raw, interactions),
                 equipment_slot=optional_string(object_raw, "equipment_slot", object_context),
                 before=load_before_rules(object_raw.get("before", []), f"{object_context}.before", OBJECT_INTERACTIONS),
+                visible_when=load_fact_conditions(object_raw.get("visible_when", []), f"{object_context}.visible_when"),
+                visible_unless=load_fact_conditions(object_raw.get("visible_unless", []), f"{object_context}.visible_unless"),
             )
         )
     return tuple(objects)
@@ -306,9 +350,37 @@ def load_npcs(raw_npcs: list, context: str) -> tuple[NPC, ...]:
                 examine_description=str(npc_raw.get("examine_description", require_string(npc_raw, "description", npc_context))),
                 interactions=interactions,
                 before=load_before_rules(npc_raw.get("before", []), f"{npc_context}.before", NPC_INTERACTIONS),
+                visible_when=load_fact_conditions(npc_raw.get("visible_when", []), f"{npc_context}.visible_when"),
+                visible_unless=load_fact_conditions(npc_raw.get("visible_unless", []), f"{npc_context}.visible_unless"),
             )
         )
     return tuple(npcs)
+
+
+def load_ships(raw_ships: list, context: str) -> tuple[Ship, ...]:
+    if len(raw_ships) > 9:
+        raise ValueError(f"{context} must contain no more than 9 ships")
+
+    ships: list[Ship] = []
+    for ship_index, ship_raw in enumerate(raw_ships):
+        ship_context = f"{context}[{ship_index}]"
+        if not isinstance(ship_raw, dict):
+            raise ValueError(f"{ship_context} must be an object")
+        ships.append(
+            Ship(
+                id=optional_id(ship_raw, "ship"),
+                name=require_string(ship_raw, "name", ship_context),
+                description=require_string(ship_raw, "description", ship_context),
+                unlock=bool(ship_raw.get("unlock", False)),
+                equipment_slots=load_string_list(ship_raw.get("equipment_slots", []), f"{ship_context}.equipment_slots"),
+                abilities=load_string_list(ship_raw.get("abilities", []), f"{ship_context}.abilities"),
+                before=load_before_rules(ship_raw.get("before", []), f"{ship_context}.before", SHIP_INTERACTIONS),
+                taglines=load_conditional_texts(ship_raw.get("taglines", []), f"{ship_context}.taglines"),
+                visible_when=load_fact_conditions(ship_raw.get("visible_when", []), f"{ship_context}.visible_when"),
+                visible_unless=load_fact_conditions(ship_raw.get("visible_unless", []), f"{ship_context}.visible_unless"),
+            )
+        )
+    return tuple(ships)
 
 
 def load_object_interactions(object_raw: dict, context: str) -> tuple[str, ...]:
@@ -405,6 +477,38 @@ def load_sequences(raw_sequences: list, context: str) -> tuple[Sequence, ...]:
     return tuple(sequences)
 
 
+def load_conditional_texts(raw_texts: object, context: str) -> tuple[ConditionalText, ...]:
+    if not isinstance(raw_texts, list):
+        raise ValueError(f"{context} must be a list")
+    texts: list[ConditionalText] = []
+    for text_index, text_raw in enumerate(raw_texts):
+        text_context = f"{context}[{text_index}]"
+        if isinstance(text_raw, str):
+            texts.append(ConditionalText(text=text_raw))
+            continue
+        if not isinstance(text_raw, dict):
+            raise ValueError(f"{text_context} must be a string or object")
+        texts.append(
+            ConditionalText(
+                text=require_string(text_raw, "text", text_context),
+                when=load_fact_conditions(text_raw.get("when", []), f"{text_context}.when"),
+                unless=load_fact_conditions(text_raw.get("unless", []), f"{text_context}.unless"),
+            )
+        )
+    return tuple(texts)
+
+
+def load_string_list(raw_values: object, context: str) -> tuple[str, ...]:
+    if not isinstance(raw_values, list):
+        raise ValueError(f"{context} must be a list")
+    values: list[str] = []
+    for value_index, raw_value in enumerate(raw_values):
+        value = require_string({"value": raw_value}, "value", f"{context}[{value_index}]")
+        if value not in values:
+            values.append(value)
+    return tuple(values)
+
+
 def load_fact_conditions(raw_facts: object, context: str) -> tuple[str, ...]:
     if not isinstance(raw_facts, list):
         raise ValueError(f"{context} must be a list")
@@ -426,8 +530,12 @@ def optional_id(raw: dict, fallback: str) -> str:
     return fallback
 
 
-def interaction_count(objects: tuple[StoryObject, ...], npcs: tuple[NPC, ...]) -> int:
-    return sum(len(story_object.interactions) for story_object in objects) + sum(len(npc.interactions) for npc in npcs)
+def interaction_count(objects: tuple[StoryObject, ...], npcs: tuple[NPC, ...], ships: tuple[Ship, ...]) -> int:
+    return (
+        sum(len(story_object.interactions) for story_object in objects)
+        + sum(len(npc.interactions) for npc in npcs)
+        + sum(len(ship_interactions(ship)) for ship in ships)
+    )
 
 
 def load_start_location(raw: dict, start_system: str) -> tuple[str | None, tuple[str, ...]]:
@@ -502,6 +610,10 @@ def load_world(path: Path = DATA_PATH) -> StoryWorld:
                     description=require_string(orbital_raw, "description", orbital_context),
                     parent=parent,
                     landing_options=options,
+                    default_landing_destination_ids=load_fact_conditions(
+                        orbital_raw.get("default_landing_destination_ids", []),
+                        f"{orbital_context}.default_landing_destination_ids",
+                    ),
                 )
             )
 
@@ -539,6 +651,11 @@ def load_world(path: Path = DATA_PATH) -> StoryWorld:
                 raise ValueError(f"{system.id}.{orbital.id}.parent references unknown orbital {orbital.parent}")
             if orbital.type == "Moon" and orbital.parent is None:
                 raise ValueError(f"{system.id}.{orbital.id} is a Moon and must define parent")
+            if orbital.default_landing_destination_ids:
+                try:
+                    destination_path_by_ids(orbital, orbital.default_landing_destination_ids)
+                except KeyError as error:
+                    raise ValueError(f"{system.id}.{orbital.id}.default_landing_destination_ids references unknown destination {error.args[0]}") from error
 
         for hop_id in system.hops:
             if hop_id not in system_ids:
@@ -622,6 +739,11 @@ def world_to_raw(world: StoryWorld) -> dict:
                         "type": orbital.type,
                         "description": orbital.description,
                         **({"parent": orbital.parent} if orbital.parent else {}),
+                        **(
+                            {"default_landing_destination_ids": list(orbital.default_landing_destination_ids)}
+                            if orbital.default_landing_destination_ids
+                            else {}
+                        ),
                         "landing_options": [
                             landing_option_to_raw(option) for option in orbital.landing_options
                         ],
@@ -640,6 +762,9 @@ def landing_option_to_raw(option: LandingOption) -> dict:
         "kind": option.kind,
         "name": option.name,
         "description": option.description,
+        **({"port": option.port} if option.port else {}),
+        **({"visible_when": list(option.visible_when)} if option.visible_when else {}),
+        **({"visible_unless": list(option.visible_unless)} if option.visible_unless else {}),
         "objects": [
             {
                 "id": story_object.id,
@@ -649,6 +774,8 @@ def landing_option_to_raw(option: LandingOption) -> dict:
                 "collectable": story_object.collectable,
                 **({"equipment_slot": story_object.equipment_slot} if story_object.equipment_slot else {}),
                 "before": before_rules_to_raw(story_object.before),
+                **({"visible_when": list(story_object.visible_when)} if story_object.visible_when else {}),
+                **({"visible_unless": list(story_object.visible_unless)} if story_object.visible_unless else {}),
             }
             for story_object in option.objects
         ],
@@ -660,8 +787,25 @@ def landing_option_to_raw(option: LandingOption) -> dict:
                 "examine_description": npc.examine_description,
                 "interactions": list(npc.interactions),
                 "before": before_rules_to_raw(npc.before),
+                **({"visible_when": list(npc.visible_when)} if npc.visible_when else {}),
+                **({"visible_unless": list(npc.visible_unless)} if npc.visible_unless else {}),
             }
             for npc in option.npcs
+        ],
+        "ships": [
+            {
+                "id": ship.id,
+                "name": ship.name,
+                "description": ship.description,
+                "unlock": ship.unlock,
+                "equipment_slots": list(ship.equipment_slots),
+                "abilities": list(ship.abilities),
+                "before": before_rules_to_raw(ship.before),
+                "taglines": conditional_texts_to_raw(ship.taglines),
+                **({"visible_when": list(ship.visible_when)} if ship.visible_when else {}),
+                **({"visible_unless": list(ship.visible_unless)} if ship.visible_unless else {}),
+            }
+            for ship in option.ships
         ],
         "before": before_rules_to_raw(option.before),
         "sequences": [
@@ -691,6 +835,18 @@ def before_rules_to_raw(rules: tuple[BeforeRule, ...]) -> list[dict]:
             raw_rule["unless"] = list(rule.unless)
         raw_rules.append(raw_rule)
     return raw_rules
+
+
+def conditional_texts_to_raw(texts: tuple[ConditionalText, ...]) -> list[dict]:
+    raw_texts = []
+    for text in texts:
+        raw_text = {"text": text.text}
+        if text.when:
+            raw_text["when"] = list(text.when)
+        if text.unless:
+            raw_text["unless"] = list(text.unless)
+        raw_texts.append(raw_text)
+    return raw_texts
 
 
 def save_and_reload(path: Path, raw: dict) -> StoryWorld:
@@ -811,6 +967,7 @@ def add_landing_destination(
             "description": description,
             "objects": [],
             "npcs": [],
+            "ships": [],
             "before": [],
             "sequences": [],
             "destinations": [],
@@ -859,6 +1016,7 @@ def add_object(
             raise ValueError(f"interaction must be one of {sorted(OBJECT_INTERACTIONS)}")
     current_choice_count = sum(len(story_object.get("interactions", [story_object.get("kind", "Examine")])) for story_object in objects)
     current_choice_count += sum(len(npc.get("interactions", ["Examine", "Talk"])) for npc in destination_raw.setdefault("npcs", []))
+    current_choice_count += sum(1 for _ship in destination_raw.setdefault("ships", []))
     current_choice_count += len(destination_raw.setdefault("destinations", []))
     if current_choice_count + len(interactions) > 9:
         raise ValueError("destination already has 9 numbered choices")
@@ -895,6 +1053,7 @@ def add_npc(
     objects = destination_raw.setdefault("objects", [])
     current_choice_count = sum(len(story_object.get("interactions", [story_object.get("kind", "Examine")])) for story_object in objects)
     current_choice_count += sum(len(npc.get("interactions", ["Examine", "Talk"])) for npc in npcs)
+    current_choice_count += sum(1 for _ship in destination_raw.setdefault("ships", []))
     current_choice_count += len(destination_raw.setdefault("destinations", []))
     if current_choice_count + 2 > 9:
         raise ValueError("destination already has 9 numbered choices")
@@ -1361,12 +1520,12 @@ def prompt_menu(stdscr: curses.window, title: str, options: list[str]) -> int | 
         lines = [title, ""]
         for index, option in enumerate(options, start=1):
             lines.append(f"{index}. {option}")
-        lines.extend(["", "B: back"])
+        lines.extend(["", "G: go back"])
         stdscr.erase()
         centered_window(stdscr, 72, lines)
         stdscr.refresh()
         key = stdscr.getch()
-        if key in (ord("b"), ord("B")):
+        if key in (ord("g"), ord("G")):
             return None
         index = key - ord("1")
         if 0 <= index < len(options):
@@ -1406,7 +1565,7 @@ def draw_jump_list(stdscr: curses.window, world: StoryWorld, state: GameState, s
         dy = hop.position_au[1]
         distance = system_distance_au(system, hop)
         lines.append(f"{index}. {hop.name} [{format_signed_au(dx)}, {format_signed_au(dy)}] {distance:.0f} AU")
-    lines.extend(["", "Number: jump", "B: back    I: inventory    M: map    Q: quit"])
+    lines.extend(["", "Number: jump", "G: go back    I: inventory    M: map    Q: quit"])
     game_window(stdscr, state, 80, lines)
 
 
@@ -1417,7 +1576,7 @@ def draw_map(stdscr: curses.window, world: StoryWorld, state: GameState, system:
         *build_map_lines(world, system),
         "",
         "@ current    * system    lines: available jumps",
-        "B: back",
+        "G: go back",
         "I: inventory",
         "Q: quit",
     ]
@@ -1430,11 +1589,16 @@ def draw_orbit(stdscr: curses.window, state: GameState, orbital: Orbital) -> Non
         "",
         orbital.description,
         "",
+    ]
+    ship = boarded_ship(state)
+    if ship is not None:
+        lines.extend([f"Aboard: {ship.name}", ""])
+    lines.extend([
         "L: land",
         "I: inventory",
         "T: return to system",
         "Q: quit",
-    ]
+    ])
     game_window(stdscr, state, 72, lines)
 
 
@@ -1454,26 +1618,41 @@ def draw_option(stdscr: curses.window, state: GameState, orbital: Orbital, optio
             choice_number += 1
         lines.append("")
 
-    npc_choices = npc_choices_for_destination(option)
+    npc_choices = npc_choices_for_destination(state, option)
     if npc_choices:
         lines.append("People:")
-        for npc in option.npcs:
+        for npc in visible_npcs_for_destination(state, option):
             lines.append(npc.description)
         for choice in npc_choices:
             lines.append(f"{choice_number}. {choice.target.name} [{choice.interaction}]")
             choice_number += 1
         lines.append("")
 
-    if option.destinations:
+    ship_choices = ship_choices_for_destination(state, option)
+    visible_ships = visible_ships_for_destination(state, option)
+    if visible_ships:
+        lines.append("Ships:")
+        for ship in visible_ships:
+            lines.append(ship_tagline(state, option, ship))
+        for choice in ship_choices:
+            lines.append(f"{choice_number}. {choice.target.name} [{choice.interaction}]")
+            choice_number += 1
+        lines.append("")
+
+    visible_destination_entries_list = visible_destination_entries(state, option)
+    if visible_destination_entries_list:
         lines.append("Destinations:")
-    for index, child in enumerate(option.destinations, start=1):
+    for _child_index, child in visible_destination_entries_list:
         lines.append(f"{choice_number}. {child.name} [{child.kind}]")
         choice_number += 1
-    if state.destination_path == state.docked_path:
-        lines.extend(["", "T: take off"])
     lines.append("")
+    boardable_ships = boardable_ships_for_destination(state, option)
+    if len(boardable_ships) == 1:
+        lines.append(f"B: board {boardable_ships[0].name}")
+    elif boardable_ships:
+        lines.append("B: board ship")
     if state.destination_path != state.docked_path:
-        lines.append("B: back")
+        lines.append("G: go back")
     lines.extend([
         "I: inventory",
         "Q: quit",
@@ -1481,10 +1660,24 @@ def draw_option(stdscr: curses.window, state: GameState, orbital: Orbital, optio
     game_window(stdscr, state, 72, lines)
 
 
+def draw_boarded_ship(stdscr: curses.window, state: GameState) -> None:
+    ship = boarded_ship(state)
+    name = ship.name if ship is not None else "Ship"
+    lines = [
+        f"On board the {name}",
+        "",
+        "T: take off",
+        "G: go back",
+        "I: inventory",
+        "Q: quit",
+    ]
+    game_window(stdscr, state, 72, lines)
+
+
 def editor_commands_for_state(state: GameState) -> list[str]:
     if not state.editor_enabled:
         return []
-    if sequence_active(state) or state.interaction_index is not None or state.notice_message or state.view in {"map", "inventory"}:
+    if sequence_active(state) or state.continue_message or state.view in {"map", "inventory"}:
         return ["R: reload"]
     if state.view == "jump":
         return ["A: add system", "R: reload"]
@@ -1529,42 +1722,13 @@ def draw_editor_box(stdscr: curses.window, state: GameState) -> None:
     bottom_window(stdscr, 72, lines, top=state.editor_box_top)
 
 
-def draw_object_interaction(
-    stdscr: curses.window,
-    orbital: Orbital,
-    destination: LandingOption,
-    choice: InteractionChoice,
-) -> None:
-    target = choice.target
-    description = interaction_description(choice)
-    lines = [
-        f"{orbital.name}: {destination.name}",
-        "",
-        f"{choice.interaction}: {target.name}",
-        "",
-        description,
-        "",
-        "B: back",
-        "Q: quit",
-    ]
-    centered_window(stdscr, 72, lines)
-
-
-def draw_notice(stdscr: curses.window, state: GameState) -> None:
-    lines = [
-        state.notice_title,
-        "",
-        state.notice_message,
-        "",
-        "B: back",
-        "Q: quit",
-    ]
-    centered_window(stdscr, 72, lines)
-
-
 def draw_sequence(stdscr: curses.window, state: GameState) -> None:
     message = state.sequence_messages[state.sequence_index] if sequence_active(state) else ""
     centered_window(stdscr, 72, [message], footer="Press any key to continue")
+
+
+def draw_continue_message(stdscr: curses.window, state: GameState) -> None:
+    centered_window(stdscr, 72, [state.continue_message], footer="Press any key to continue")
 
 
 def draw_inventory(stdscr: curses.window, state: GameState) -> None:
@@ -1579,16 +1743,9 @@ def draw_inventory(stdscr: curses.window, state: GameState) -> None:
         equipped_ids = set(state.equipment.values())
         for index, item in enumerate(items, start=1):
             marker = ">" if index - 1 == state.inventory_index else " "
-            equipped = " equipped" if item.id in equipped_ids else ""
-            slot = f" / {item.equipment_slot}" if item.equipment_slot else ""
-            lines.append(f"{index}. {marker} {item.name}{slot}{equipped}")
-
-    if state.equipment:
-        lines.extend(["", "Equipped:"])
-        for slot, item_id in sorted(state.equipment.items()):
-            item = state.inventory.get(item_id)
-            if item is not None:
-                lines.append(f"{slot}: {item.name}")
+            equipped = "*" if item.id in equipped_ids else " "
+            item_type = f" [{item.equipment_slot.lower()}]" if item.equipment_slot else ""
+            lines.append(f"{index}. {marker}{equipped} {item.name}{item_type}")
 
     if state.message:
         lines.extend(["", state.message])
@@ -1599,7 +1756,7 @@ def draw_inventory(stdscr: curses.window, state: GameState) -> None:
         selected = items[state.inventory_index]
         if selected.equipment_slot:
             lines.append("E: equip")
-    lines.extend(["B: back", "Q: quit"])
+    lines.extend(["G: go back", "Q: quit"])
     centered_window(stdscr, 72, lines)
 
 
@@ -1615,13 +1772,12 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
         state.editor_box_top = None
         system = world.system_by_id(state.system_id)
 
-        if sequence_active(state):
+        if state.continue_message:
+            draw_continue_message(stdscr, state)
+        elif sequence_active(state):
             draw_sequence(stdscr, state)
         elif state.view == "inventory":
-            if state.notice_message:
-                draw_notice(stdscr, state)
-            else:
-                draw_inventory(stdscr, state)
+            draw_inventory(stdscr, state)
         elif state.view == "jump":
             draw_jump_list(stdscr, world, state, system)
         elif state.view == "map":
@@ -1631,21 +1787,18 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
         else:
             orbital = orbital_by_id(system, state.orbital_id)
             selected_destination = destination_at_path(orbital, state.destination_path)
-            selected_interaction = interaction_at_state(state, selected_destination, state.interaction_index)
-            if selected_destination is not None and not state.notice_message and state.interaction_index is None:
+            if selected_destination is not None:
                 enter_destination(state, selected_destination)
             if sequence_active(state):
                 draw_sequence(stdscr, state)
-            elif selected_destination is not None and state.notice_message:
-                draw_notice(stdscr, state)
-            elif selected_destination is not None and selected_interaction is not None:
-                draw_object_interaction(stdscr, orbital, selected_destination, selected_interaction)
+            elif selected_destination is not None and boarded_ship_at_destination(state, selected_destination):
+                draw_boarded_ship(stdscr, state)
             elif selected_destination is not None:
                 draw_option(stdscr, state, orbital, selected_destination)
             else:
                 draw_orbit(stdscr, state, orbital)
 
-        if not sequence_active(state):
+        if not state.continue_message and not sequence_active(state):
             draw_editor_box(stdscr, state)
         stdscr.refresh()
         key = stdscr.getch()
@@ -1658,6 +1811,10 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
                 state.message = f"Reloaded: {data_path}"
             except (OSError, json.JSONDecodeError, ValueError, KeyError) as error:
                 state.message = f"Reload failed: {error}"
+            continue
+
+        if state.continue_message:
+            state.continue_message = ""
             continue
 
         if sequence_active(state):
@@ -1679,7 +1836,7 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
             continue
 
         if state.view == "map":
-            if key in (ord("b"), ord("B")):
+            if key in (ord("g"), ord("G")):
                 state.view = state.map_return_view
             continue
 
@@ -1695,7 +1852,7 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
                 state.destination_path.clear()
                 state.interaction_index = None
                 clear_notice(state)
-            elif key in (ord("b"), ord("B")):
+            elif key in (ord("g"), ord("G")):
                 state.view = "system"
             elif key in (ord("m"), ord("M")):
                 state.map_return_view = "jump"
@@ -1714,31 +1871,27 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
                 state.interaction_index = None
                 clear_notice(state)
                 continue
-            if state.interaction_index is not None or state.notice_message:
-                if key in (ord("b"), ord("B")):
-                    state.interaction_index = None
-                    clear_notice(state)
+            if boarded_ship_at_destination(state, selected_destination):
+                if key in (ord("t"), ord("T")):
+                    take_off_from_destination(state)
+                elif key in (ord("g"), ord("G")):
+                    state.boarded_ship_id = None
                 continue
             index = key - ord("1")
             interaction_choices = destination_interaction_choices(state, selected_destination)
+            visible_destination_entries_list = visible_destination_entries(state, selected_destination)
             if 0 <= index < len(interaction_choices):
                 handle_interaction_choice(state, interaction_choices[index], index)
-            elif 0 <= index - len(interaction_choices) < len(selected_destination.destinations):
-                child_index = index - len(interaction_choices)
-                child_destination = selected_destination.destinations[child_index]
+            elif 0 <= index - len(interaction_choices) < len(visible_destination_entries_list):
+                child_index, child_destination = visible_destination_entries_list[index - len(interaction_choices)]
                 blocked_message = destination_before_rule_message(state, child_destination)
                 if blocked_message is not None:
-                    state.notice_title = child_destination.name
-                    state.notice_message = blocked_message
+                    state.continue_message = blocked_message
                 else:
                     state.destination_path.append(child_index)
-            elif key in (ord("t"), ord("T")) and state.destination_path == state.docked_path:
-                state.last_orbital_by_system[state.system_id] = state.orbital_id
-                state.docked_path.clear()
-                state.destination_path.clear()
-                state.interaction_index = None
-                clear_notice(state)
             elif key in (ord("b"), ord("B")):
+                board_ship_at_destination(state, selected_destination)
+            elif key in (ord("g"), ord("G")):
                 if state.destination_path != state.docked_path:
                     state.destination_path.pop()
             elif state.editor_enabled and key in (ord("a"), ord("A")):
@@ -1798,14 +1951,11 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
                 if added is not None:
                     world, state.message = added
                     orbital = orbital_by_id(world.system_by_id(state.system_id), state.orbital_id)
-            if len(orbital.landing_options) == 1:
-                state.docked_path = [0]
-                state.destination_path = [0]
-                state.interaction_index = None
-                clear_notice(state)
-            elif len(orbital.landing_options) > 1:
-                state.docked_path = [0]
-                state.destination_path = [0]
+            landing_path = landing_path_for_orbital(state, orbital)
+            if landing_path:
+                state.docked_path = landing_path
+                state.destination_path = list(landing_path)
+                land_boarded_ship(state, orbital, landing_path)
                 state.interaction_index = None
                 clear_notice(state)
         elif state.editor_enabled and key in (ord("e"), ord("E")):
@@ -1821,18 +1971,13 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
 
 
 def handle_inventory_input(state: GameState, key: int) -> None:
-    if state.notice_message:
-        if key in (ord("b"), ord("B")):
-            clear_notice(state)
-        return
-
     items = inventory_items(state)
     index = key - ord("1")
     if 0 <= index < len(items):
         state.inventory_index = index
         return
 
-    if key in (ord("b"), ord("B"), ord("i"), ord("I")):
+    if key in (ord("g"), ord("G"), ord("i"), ord("I")):
         state.view = state.inventory_return_view
         clear_notice(state)
         return
@@ -1845,26 +1990,23 @@ def handle_inventory_input(state: GameState, key: int) -> None:
     selected = items[state.inventory_index]
 
     if key in (ord("x"), ord("X")):
-        state.notice_title = selected.name
-        state.notice_message = selected.description
+        state.continue_message = selected.description
         return
 
     if key in (ord("e"), ord("E")):
         if not selected.equipment_slot:
             state.message = "You cannot equip that."
             return
-        previous_id = state.equipment.get(selected.equipment_slot)
         state.equipment[selected.equipment_slot] = selected.id
-        if previous_id and previous_id != selected.id:
-            previous = state.inventory.get(previous_id)
-            previous_name = previous.name if previous is not None else "previous equipment"
-            state.message = f"Equipped {selected.name}, replacing {previous_name}."
-        else:
-            state.message = f"Equipped {selected.name}."
 
 
 def inventory_items(state: GameState) -> list[StoryObject]:
     return list(state.inventory.values())
+
+
+def current_destination_id(state: GameState, orbital: Orbital) -> str | None:
+    destination = destination_at_path(orbital, state.destination_path)
+    return destination.id if destination is not None else None
 
 
 def reload_world_preserving_state(world: StoryWorld, data_path: Path, state: GameState) -> StoryWorld:
@@ -1891,6 +2033,17 @@ def reload_world_preserving_state(world: StoryWorld, data_path: Path, state: Gam
         object_id: new_objects.get(object_id, story_object)
         for object_id, story_object in state.inventory.items()
     }
+    new_ships = ships_by_id(new_world)
+    new_ship_locations = authored_ship_locations(new_world)
+    state.ships = new_ships
+    state.ship_locations = {
+        ship_id: state.ship_locations.get(ship_id, new_ship_locations.get(ship_id, "unknown"))
+        for ship_id in new_ships
+    }
+    if state.player_ship_id not in new_ships:
+        state.player_ship_id = None
+    if state.boarded_ship_id not in new_ships:
+        state.boarded_ship_id = None
     state.destination_path = list(new_destination_path)
     state.docked_path = list(new_docked_path)
     state.last_orbital_by_system = remapped_last_orbitals
@@ -1912,6 +2065,36 @@ def collect_objects_by_id(destinations: tuple[LandingOption, ...], objects: dict
         for story_object in destination.objects:
             objects[story_object.id] = story_object
         collect_objects_by_id(destination.destinations, objects)
+
+
+def ships_by_id(world: StoryWorld) -> dict[str, Ship]:
+    ships: dict[str, Ship] = {}
+    for system in world.systems:
+        for orbital in system.orbitals:
+            collect_ships_by_id(orbital.landing_options, ships)
+    return ships
+
+
+def collect_ships_by_id(destinations: tuple[LandingOption, ...], ships: dict[str, Ship]) -> None:
+    for destination in destinations:
+        for ship in destination.ships:
+            ships[ship.id] = ship
+        collect_ships_by_id(destination.destinations, ships)
+
+
+def authored_ship_locations(world: StoryWorld) -> dict[str, str]:
+    locations: dict[str, str] = {}
+    for system in world.systems:
+        for orbital in system.orbitals:
+            collect_authored_ship_locations(orbital.landing_options, locations)
+    return locations
+
+
+def collect_authored_ship_locations(destinations: tuple[LandingOption, ...], locations: dict[str, str]) -> None:
+    for destination in destinations:
+        for ship in destination.ships:
+            locations[ship.id] = destination.id
+        collect_authored_ship_locations(destination.destinations, locations)
 
 
 def current_destination_ids(
@@ -1936,6 +2119,8 @@ def current_destination_ids(
 
 def initial_game_state(world: StoryWorld, editor_enabled: bool) -> GameState:
     state = GameState(system_id=world.start_system, editor_enabled=editor_enabled)
+    state.ships = ships_by_id(world)
+    state.ship_locations = authored_ship_locations(world)
     if world.start_orbital_id is None:
         return state
 
@@ -1982,16 +2167,110 @@ def object_choices_for_destination(state: GameState, destination: LandingOption)
     return choices
 
 
-def npc_choices_for_destination(destination: LandingOption) -> list[InteractionChoice]:
+def npc_choices_for_destination(state: GameState, destination: LandingOption) -> list[InteractionChoice]:
     choices: list[InteractionChoice] = []
-    for npc in destination.npcs:
+    for npc in visible_npcs_for_destination(state, destination):
         for interaction in npc.interactions:
             choices.append(InteractionChoice("npc", npc, interaction))
     return choices
 
 
 def visible_objects_for_destination(state: GameState, destination: LandingOption) -> list[StoryObject]:
-    return [story_object for story_object in destination.objects if object_is_at_authored_location(state, story_object)]
+    return [
+        story_object
+        for story_object in destination.objects
+        if object_is_at_authored_location(state, story_object)
+        and fact_conditions_met(state, story_object.visible_when, story_object.visible_unless)
+    ]
+
+
+def visible_npcs_for_destination(state: GameState, destination: LandingOption) -> list[NPC]:
+    return [
+        npc
+        for npc in destination.npcs
+        if fact_conditions_met(state, npc.visible_when, npc.visible_unless)
+    ]
+
+
+def visible_ships_for_destination(state: GameState, destination: LandingOption) -> list[Ship]:
+    return [
+        ship
+        for ship in state.ships.values()
+        if state.ship_locations.get(ship.id) == destination.id
+        and fact_conditions_met(state, ship.visible_when, ship.visible_unless)
+    ]
+
+
+def boardable_ships_for_destination(state: GameState, destination: LandingOption) -> list[Ship]:
+    return [
+        ship
+        for ship in visible_ships_for_destination(state, destination)
+        if ship.unlock or state.player_ship_id == ship.id
+    ]
+
+
+def boarded_ship(state: GameState) -> Ship | None:
+    if state.boarded_ship_id is None:
+        return None
+    return state.ships.get(state.boarded_ship_id)
+
+
+def boarded_ship_at_destination(state: GameState, destination: LandingOption) -> bool:
+    return (
+        state.boarded_ship_id is not None
+        and state.ship_locations.get(state.boarded_ship_id) == destination.id
+    )
+
+
+def board_ship_at_destination(state: GameState, destination: LandingOption) -> None:
+    ships = boardable_ships_for_destination(state, destination)
+    if not ships:
+        return
+    ship = ships[0]
+    if ship.unlock:
+        state.player_ship_id = ship.id
+    state.boarded_ship_id = ship.id
+    clear_notice(state)
+
+
+def take_off_from_destination(state: GameState) -> None:
+    if state.boarded_ship_id is None or state.orbital_id is None:
+        return
+    state.ship_locations[state.boarded_ship_id] = f"orbit:{state.system_id}:{state.orbital_id}"
+    state.last_orbital_by_system[state.system_id] = state.orbital_id
+    state.docked_path.clear()
+    state.destination_path.clear()
+    state.interaction_index = None
+    clear_notice(state)
+
+
+def landing_path_for_orbital(state: GameState, orbital: Orbital) -> list[int]:
+    if state.boarded_ship_id and orbital.default_landing_destination_ids:
+        return list(destination_path_by_ids(orbital, orbital.default_landing_destination_ids))
+    if orbital.landing_options:
+        return [0]
+    return []
+
+
+def land_boarded_ship(state: GameState, orbital: Orbital, landing_path: list[int]) -> None:
+    if state.boarded_ship_id is None:
+        return
+    destination = destination_at_path(orbital, landing_path)
+    if destination is not None:
+        state.ship_locations[state.boarded_ship_id] = destination.id
+        state.boarded_ship_id = None
+
+
+def visible_destination_entries(state: GameState, destination: LandingOption) -> list[tuple[int, LandingOption]]:
+    return [
+        (index, child)
+        for index, child in enumerate(destination.destinations)
+        if destination_visible(state, child)
+    ]
+
+
+def destination_visible(state: GameState, destination: LandingOption) -> bool:
+    return fact_conditions_met(state, destination.visible_when, destination.visible_unless)
 
 
 def object_is_at_authored_location(state: GameState, story_object: StoryObject) -> bool:
@@ -2000,52 +2279,59 @@ def object_is_at_authored_location(state: GameState, story_object: StoryObject) 
     return state.object_locations.get(story_object.id, "authored") == "authored"
 
 
+def ship_interactions(ship: Ship) -> tuple[str, ...]:
+    return ("Examine",)
+
+
+def ship_tagline(state: GameState, destination: LandingOption, ship: Ship) -> str:
+    for tagline in ship.taglines:
+        if fact_conditions_met(state, tagline.when, tagline.unless):
+            return tagline.text
+    disposition = "docked" if destination.port else "parked"
+    return f"The {ship.name} is {disposition} here."
+
+
+def ship_choices_for_destination(state: GameState, destination: LandingOption) -> list[InteractionChoice]:
+    choices: list[InteractionChoice] = []
+    for ship in visible_ships_for_destination(state, destination):
+        for interaction in ship_interactions(ship):
+            choices.append(InteractionChoice("ship", ship, interaction))
+    return choices
+
+
 def destination_interaction_choices(state: GameState, destination: LandingOption) -> list[InteractionChoice]:
-    return [*object_choices_for_destination(state, destination), *npc_choices_for_destination(destination)]
-
-
-def interaction_at_state(
-    state: GameState,
-    destination: LandingOption | None,
-    interaction_index: int | None,
-) -> InteractionChoice | None:
-    if destination is None or interaction_index is None:
-        return None
-    choices = destination_interaction_choices(state, destination)
-    if interaction_index < 0 or interaction_index >= len(choices):
-        return None
-    return choices[interaction_index]
+    return [
+        *object_choices_for_destination(state, destination),
+        *npc_choices_for_destination(state, destination),
+        *ship_choices_for_destination(state, destination),
+    ]
 
 
 def handle_interaction_choice(state: GameState, choice: InteractionChoice, choice_index: int) -> None:
     blocked_message = before_rule_message(state, choice)
     if blocked_message is not None:
-        state.notice_title = f"{choice.interaction}: {choice.target.name}"
-        state.notice_message = blocked_message
+        state.continue_message = blocked_message
         state.interaction_index = None
         return
     if choice.kind == "object" and choice.interaction == "Take":
         story_object = choice.target
         if isinstance(story_object, StoryObject):
             if not story_object.collectable:
-                state.notice_title = f"Take: {story_object.name}"
-                state.notice_message = "You cannot take that."
+                state.continue_message = "You cannot take that."
                 state.interaction_index = None
                 return
             if story_object.id in state.inventory:
-                state.notice_title = f"Take: {story_object.name}"
-                state.notice_message = "You already have that."
+                state.continue_message = "You already have that."
                 state.interaction_index = None
                 return
             state.inventory[story_object.id] = story_object
             state.object_locations[story_object.id] = "inventory"
             state.inventory_index = len(state.inventory) - 1
-            state.notice_title = f"Take: {story_object.name}"
-            state.notice_message = f"Taken: {story_object.name}"
             state.interaction_index = None
+            clear_notice(state)
             return
-    state.interaction_index = choice_index
-    clear_notice(state)
+    state.continue_message = interaction_description(choice)
+    state.interaction_index = None
 
 
 def before_rule_message(state: GameState, choice: InteractionChoice) -> str | None:
@@ -2106,15 +2392,26 @@ def state_has_fact(state: GameState, fact: str) -> bool:
     if fact.startswith("equipped:slot:"):
         slot = fact.removeprefix("equipped:slot:")
         return slot in state.equipment
+    if fact.startswith("ship:"):
+        parts = fact.split(":")
+        if len(parts) == 4 and parts[2] == "at":
+            return state.ship_locations.get(parts[1]) == parts[3]
+        if len(parts) == 3 and parts[2] == "owned":
+            return state.player_ship_id == parts[1]
+        if len(parts) == 3 and parts[2] == "boarded":
+            return state.boarded_ship_id == parts[1]
     return fact in state.facts
 
 
 def clear_notice(state: GameState) -> None:
-    state.notice_title = ""
-    state.notice_message = ""
+    state.continue_message = ""
 
 
 def interaction_description(choice: InteractionChoice) -> str:
+    if isinstance(choice.target, Ship):
+        if choice.interaction == "Board":
+            return f"On board the {choice.target.name}."
+        return choice.target.description
     if isinstance(choice.target, NPC):
         if choice.interaction == "Examine":
             return choice.target.examine_description
@@ -2557,13 +2854,22 @@ def dump_world(world: StoryWorld) -> str:
             lines.append("Hops: " + ", ".join(system.hops))
         for index, orbital in enumerate(system.orbitals, start=1):
             lines.append(f"{index}. {orbital.name} [{orbital_type_label(system, orbital)}] - {orbital.description}")
+            if orbital.default_landing_destination_ids:
+                lines.append("   default landing: " + " > ".join(orbital.default_landing_destination_ids))
             for option_index, option in enumerate(orbital.landing_options, start=1):
                 dump_destination(option, lines, f"   {option_index}.")
     return "\n".join(lines)
 
 
 def dump_destination(option: LandingOption, lines: list[str], prefix: str) -> None:
-    lines.append(f"{prefix} {option.name} [{option.kind}]: {option.description}")
+    flags = []
+    if option.port:
+        flags.append("port")
+    visibility = condition_suffix(option.visible_when, option.visible_unless)
+    if visibility:
+        flags.append("visible " + visibility.strip())
+    flag_suffix = f" ({'; '.join(flags)})" if flags else ""
+    lines.append(f"{prefix} {option.name} [{option.kind}]{flag_suffix}: {option.description}")
     for rule in option.before:
         lines.append(f"      before {rule.interaction}{condition_suffix(rule.when, rule.unless)}: {rule.message}")
     for sequence in option.sequences:
@@ -2577,6 +2883,18 @@ def dump_destination(option: LandingOption, lines: list[str], prefix: str) -> No
     for index, npc in enumerate(option.npcs, start=1):
         lines.append(f"      {prefix}n{index}. {npc.name} [{', '.join(npc.interactions)}]: {npc.description}")
         for rule in npc.before:
+            lines.append(f"         before {rule.interaction}{condition_suffix(rule.when, rule.unless)}: {rule.message}")
+    for index, ship in enumerate(option.ships, start=1):
+        lines.append(f"      {prefix}h{index}. {ship.name} [Ship]: {ship.description}")
+        if ship.unlock:
+            lines.append("         unlock: true")
+        if ship.equipment_slots:
+            lines.append("         slots: " + ", ".join(ship.equipment_slots))
+        if ship.abilities:
+            lines.append("         abilities: " + ", ".join(ship.abilities))
+        for tagline in ship.taglines:
+            lines.append(f"         tagline{condition_suffix(tagline.when, tagline.unless)}: {tagline.text}")
+        for rule in ship.before:
             lines.append(f"         before {rule.interaction}{condition_suffix(rule.when, rule.unless)}: {rule.message}")
     for index, child in enumerate(option.destinations, start=1):
         dump_destination(child, lines, f"   {prefix}{index}.")

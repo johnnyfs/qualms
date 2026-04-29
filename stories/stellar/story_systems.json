@@ -68,6 +68,12 @@
           "type": "Moon",
           "description": "The ugliest moon in the galaxy, home to a tapped-out irridium mine and not much else.",
           "parent": "bolorus",
+          "default_landing_destination_ids": [
+            "mining-colony-5",
+            "pointless-settlement",
+            "airlock",
+            "lunar-surface"
+          ],
           "landing_options": [
             {
               "id": "mining-colony-5",
@@ -219,6 +225,36 @@
                                   "description": "Utter destruction.",
                                   "objects": [],
                                   "npcs": [],
+                                  "ships": [
+                                    {
+                                      "id": "canary",
+                                      "name": "Canary",
+                                      "description": "The AUD Canary. AUD? You've never heard it. It looks built for speed -- long, sleek, all cockpit and engine, not much room for cargo or passengers. There's a hatch on top.",
+                                      "unlock": true,
+                                      "equipment_slots": [],
+                                      "abilities": [],
+                                      "before": [
+                                        {
+                                          "interaction": "Examine",
+                                          "when": [
+                                            "ship:canary:at:ground-zero"
+                                          ],
+                                          "message": "Eerily empty. Not so much as one irradiated corpse. If there was a pilot, he either ejected or was vaporized."
+                                        }
+                                      ],
+                                      "taglines": [
+                                        {
+                                          "when": [
+                                            "ship:canary:at:ground-zero"
+                                          ],
+                                          "text": "A sleek yellow sloop sits at the heart of the crater, without so much as a scratch."
+                                        }
+                                      ]
+                                    }
+                                  ],
+                                  "visible_when": [
+                                    "ship:canary:at:ground-zero"
+                                  ],
                                   "destinations": []
                                 },
                                 {
@@ -228,6 +264,9 @@
                                   "description": "There's no way anyone survived this.",
                                   "objects": [],
                                   "npcs": [],
+                                  "visible_when": [
+                                    "ship:canary:at:ground-zero"
+                                  ],
                                   "destinations": []
                                 }
                               ]
