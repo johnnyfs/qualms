@@ -1,0 +1,246 @@
+from __future__ import annotations
+
+import copy
+import importlib.util
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+STELLAR = ROOT / "stories" / "stellar" / "story_systems.json"
+BLANK = ROOT / "examples" / "blank" / "story_systems.json"
+SOL_PROOF = ROOT / "examples" / "sol-proof" / "story_systems.json"
+
+
+def load_story_module():
+    module_path = ROOT / "curses" / "dark_qualms_story.py"
+    spec = importlib.util.spec_from_file_location("dark_qualms_story", module_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("could not load dark_qualms_story.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+dq = load_story_module()
+
+
+def raw_story(path: Path = STELLAR) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def load_raw(raw: dict):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "story_systems.json"
+        path.write_text(json.dumps(raw), encoding="utf-8")
+        return dq.load_world(path)
+
+
+def destination_by_ids(world, *destination_ids: str):
+    orbital = dq.orbital_by_id(world.system_by_id(world.start_system), world.start_orbital_id)
+    path = dq.destination_path_by_ids(orbital, tuple(destination_ids))
+    destination = dq.destination_at_path(orbital, list(path))
+    if destination is None:
+        raise AssertionError(f"destination not found: {destination_ids}")
+    return destination
+
+
+class LegacyLoaderTests(unittest.TestCase):
+    def test_current_stories_load_and_dump(self) -> None:
+        for path in (STELLAR, BLANK, SOL_PROOF):
+            with self.subTest(path=path):
+                world = dq.load_world(path)
+                self.assertTrue(world.systems)
+                self.assertIn(world.system_by_id(world.start_system), world.systems)
+                self.assertTrue(dq.dump_world(world))
+
+    def test_initial_location_matches_current_story_start(self) -> None:
+        world = dq.load_world(STELLAR)
+        state = dq.initial_game_state(world, editor_enabled=False)
+
+        self.assertEqual(state.system_id, "empty-system")
+        self.assertEqual(state.orbital_id, "rainbow")
+        self.assertEqual(world.start_destination_ids, ("mining-colony-5",))
+
+        orbital = dq.orbital_by_id(world.system_by_id(state.system_id), state.orbital_id)
+        self.assertEqual(tuple(dq.current_destination_ids(world, state.destination_path, state.system_id, state.orbital_id)), world.start_destination_ids)
+        self.assertEqual(dq.destination_at_path(orbital, state.destination_path).id, "mining-colony-5")
+
+    def test_loader_rejects_duplicate_system_ids(self) -> None:
+        raw = raw_story()
+        raw["systems"].append(copy.deepcopy(raw["systems"][0]))
+
+        with self.assertRaisesRegex(ValueError, "system IDs must be unique"):
+            load_raw(raw)
+
+    def test_loader_rejects_duplicate_orbital_ids(self) -> None:
+        raw = raw_story()
+        orbitals = raw["systems"][0]["orbitals"]
+        orbitals.append(copy.deepcopy(orbitals[0]))
+
+        with self.assertRaisesRegex(ValueError, "duplicates"):
+            load_raw(raw)
+
+    def test_loader_rejects_unknown_moon_parent(self) -> None:
+        raw = raw_story()
+        raw["systems"][0]["orbitals"][1]["parent"] = "missing-parent"
+
+        with self.assertRaisesRegex(ValueError, "parent references unknown orbital"):
+            load_raw(raw)
+
+    def test_loader_rejects_non_reciprocal_hops(self) -> None:
+        raw = {
+            "start_system": "a",
+            "systems": [
+                {
+                    "id": "a",
+                    "name": "A",
+                    "star_type": "Unspecified",
+                    "description": "",
+                    "position_au": [0, 0],
+                    "hops": ["b"],
+                    "orbitals": [],
+                },
+                {
+                    "id": "b",
+                    "name": "B",
+                    "star_type": "Unspecified",
+                    "description": "",
+                    "position_au": [1, 0],
+                    "hops": [],
+                    "orbitals": [],
+                },
+            ],
+        }
+
+        with self.assertRaisesRegex(ValueError, "must be reciprocal"):
+            load_raw(raw)
+
+    def test_loader_rejects_over_distance_hops(self) -> None:
+        raw = {
+            "start_system": "a",
+            "systems": [
+                {
+                    "id": "a",
+                    "name": "A",
+                    "star_type": "Unspecified",
+                    "description": "",
+                    "position_au": [0, 0],
+                    "hops": ["b"],
+                    "orbitals": [],
+                },
+                {
+                    "id": "b",
+                    "name": "B",
+                    "star_type": "Unspecified",
+                    "description": "",
+                    "position_au": [dq.MAX_HOP_DISTANCE_AU + 1, 0],
+                    "hops": ["a"],
+                    "orbitals": [],
+                },
+            ],
+        }
+
+        with self.assertRaisesRegex(ValueError, "exceeds"):
+            load_raw(raw)
+
+
+class LegacyBehaviorTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.world = dq.load_world(STELLAR)
+        self.state = dq.initial_game_state(self.world, editor_enabled=False)
+        self.orbital = dq.orbital_by_id(self.world.system_by_id(self.state.system_id), self.state.orbital_id)
+
+    def test_take_moves_object_to_inventory(self) -> None:
+        bar = destination_by_ids(self.world, "mining-colony-5", "pointless-bar")
+        choices = dq.object_choices_for_destination(self.state, bar)
+        take = next(choice for choice in choices if choice.target.id == "portrait-of-enrick" and choice.interaction == "Take")
+
+        dq.handle_interaction_choice(self.state, take, choice_index=0)
+
+        self.assertIn("portrait-of-enrick", self.state.inventory)
+        self.assertEqual(self.state.object_locations["portrait-of-enrick"], "inventory")
+        self.assertFalse(self.state.continue_message)
+
+    def test_before_rule_blocks_matching_interaction(self) -> None:
+        bar = destination_by_ids(self.world, "mining-colony-5", "pointless-bar")
+        talk = next(choice for choice in dq.npc_choices_for_destination(self.state, bar) if choice.target.id == "stu" and choice.interaction == "Talk")
+
+        dq.handle_interaction_choice(self.state, talk, choice_index=0)
+
+        self.assertEqual(self.state.continue_message, "We call him stupor for a reason.")
+
+    def test_use_rule_sets_ship_control_after_message_sequence(self) -> None:
+        portrait = dq.objects_by_id(self.world)["portrait-of-enrick"]
+        console = dq.objects_by_id(self.world)["control-console"]
+        self.state.inventory[portrait.id] = portrait
+        self.state.object_locations[portrait.id] = "inventory"
+        self.state.use_source_item_id = portrait.id
+        self.state.use_return_view = "inventory"
+        self.state.view = "use_room_target"
+
+        dq.use_item_on_target(self.state, console)
+
+        self.assertEqual(self.state.sequence_messages, ("The iris whirs with approval, and the console powers up.",))
+        self.assertIsNone(self.state.use_source_item_id)
+        dq.advance_sequence(self.state)
+        self.assertEqual(self.state.player_ship_id, "canary")
+
+    def test_destination_sequence_completes_after_messages(self) -> None:
+        mining_colony = destination_by_ids(self.world, "mining-colony-5")
+        self.state.facts.add("visited:destination:pointless-bar")
+        self.state.facts.add("visited:destination:pointless-settlement")
+
+        dq.enter_destination(self.state, mining_colony)
+
+        self.assertEqual(len(self.state.sequence_messages), 1)
+        self.assertNotIn("sequence:blemish-crash:complete", self.state.facts)
+        dq.advance_sequence(self.state)
+        self.assertIn("sequence:blemish-crash:complete", self.state.facts)
+
+    def test_equipment_fact_unblocks_lunar_surface(self) -> None:
+        lunar_surface = destination_by_ids(
+            self.world,
+            "mining-colony-5",
+            "pointless-settlement",
+            "airlock",
+            "lunar-surface",
+        )
+
+        self.assertIn("cold-boiling", dq.destination_before_rule_message(self.state, lunar_surface))
+        self.state.equipment["Exosuit"] = "spare-expedition-suit"
+        self.assertIsNone(dq.destination_before_rule_message(self.state, lunar_surface))
+        self.assertTrue(dq.state_has_fact(self.state, "equipped:slot:Exosuit"))
+
+    def test_ship_board_takeoff_and_land(self) -> None:
+        impact_crater = destination_by_ids(
+            self.world,
+            "mining-colony-5",
+            "pointless-settlement",
+            "airlock",
+            "lunar-surface",
+            "active-mine",
+            "impact-crater",
+        )
+
+        self.assertEqual(self.state.ship_locations["canary"], "impact-crater")
+        dq.board_ship_at_destination(self.state, impact_crater)
+        self.assertEqual(self.state.boarded_ship_id, "canary")
+
+        self.state.player_ship_id = "canary"
+        dq.take_off_from_destination(self.state)
+        self.assertEqual(self.state.ship_locations["canary"], "orbit:empty-system:rainbow")
+        self.assertEqual(self.state.docked_path, [])
+
+        landing_path = dq.destination_path_by_ids(self.orbital, ("mining-colony-5",))
+        dq.land_boarded_ship(self.state, self.orbital, list(landing_path))
+        self.assertEqual(self.state.ship_locations["canary"], "mining-colony-5")
+        self.assertIsNone(self.state.boarded_ship_id)
+
+
+if __name__ == "__main__":
+    unittest.main()
