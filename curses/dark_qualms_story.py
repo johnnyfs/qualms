@@ -5,14 +5,21 @@ import argparse
 import curses
 import json
 import re
+import sys
 import textwrap
 from curses import ascii
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from qualms import ActionAttempt, RulesEngine
+from qualms.legacy import legacy_world_to_game_definition
+
 DATA_PATH = PROJECT_ROOT / "stories" / "stellar" / "story_systems.json"
 ORBITAL_TYPES = {"Planet", "Moon", "Station"}
 OPTION_KINDS = {"Bar", "Tourist Destination", "Destination"}
@@ -195,6 +202,10 @@ class GameState:
     last_orbital_by_system: dict[str, str] = field(default_factory=dict)
     message: str = ""
     editor_box_top: int | None = None
+    rules_definition: Any | None = None
+    rules_state: Any | None = None
+    rules_engine: RulesEngine | None = None
+    legacy_id_map: dict[str, str] = field(default_factory=dict)
 
 
 def blank_world_raw() -> dict:
@@ -1985,6 +1996,25 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
             hops = sorted_hops(world, system)
             index = key - ord("1")
             if 0 <= index < len(hops):
+                ship_id = state.boarded_ship_id or state.player_ship_id
+                ship_entity_id = legacy_entity_id(state, ship_id)
+                destination_system_id = legacy_entity_id(state, hops[index].id)
+                if ship_entity_id and destination_system_id:
+                    result = attempt_rules_action(
+                        state,
+                        "Jump",
+                        {
+                            "actor": "player",
+                            "ship": ship_entity_id,
+                            "destination_system": destination_system_id,
+                        },
+                    )
+                    if result is not None and result.status == "failed":
+                        state.message = f"Action failed: {result.error}"
+                        continue
+                    if result is not None and result.status == "blocked":
+                        start_action_messages(state, result)
+                        continue
                 state.last_system_id = state.system_id
                 state.system_id = hops[index].id
                 state.view = "system"
@@ -2030,9 +2060,11 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
                 handle_interaction_choice(state, interaction_choices[index], index)
             elif 0 <= index - len(interaction_choices) < len(visible_destination_entries_list):
                 child_index, child_destination = visible_destination_entries_list[index - len(interaction_choices)]
-                blocked_message = destination_before_rule_message(state, child_destination)
-                if blocked_message is not None:
-                    start_continue_message(state, blocked_message)
+                result = attempt_enter_destination_action(state, child_destination)
+                if result is not None and result.status == "failed":
+                    state.message = f"Action failed: {result.error}"
+                elif result is not None and result.status == "blocked":
+                    start_action_messages(state, result)
                 else:
                     state.destination_path.append(child_index)
             elif key in (ord("b"), ord("B")):
@@ -2143,6 +2175,12 @@ def handle_inventory_input(state: GameState, key: int) -> None:
         if not selected.equipment_slot:
             state.message = "You cannot equip that."
             return
+        entity_id = legacy_entity_id(state, selected.id)
+        if entity_id:
+            result = attempt_rules_action(state, "Equip", {"actor": "player", "item": entity_id})
+            if result is not None and result.status == "failed":
+                state.message = f"Action failed: {result.error}"
+                return
         state.equipment[selected.equipment_slot] = selected.id
 
     if key in (ord("u"), ord("U")) and "Use" in selected.interactions:
@@ -2222,6 +2260,7 @@ def reload_world_preserving_state(world: StoryWorld, data_path: Path, state: Gam
     state.last_orbital_by_system = remapped_last_orbitals
     state.interaction_index = None
     clear_notice(state)
+    attach_rules_runtime(new_world, state)
     return new_world
 
 
@@ -2300,6 +2339,7 @@ def initial_game_state(world: StoryWorld, editor_enabled: bool) -> GameState:
     controlled_ships = [ship.id for ship in state.ships.values() if ship.controlled]
     if controlled_ships:
         state.player_ship_id = controlled_ships[0]
+    attach_rules_runtime(world, state)
     if world.start_orbital_id is None:
         return state
 
@@ -2309,6 +2349,152 @@ def initial_game_state(world: StoryWorld, editor_enabled: bool) -> GameState:
     state.docked_path = list(destination_path)
     state.destination_path = list(destination_path)
     return state
+
+
+def attach_rules_runtime(world: StoryWorld, state: GameState) -> None:
+    state.rules_definition = legacy_world_to_game_definition(world)
+    state.rules_engine = RulesEngine(state.rules_definition)
+    state.legacy_id_map = dict(state.rules_definition.metadata.get("legacy_id_map", {}))
+    sync_rules_state_from_legacy(state)
+
+
+def sync_rules_state_from_legacy(state: GameState) -> None:
+    if state.rules_definition is None:
+        return
+    rules_state = state.rules_definition.instantiate()
+    for fact in state.facts:
+        rules_state.memory.set(fact)
+    for object_id in state.inventory:
+        entity_id = legacy_entity_id(state, object_id)
+        if entity_id:
+            try_assert(rules_state, "CarriedBy", ["player", entity_id])
+    for slot, object_id in state.equipment.items():
+        rules_state.memory.set(f"equipped:slot:{slot}")
+        entity_id = legacy_entity_id(state, object_id)
+        if entity_id:
+            try_assert(rules_state, "Equipped", ["player", entity_id])
+    for object_id, location in state.object_locations.items():
+        entity_id = legacy_entity_id(state, object_id)
+        if entity_id is None:
+            continue
+        if location == "inventory":
+            try_assert(rules_state, "CarriedBy", ["player", entity_id])
+        else:
+            location_id = legacy_entity_id(state, location)
+            if location_id:
+                try_assert(rules_state, "At", [entity_id, location_id])
+    for ship_id, location in state.ship_locations.items():
+        ship_entity_id = legacy_entity_id(state, ship_id)
+        if ship_entity_id is None:
+            continue
+        if location.startswith("orbit:"):
+            parts = location.split(":")
+            if len(parts) == 3:
+                orbital_id = legacy_entity_id(state, parts[2])
+                if orbital_id:
+                    try_assert(rules_state, "InOrbit", [ship_entity_id, orbital_id])
+        else:
+            location_id = legacy_entity_id(state, location)
+            if location_id:
+                try_assert(rules_state, "DockedAt", [ship_entity_id, location_id])
+    if state.player_ship_id:
+        ship_entity_id = legacy_entity_id(state, state.player_ship_id)
+        if ship_entity_id:
+            try_assert(rules_state, "ControlledBy", [ship_entity_id, "player"])
+            rules_state.memory.set(f"ship:{state.player_ship_id}:owned")
+    if state.boarded_ship_id:
+        ship_entity_id = legacy_entity_id(state, state.boarded_ship_id)
+        if ship_entity_id:
+            rules_state.memory.set("Aboard", ["player", ship_entity_id])
+            rules_state.memory.set(f"ship:{state.boarded_ship_id}:boarded")
+    state.rules_state = rules_state
+
+
+def try_assert(rules_state: Any, relation: str, args: list[str]) -> None:
+    try:
+        rules_state.assert_relation(relation, args)
+    except (KeyError, ValueError):
+        return
+
+
+def legacy_entity_id(state: GameState, legacy_id: str | None) -> str | None:
+    if legacy_id is None:
+        return None
+    return state.legacy_id_map.get(legacy_id)
+
+
+def attempt_rules_action(state: GameState, action_id: str, args: dict[str, Any]):
+    if state.rules_engine is None:
+        return None
+    sync_rules_state_from_legacy(state)
+    result = state.rules_engine.attempt(state.rules_state, ActionAttempt(action_id, args))
+    apply_rules_result_to_legacy(state)
+    return result
+
+
+def apply_rules_result_to_legacy(state: GameState) -> None:
+    if state.rules_state is None:
+        return
+    for fact_id, args in state.rules_state.memory.facts:
+        if args:
+            continue
+        apply_runtime_fact(state, fact_id)
+    for ship_id in state.ships:
+        ship_entity_id = legacy_entity_id(state, ship_id)
+        if ship_entity_id and relation_true(state, "ControlledBy", [ship_entity_id, "player"]):
+            state.player_ship_id = ship_id
+
+
+def apply_runtime_fact(state: GameState, fact_id: str) -> None:
+    parts = fact_id.split(":")
+    if len(parts) == 3 and parts[0] == "ship" and parts[2] == "control":
+        state.player_ship_id = parts[1]
+    else:
+        state.facts.add(fact_id)
+
+
+def relation_true(state: GameState, relation: str, args: list[str]) -> bool:
+    if state.rules_state is None:
+        return False
+    try:
+        return bool(state.rules_state.test(relation, args))
+    except (KeyError, ValueError):
+        return False
+
+
+def action_texts(result: Any) -> tuple[str, ...]:
+    if result is None:
+        return ()
+    return tuple(str(event["text"]) for event in result.events if event.get("text"))
+
+
+def start_action_messages(state: GameState, result: Any, fallback: str | None = None) -> None:
+    messages = action_texts(result)
+    if len(messages) == 1:
+        start_continue_message(state, messages[0])
+    elif messages:
+        start_message_sequence(state, messages)
+    elif fallback:
+        start_continue_message(state, fallback)
+
+
+def interaction_action_attempt(state: GameState, choice: InteractionChoice):
+    entity_id = legacy_entity_id(state, choice.target.id)
+    if entity_id is None:
+        return None
+    if choice.interaction == "Examine":
+        return attempt_rules_action(state, "Examine", {"actor": "player", "target": entity_id})
+    if choice.interaction == "Take":
+        return attempt_rules_action(state, "Take", {"actor": "player", "item": entity_id})
+    if choice.interaction == "Use":
+        return attempt_rules_action(state, "Use", {"actor": "player", "source": entity_id})
+    if choice.interaction == "Power up":
+        return attempt_rules_action(state, "PowerUp", {"actor": "player", "target": entity_id})
+    if choice.interaction == "Talk":
+        return attempt_rules_action(state, "Talk", {"actor": "player", "target": entity_id})
+    if choice.interaction == "Board":
+        return attempt_rules_action(state, "Board", {"actor": "player", "ship": entity_id})
+    return None
 
 
 def destination_at_path(orbital: Orbital, destination_path: list[int]) -> LandingOption | None:
@@ -2423,6 +2609,15 @@ def board_ship_at_destination(state: GameState, destination: LandingOption) -> N
     if not ships:
         return
     ship = ships[0]
+    ship_entity_id = legacy_entity_id(state, ship.id)
+    if ship_entity_id:
+        result = attempt_rules_action(state, "Board", {"actor": "player", "ship": ship_entity_id})
+        if result is not None and result.status == "failed":
+            state.message = f"Action failed: {result.error}"
+            return
+        if result is not None and result.status == "blocked":
+            start_action_messages(state, result)
+            return
     state.boarded_ship_id = ship.id
     state.facts.add(f"ship:{ship.id}:visited")
     state.facts.add(f"ship:{ship.id}:identified")
@@ -2435,6 +2630,20 @@ def take_off_from_destination(state: GameState) -> None:
     ship = boarded_ship(state)
     if ship is None or not ship_controlled_by_player(state, ship):
         return
+    ship_entity_id = legacy_entity_id(state, ship.id)
+    orbital_entity_id = legacy_entity_id(state, state.orbital_id)
+    if ship_entity_id and orbital_entity_id:
+        result = attempt_rules_action(
+            state,
+            "TakeOff",
+            {"actor": "player", "ship": ship_entity_id, "orbital": orbital_entity_id},
+        )
+        if result is not None and result.status == "failed":
+            state.message = f"Action failed: {result.error}"
+            return
+        if result is not None and result.status == "blocked":
+            start_action_messages(state, result)
+            return
     state.ship_locations[state.boarded_ship_id] = f"orbit:{state.system_id}:{state.orbital_id}"
     state.last_orbital_by_system[state.system_id] = state.orbital_id
     state.docked_path.clear()
@@ -2456,6 +2665,20 @@ def land_boarded_ship(state: GameState, orbital: Orbital, landing_path: list[int
         return
     destination = destination_at_path(orbital, landing_path)
     if destination is not None:
+        ship_entity_id = legacy_entity_id(state, state.boarded_ship_id)
+        destination_entity_id = legacy_entity_id(state, destination.id)
+        if ship_entity_id and destination_entity_id:
+            result = attempt_rules_action(
+                state,
+                "Land",
+                {"actor": "player", "ship": ship_entity_id, "destination": destination_entity_id},
+            )
+            if result is not None and result.status == "failed":
+                state.message = f"Action failed: {result.error}"
+                return
+            if result is not None and result.status == "blocked":
+                start_action_messages(state, result)
+                return
         state.ship_locations[state.boarded_ship_id] = destination.id
         state.boarded_ship_id = None
 
@@ -2541,11 +2764,17 @@ def interaction_choice_label(state: GameState, choice: InteractionChoice) -> str
 
 
 def handle_interaction_choice(state: GameState, choice: InteractionChoice, choice_index: int) -> None:
-    rule = before_rule_for_choice(state, choice)
-    if rule is not None:
-        start_continue_message(state, rule.message, rule.on_complete)
+    result = interaction_action_attempt(state, choice)
+    if result is not None and result.status == "failed":
+        state.message = f"Action failed: {result.error}"
         state.interaction_index = None
         return
+    if result is not None and result.status == "blocked":
+        start_action_messages(state, result)
+        state.interaction_index = None
+        return
+    if choice.kind == "npc" and choice.interaction == "Examine":
+        result = None
     if choice.kind == "object" and choice.interaction == "Take":
         story_object = choice.target
         if isinstance(story_object, StoryObject):
@@ -2563,7 +2792,11 @@ def handle_interaction_choice(state: GameState, choice: InteractionChoice, choic
             state.interaction_index = None
             clear_notice(state)
             return
-    start_continue_message(state, interaction_description(choice))
+    if choice.kind == "ship" and choice.interaction == "Board":
+        start_action_messages(state, result, interaction_description(choice))
+        state.interaction_index = None
+        return
+    start_action_messages(state, result, interaction_description(choice))
     state.interaction_index = None
 
 
@@ -2593,15 +2826,29 @@ def use_item_on_target(state: GameState, target: StoryObject) -> None:
     if source is None:
         state.view = "inventory"
         return
-    for rule in source.use_rules:
-        if rule.target == target.id and fact_conditions_met(state, rule.when, rule.unless):
-            state.view = state.use_return_view
-            state.use_source_item_id = None
-            start_message_sequence(state, rule.messages, rule.on_complete)
-            return
+    source_entity_id = legacy_entity_id(state, source.id)
+    target_entity_id = legacy_entity_id(state, target.id)
+    result = None
+    if source_entity_id and target_entity_id:
+        result = attempt_rules_action(
+            state,
+            "Use",
+            {
+                "actor": "player",
+                "source": source_entity_id,
+                "target": target_entity_id,
+            },
+        )
     state.view = state.use_return_view
     state.use_source_item_id = None
-    start_continue_message(state, "Nothing happens.")
+    if result is not None and result.status == "failed":
+        state.message = f"Action failed: {result.error}"
+        return
+    messages = action_texts(result)
+    if messages:
+        start_message_sequence(state, messages)
+    else:
+        start_continue_message(state, "Nothing happens.")
 
 
 def before_rule_message(state: GameState, choice: InteractionChoice) -> str | None:
@@ -2621,6 +2868,13 @@ def destination_before_rule_message(state: GameState, destination: LandingOption
         if rule.interaction == "Enter" and fact_conditions_met(state, rule.when, rule.unless):
             return rule.message
     return None
+
+
+def attempt_enter_destination_action(state: GameState, destination: LandingOption):
+    destination_entity_id = legacy_entity_id(state, destination.id)
+    if destination_entity_id is None:
+        return None
+    return attempt_rules_action(state, "Enter", {"actor": "player", "destination": destination_entity_id})
 
 
 def enter_destination(state: GameState, destination: LandingOption) -> None:

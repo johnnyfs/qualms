@@ -174,6 +174,17 @@ class LegacyBehaviorTests(unittest.TestCase):
 
         self.assertEqual(self.state.continue_message, "We call him stupor for a reason.")
 
+    def test_npc_examine_preserves_examine_description(self) -> None:
+        bar = destination_by_ids(self.world, "mining-colony-5", "pointless-bar")
+        examine = next(choice for choice in dq.npc_choices_for_destination(self.state, bar) if choice.target.id == "stu" and choice.interaction == "Examine")
+
+        dq.handle_interaction_choice(self.state, examine, choice_index=0)
+
+        self.assertEqual(
+            self.state.continue_message,
+            "His real name is Stu, but you call him 'Stupor' because you are very clever.",
+        )
+
     def test_use_rule_sets_ship_control_after_message_sequence(self) -> None:
         portrait = dq.objects_by_id(self.world)["portrait-of-enrick"]
         console = dq.objects_by_id(self.world)["control-console"]
