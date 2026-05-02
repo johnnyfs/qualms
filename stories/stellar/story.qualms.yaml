@@ -3,7 +3,7 @@ id: stellar
 imports:
 - ../../stories/prelude/nova-qualms.qualms.yaml
 metadata:
-  legacy_id_map:
+  local_id_map:
     empty-system: empty-system
     bolorus: empty-system:bolorus
     abandoned-mining-platform: empty-system:bolorus:abandoned-mining-platform
@@ -52,7 +52,7 @@ story:
         y: 0.0
         hops: []
     metadata:
-      legacy_id: empty-system
+      local_id: empty-system
   - id: empty-system:bolorus
     kind: Planet
     fields:
@@ -65,8 +65,8 @@ story:
         parent: null
         default_landing_path: []
     metadata:
-      legacy_id: bolorus
-      legacy_type: Planet
+      local_id: bolorus
+      source_type: Planet
   - id: empty-system:bolorus:abandoned-mining-platform
     kind: Destination
     fields:
@@ -75,8 +75,8 @@ story:
         description: Solar-powered maintenance drones keep it minimally operational,
           but it could sink into the clouds any day now.
     metadata:
-      legacy_id: abandoned-mining-platform
-      legacy_kind: Destination
+      local_id: abandoned-mining-platform
+      display_kind: Destination
       port: false
       visible_when: []
       visible_unless: []
@@ -100,8 +100,8 @@ story:
           no life here to generate dust, you guess. There is however some truly sophisticated
           art on the wall.
     metadata:
-      legacy_id: rig-managers-office
-      legacy_kind: Destination
+      local_id: rig-managers-office
+      display_kind: Destination
       port: false
       visible_when: []
       visible_unless: []
@@ -127,7 +127,7 @@ story:
           "Actress." Under a blue lipstick print is a signature and the inscription:
           "From one hometown spawn to another -- stay inscrutable, <3 Andira Manara."'
     metadata:
-      legacy_id: art-on-the-wall
+      local_id: art-on-the-wall
       interactions:
       - Examine
       - Take
@@ -163,8 +163,8 @@ story:
         - airlock
         - lunar-surface
     metadata:
-      legacy_id: rainbow
-      legacy_type: Moon
+      local_id: rainbow
+      source_type: Moon
   - id: empty-system:rainbow:mining-colony-5
     kind: Destination
     fields:
@@ -174,8 +174,8 @@ story:
           one through four. If life here is any indication, they must have died of
           boredom.
     metadata:
-      legacy_id: mining-colony-5
-      legacy_kind: Destination
+      local_id: mining-colony-5
+      display_kind: Destination
       port: false
       visible_when: []
       visible_unless: []
@@ -219,8 +219,8 @@ story:
         name: Pointless Bar
         description: Alcohol is a depressant.
     metadata:
-      legacy_id: pointless-bar
-      legacy_kind: Destination
+      local_id: pointless-bar
+      display_kind: Destination
       port: false
       visible_when: []
       visible_unless: []
@@ -245,7 +245,7 @@ story:
         name: Portrait of Enrick
         description: A portrait of your Enrick, your old guardian hangs on the wall.
     metadata:
-      legacy_id: portrait-of-enrick
+      local_id: portrait-of-enrick
       interactions:
       - Examine
       - Take
@@ -300,7 +300,7 @@ story:
         examine_description: His real name is Stu, but you call him 'Stupor' because
           you are very clever.
     metadata:
-      legacy_id: stu
+      local_id: stu
       interactions:
       - Examine
       - Talk
@@ -326,8 +326,8 @@ story:
         name: Pointless Settlement
         description: It keeps us all alive, for some reason.
     metadata:
-      legacy_id: pointless-settlement
-      legacy_kind: Destination
+      local_id: pointless-settlement
+      display_kind: Destination
       port: false
       visible_when: []
       visible_unless: []
@@ -350,8 +350,8 @@ story:
         description: Just enough room to sleep, with a fold-out desk and chair for
           reading and a collapsible combination toilet and shower.
     metadata:
-      legacy_id: your-place
-      legacy_kind: Destination
+      local_id: your-place
+      display_kind: Destination
       port: false
       visible_when: []
       visible_unless: []
@@ -373,7 +373,7 @@ story:
         name: Your journal
         description: Everyone hates me, etc.
     metadata:
-      legacy_id: your-journal
+      local_id: your-journal
       interactions:
       - Examine
       collectable: false
@@ -387,8 +387,8 @@ story:
         name: Airlock
         description: Connects the dreary dome to the even drearier lunar surface.
     metadata:
-      legacy_id: airlock
-      legacy_kind: Destination
+      local_id: airlock
+      display_kind: Destination
       port: false
       visible_when: []
       visible_unless: []
@@ -416,7 +416,7 @@ story:
         description: An exciting name for what is actually just the minimum amount
           of kaptex necessary to keep you from dying immediately.
     metadata:
-      legacy_id: spare-expedition-suit
+      local_id: spare-expedition-suit
       interactions:
       - Examine
       - Take
@@ -447,8 +447,8 @@ story:
         name: Lunar Surface
         description: Barren.
     metadata:
-      legacy_id: lunar-surface
-      legacy_kind: Destination
+      local_id: lunar-surface
+      display_kind: Destination
       port: false
       visible_when: []
       visible_unless: []
@@ -486,8 +486,8 @@ story:
         name: Abandoned Quarry
         description: Abandoned for a reason.
     metadata:
-      legacy_id: abandoned-quarry
-      legacy_kind: Destination
+      local_id: abandoned-quarry
+      display_kind: Destination
       port: false
       visible_when: []
       visible_unless: []
@@ -509,8 +509,8 @@ story:
         name: Active Mine
         description: You picked a good day to play hookie.
     metadata:
-      legacy_id: active-mine
-      legacy_kind: Destination
+      local_id: active-mine
+      display_kind: Destination
       port: false
       visible_when: []
       visible_unless: []
@@ -556,8 +556,8 @@ story:
         name: Impact Crater
         description: Utter destruction.
     metadata:
-      legacy_id: impact-crater
-      legacy_kind: Destination
+      local_id: impact-crater
+      display_kind: Destination
       port: false
       visible_when:
       - ship:canary:at:impact-crater
@@ -584,7 +584,7 @@ story:
       Vehicle:
         abilities: []
     metadata:
-      legacy_id: canary
+      local_id: canary
       unlock: true
       controlled: false
       equipment_slots: []
@@ -637,7 +637,7 @@ story:
           a generation ago. There's a stick and a hud and a windshield, and a nav
           map on your right that suggests it's jump-capable.
     metadata:
-      legacy_id: control-console
+      local_id: control-console
       interactions:
       - Examine
       - Power up
@@ -666,8 +666,8 @@ story:
         name: Collapsed Entrance
         description: There's no way anyone survived this.
     metadata:
-      legacy_id: collapsed-entrance
-      legacy_kind: Destination
+      local_id: collapsed-entrance
+      display_kind: Destination
       port: false
       visible_when:
       - ship:canary:at:impact-crater

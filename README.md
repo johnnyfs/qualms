@@ -10,7 +10,7 @@ Technical direction now lives in `specs/`:
 
 - `specs/rules-engine.md`: runtime model, UML-style class/interface sketch, and action resolution sequence.
 - `specs/story-yaml-schema.md`: rigorous YAML schema specification for engine definitions, prelude definitions, and story content.
-- `specs/migration-plan.md`: plan for migrating current story data and the curses parser/engine toward the new model.
+- `specs/runtime-roadmap.md`: next implementation steps for tightening the YAML-driven runtime and editor.
 
 `story_declarative.txt` is an older design sketch. It is useful context, but it currently mixes engine primitives, nova-specific content, and implementation notes more than the new specs should.
 
@@ -20,7 +20,7 @@ Technical direction now lives in `specs/`:
 - `stories/`: active story data. The current story is `stories/stellar/story.qualms.yaml`.
 - `curses/`: maintained text interface for playing and editing the story graph.
 - `godot/`: paused 2D orbital-flight prototype; kept for possible future interface work.
-- `examples/`: valid older story datasets kept for reference.
+- `examples/`: valid YAML sample story datasets kept for reference.
 
 The current story model defines systems, star types, graph hops, orbitals (`Planet`, `Moon`, `Station`), recursive local destinations, objects that support interactions such as examine, take, or use, NPCs that support examine and talk, destination sequences, and simple fact-gated before rules.
 
@@ -50,10 +50,10 @@ Run against another story directory:
 ./run.sh ./stories/stellar
 ```
 
-The game reads and writes `story.qualms.yaml` inside that directory. You can still pass a direct legacy JSON file path for old examples and conversion checks:
+The game reads and writes `story.qualms.yaml` inside that directory. Sample stories can be run by passing their directory:
 
 ```sh
-./run.sh ./examples/blank/story_systems.json
+./run.sh ./examples/blank
 ```
 
 If the YAML data path is missing or empty, the game creates a blank YAML world with one empty system so you can start authoring in-game.
@@ -64,7 +64,7 @@ Validate story data without launching curses:
 
 ```sh
 ./run.sh --validate
-./run.sh ./examples/sol-proof/story_systems.json --validate
+./run.sh ./examples/sol-proof --validate
 ```
 
 Dump the defined narrative surface:

@@ -1,50 +1,38 @@
 from __future__ import annotations
 
 import re
-import tempfile
 from pathlib import Path
 from typing import Any
 
 import yaml
-
-from .core import GameDefinition
-from .yaml_loader import load_game_definition
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 NOVA_PRELUDE = PROJECT_ROOT / "stories" / "prelude" / "nova-qualms.qualms.yaml"
 
 
-def legacy_world_to_game_definition(world: Any) -> GameDefinition:
-    yaml_data = legacy_world_to_yaml_data(world, import_path=str(NOVA_PRELUDE))
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = Path(tmpdir) / "story.qualms.yaml"
-        path.write_text(yaml.safe_dump(yaml_data, sort_keys=False, allow_unicode=False), encoding="utf-8")
-        return load_game_definition(path)
-
-
-def legacy_world_to_yaml_data(world: Any, import_path: str = "../prelude/nova-qualms.qualms.yaml") -> dict[str, Any]:
-    converter = LegacyConverter(import_path)
+def story_world_to_yaml_data(world: Any, import_path: str = "../prelude/nova-qualms.qualms.yaml") -> dict[str, Any]:
+    converter = StoryYamlConverter(import_path)
     return converter.convert(world)
 
 
-def write_legacy_world_yaml(world: Any, output_path: str | Path, import_path: str | None = None) -> None:
+def write_story_world_yaml(world: Any, output_path: str | Path, import_path: str | None = None) -> None:
     output = Path(output_path)
     effective_import = import_path
     if effective_import is None:
         effective_import = relative_import(output.parent, NOVA_PRELUDE)
-    data = legacy_world_to_yaml_data(world, effective_import)
+    data = story_world_to_yaml_data(world, effective_import)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=False), encoding="utf-8")
 
 
-class LegacyConverter:
+class StoryYamlConverter:
     def __init__(self, import_path: str):
         self.import_path = import_path
         self.entities: list[dict[str, Any]] = []
         self.entity_by_id: dict[str, dict[str, Any]] = {}
         self.assertions: list[dict[str, Any]] = []
-        self.legacy_id_map: dict[str, str] = {}
+        self.local_id_map: dict[str, str] = {}
         self.pending_rules: list[tuple[str, str, Any]] = []
 
     def convert(self, world: Any) -> dict[str, Any]:
@@ -61,12 +49,12 @@ class LegacyConverter:
             "qualms": "0.1",
             "id": "stellar",
             "imports": [self.import_path],
-            "metadata": {"legacy_id_map": self.legacy_id_map},
+            "metadata": {"local_id_map": self.local_id_map},
             "story": {
                 "start": {
                     "actor": "player",
                     "system": safe_id(world.start_system),
-                    **({"location": self.lookup_legacy_id(world.start_destination_ids[-1])} if world.start_destination_ids else {}),
+                    **({"location": self.lookup_local_id(world.start_destination_ids[-1])} if world.start_destination_ids else {}),
                 },
                 "entities": self.entities,
                 "assertions": self.assertions,
@@ -76,7 +64,7 @@ class LegacyConverter:
 
     def convert_system(self, system: Any) -> None:
         system_id = safe_id(system.id)
-        self.remember_legacy_id(system.id, system_id)
+        self.remember_local_id(system.id, system_id)
         self.add_entity(
             system_id,
             "System",
@@ -89,14 +77,14 @@ class LegacyConverter:
                     "hops": [safe_id(hop_id) for hop_id in system.hops],
                 },
             },
-            metadata={"legacy_id": system.id},
+            metadata={"local_id": system.id},
         )
         for orbital in system.orbitals:
             self.convert_orbital(system, orbital, system_id)
 
     def convert_orbital(self, system: Any, orbital: Any, system_entity_id: str) -> None:
         orbital_id = safe_id(f"{system.id}:{orbital.id}")
-        self.remember_legacy_id(orbital.id, orbital_id)
+        self.remember_local_id(orbital.id, orbital_id)
         kind = orbital.type if orbital.type in {"Planet", "Moon", "Station"} else "Planet"
         parent = safe_id(f"{system.id}:{orbital.parent}") if orbital.parent else None
         self.add_entity(
@@ -110,7 +98,7 @@ class LegacyConverter:
                     "default_landing_path": list(orbital.default_landing_destination_ids),
                 },
             },
-            metadata={"legacy_id": orbital.id, "legacy_type": orbital.type},
+            metadata={"local_id": orbital.id, "source_type": orbital.type},
         )
         self.assert_relation("At", [{"ref": orbital_id}, {"ref": system_entity_id}])
         for option in orbital.landing_options:
@@ -118,14 +106,14 @@ class LegacyConverter:
 
     def convert_destination(self, option: Any, parent_entity_id: str, path_parts: list[str]) -> None:
         destination_id = safe_id(":".join(path_parts))
-        self.remember_legacy_id(option.id, destination_id)
+        self.remember_local_id(option.id, destination_id)
         self.add_entity(
             destination_id,
             "Destination",
             fields={"Presentable": {"name": option.name, "description": option.description}},
             metadata={
-                "legacy_id": option.id,
-                "legacy_kind": option.kind,
+                "local_id": option.id,
+                "display_kind": option.kind,
                 "port": option.port,
                 "visible_when": list(option.visible_when),
                 "visible_unless": list(option.visible_unless),
@@ -144,7 +132,7 @@ class LegacyConverter:
 
     def convert_object(self, story_object: Any, location_id: str) -> None:
         object_id = safe_id(f"{location_id}:object:{story_object.id}")
-        self.remember_legacy_id(story_object.id, object_id)
+        self.remember_local_id(story_object.id, object_id)
         traits: list[dict[str, Any]] = []
         if story_object.collectable:
             traits.append({"id": "Portable"})
@@ -158,7 +146,7 @@ class LegacyConverter:
             traits=traits,
             fields={"Presentable": {"name": story_object.name, "description": story_object.description}},
             metadata={
-                "legacy_id": story_object.id,
+                "local_id": story_object.id,
                 "interactions": list(story_object.interactions),
                 "collectable": story_object.collectable,
                 "visible_when": list(story_object.visible_when),
@@ -170,7 +158,7 @@ class LegacyConverter:
 
     def convert_npc(self, npc: Any, location_id: str) -> None:
         npc_id = safe_id(f"{location_id}:npc:{npc.id}")
-        self.remember_legacy_id(npc.id, npc_id)
+        self.remember_local_id(npc.id, npc_id)
         self.add_entity(
             npc_id,
             "NPC",
@@ -182,7 +170,7 @@ class LegacyConverter:
                 }
             },
             metadata={
-                "legacy_id": npc.id,
+                "local_id": npc.id,
                 "interactions": list(npc.interactions),
                 "visible_when": list(npc.visible_when),
                 "visible_unless": list(npc.visible_unless),
@@ -193,7 +181,7 @@ class LegacyConverter:
 
     def convert_ship(self, ship: Any, location_id: str) -> None:
         ship_id = safe_id(ship.id)
-        self.remember_legacy_id(ship.id, ship_id)
+        self.remember_local_id(ship.id, ship_id)
         self.add_entity(
             ship_id,
             "Ship",
@@ -202,7 +190,7 @@ class LegacyConverter:
                 "Vehicle": {"abilities": list(ship.abilities)},
             },
             metadata={
-                "legacy_id": ship.id,
+                "local_id": ship.id,
                 "unlock": ship.unlock,
                 "controlled": ship.controlled,
                 "equipment_slots": list(ship.equipment_slots),
@@ -226,15 +214,15 @@ class LegacyConverter:
             rules = entity.setdefault("rules", [])
             if kind == "destination":
                 rules.append(visited_rule(source.id))
-                rules.extend(before_rules(entity_id, "Enter", source.before, self.legacy_id_map))
-                rules.extend(sequence_rules(entity_id, source.sequences, self.legacy_id_map))
+                rules.extend(before_rules(entity_id, "Enter", source.before, self.local_id_map))
+                rules.extend(sequence_rules(entity_id, source.sequences, self.local_id_map))
             elif kind == "object":
-                rules.extend(before_rules(entity_id, "object", source.before, self.legacy_id_map))
-                rules.extend(use_rules(entity_id, source.use_rules, self.legacy_id_map))
+                rules.extend(before_rules(entity_id, "object", source.before, self.local_id_map))
+                rules.extend(use_rules(entity_id, source.use_rules, self.local_id_map))
             elif kind == "npc":
-                rules.extend(before_rules(entity_id, "npc", source.before, self.legacy_id_map))
+                rules.extend(before_rules(entity_id, "npc", source.before, self.local_id_map))
             elif kind == "ship":
-                rules.extend(before_rules(entity_id, "ship", source.before, self.legacy_id_map))
+                rules.extend(before_rules(entity_id, "ship", source.before, self.local_id_map))
 
     def add_entity(
         self,
@@ -245,7 +233,7 @@ class LegacyConverter:
         metadata: dict[str, Any] | None = None,
     ) -> None:
         if entity_id in self.entity_by_id:
-            raise ValueError(f"duplicate converted entity {entity_id}")
+            raise ValueError(f"duplicate story entity {entity_id}")
         entity: dict[str, Any] = {"id": entity_id, "kind": kind}
         if traits:
             entity["traits"] = traits
@@ -259,18 +247,18 @@ class LegacyConverter:
     def assert_relation(self, relation: str, args: list[dict[str, Any]]) -> None:
         self.assertions.append({"relation": relation, "args": args})
 
-    def remember_legacy_id(self, legacy_id: str, entity_id: str) -> None:
-        self.legacy_id_map.setdefault(legacy_id, entity_id)
+    def remember_local_id(self, local_id: str, entity_id: str) -> None:
+        self.local_id_map.setdefault(local_id, entity_id)
 
-    def lookup_legacy_id(self, legacy_id: str) -> str:
-        return self.legacy_id_map.get(legacy_id, safe_id(legacy_id))
+    def lookup_local_id(self, local_id: str) -> str:
+        return self.local_id_map.get(local_id, safe_id(local_id))
 
 
 def before_rules(entity_id: str, target_kind: str, rules: tuple[Any, ...], id_map: dict[str, str]) -> list[dict[str, Any]]:
-    converted: list[dict[str, Any]] = []
+    entries: list[dict[str, Any]] = []
     for index, rule in enumerate(rules):
         action, args = action_match_for_interaction(rule.interaction, entity_id, target_kind)
-        converted.append(
+        entries.append(
             {
                 "id": safe_id(f"before:{rule.interaction}:{index}"),
                 "phase": "before",
@@ -280,14 +268,14 @@ def before_rules(entity_id: str, target_kind: str, rules: tuple[Any, ...], id_ma
                 "control": "stop",
             }
         )
-    return converted
+    return entries
 
 
 def use_rules(entity_id: str, rules: tuple[Any, ...], id_map: dict[str, str]) -> list[dict[str, Any]]:
-    converted: list[dict[str, Any]] = []
+    entries: list[dict[str, Any]] = []
     for index, rule in enumerate(rules):
         target_id = id_map.get(rule.target, safe_id(rule.target))
-        converted.append(
+        entries.append(
             {
                 "id": safe_id(f"use:{rule.target}:{index}"),
                 "phase": "instead",
@@ -303,13 +291,13 @@ def use_rules(entity_id: str, rules: tuple[Any, ...], id_map: dict[str, str]) ->
                 "control": "stop",
             }
         )
-    return converted
+    return entries
 
 
 def sequence_rules(entity_id: str, sequences: tuple[Any, ...], id_map: dict[str, str]) -> list[dict[str, Any]]:
-    converted: list[dict[str, Any]] = []
+    entries: list[dict[str, Any]] = []
     for sequence in sequences:
-        converted.append(
+        entries.append(
             {
                 "id": safe_id(f"sequence:{sequence.id}"),
                 "phase": "after",
@@ -318,15 +306,15 @@ def sequence_rules(entity_id: str, sequences: tuple[Any, ...], id_map: dict[str,
                 "effects": [{"emit": {"text": message}} for message in sequence.messages] + outcome_effects(sequence.on_complete, id_map),
             }
         )
-    return converted
+    return entries
 
 
-def visited_rule(legacy_destination_id: str) -> dict[str, Any]:
+def visited_rule(local_destination_id: str) -> dict[str, Any]:
     return {
-        "id": safe_id(f"visited:{legacy_destination_id}"),
+        "id": safe_id(f"visited:{local_destination_id}"),
         "phase": "after",
         "match": {"action": "Enter", "args": {"destination": {"var": "this"}}},
-        "effects": [{"set_fact": {"id": f"visited:destination:{legacy_destination_id}"}}],
+        "effects": [{"set_fact": {"id": f"visited:destination:{local_destination_id}"}}],
     }
 
 

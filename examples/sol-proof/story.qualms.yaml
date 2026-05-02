@@ -1,0 +1,1314 @@
+qualms: '0.1'
+id: stellar
+imports:
+- ../../stories/prelude/nova-qualms.qualms.yaml
+metadata:
+  local_id_map:
+    sol-proof: sol-proof
+    mercury: sol-proof:mercury
+    terminus-bar: sol-proof:mercury:terminus-bar
+    caloris-rim: sol-proof:mercury:caloris-rim
+    fire-pits: sol-proof:mercury:fire-pits
+    venus: sol-proof:venus
+    pearl-room: sol-proof:venus:pearl-room
+    cloud-deck: sol-proof:venus:cloud-deck
+    earth: sol-proof:earth
+    blue-anchor: sol-proof:earth:blue-anchor
+    old-harbor: sol-proof:earth:old-harbor
+    statue-of-liberty: sol-proof:earth:statue-of-liberty
+    luna: sol-proof:luna
+    gray-mare: sol-proof:luna:gray-mare
+    tranquility: sol-proof:luna:tranquility
+    mars: sol-proof:mars
+    rust-choir: sol-proof:mars:rust-choir
+    valles-gate: sol-proof:mars:valles-gate
+    ceres: sol-proof:ceres
+    stone-cup: sol-proof:ceres:stone-cup
+    dawn-vault: sol-proof:ceres:dawn-vault
+    belt-exchange: sol-proof:belt-exchange
+    ledger-bar: sol-proof:belt-exchange:ledger-bar
+    spin-garden: sol-proof:belt-exchange:spin-garden
+    rig-manager-s-office: sol-proof:belt-exchange:rig-manager-s-office
+    admire-the-decor: sol-proof:belt-exchange:rig-manager-s-office:object:admire-the-decor
+    jupiter: sol-proof:jupiter
+    red-spotter: sol-proof:jupiter:red-spotter
+    amalthea-view: sol-proof:jupiter:amalthea-view
+    ganymede: sol-proof:ganymede
+    ice-cellar: sol-proof:ganymede:ice-cellar
+    green-dome: sol-proof:ganymede:green-dome
+    barnard-gate: barnard-gate
+    cinder: barnard-gate:cinder
+    red-wick: barnard-gate:cinder:red-wick
+    ash-flats: barnard-gate:cinder:ash-flats
+    gatehouse: barnard-gate:gatehouse
+    lock-nine: barnard-gate:gatehouse:lock-nine
+    mirror-walk: barnard-gate:gatehouse:mirror-walk
+    sirius-wake: sirius-wake
+    whiteharbor: sirius-wake:whiteharbor
+    blue-knife: sirius-wake:whiteharbor:blue-knife
+    dazzle-deck: sirius-wake:whiteharbor:dazzle-deck
+    marrow: sirius-wake:marrow
+    gold-room: sirius-wake:marrow:gold-room
+    core-lift: sirius-wake:marrow:core-lift
+    wolf-359: wolf-359
+    flarehold: wolf-359:flarehold
+    the-shutter: wolf-359:flarehold:the-shutter
+    storm-blind: wolf-359:flarehold:storm-blind
+    eos-chain: eos-chain
+    thread: eos-chain:thread
+    spindle: eos-chain:thread:spindle
+    tether-view: eos-chain:thread:tether-view
+story:
+  start:
+    actor: player
+    system: sol-proof
+  entities:
+  - id: player
+    kind: Player
+    fields:
+      Presentable:
+        name: Player
+        description: ''
+    metadata:
+      role: player
+  - id: sol-proof
+    kind: System
+    fields:
+      Presentable:
+        name: Sol Proof
+        description: ''
+      StarSystem:
+        star_type: G-type main sequence
+        x: 0.0
+        y: 0.0
+        hops:
+        - barnard-gate
+        - sirius-wake
+    metadata:
+      local_id: sol-proof
+  - id: sol-proof:mercury
+    kind: Planet
+    fields:
+      Presentable:
+        name: Mercury
+        description: Sun-blasted contracts and quiet survey crews.
+      OrbitalBody:
+        orbital_type: Planet
+        parent: null
+        default_landing_path: []
+    metadata:
+      local_id: mercury
+      source_type: Planet
+  - id: sol-proof:mercury:terminus-bar
+    kind: Destination
+    fields:
+      Presentable:
+        name: Terminus Bar
+        description: Miners trade heat-sick rumors under shielded glass.
+    metadata:
+      local_id: terminus-bar
+      display_kind: Bar
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:terminus-bar
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:terminus-bar
+  - id: sol-proof:mercury:caloris-rim
+    kind: Destination
+    fields:
+      Presentable:
+        name: Caloris Rim
+        description: A crater overlook where the horizon bends hard.
+    metadata:
+      local_id: caloris-rim
+      display_kind: Tourist Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:caloris-rim
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:caloris-rim
+  - id: sol-proof:mercury:fire-pits
+    kind: Destination
+    fields:
+      Presentable:
+        name: Fire Pits
+        description: A galactically notorious extremophile fight club.
+    metadata:
+      local_id: fire-pits
+      display_kind: Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:fire-pits
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:fire-pits
+  - id: sol-proof:venus
+    kind: Planet
+    fields:
+      Presentable:
+        name: Venus
+        description: Cloud cities drift above a sealed furnace.
+      OrbitalBody:
+        orbital_type: Planet
+        parent: null
+        default_landing_path: []
+    metadata:
+      local_id: venus
+      source_type: Planet
+  - id: sol-proof:venus:pearl-room
+    kind: Destination
+    fields:
+      Presentable:
+        name: Pearl Room
+        description: Pilots drink under windows full of yellow stormlight.
+    metadata:
+      local_id: pearl-room
+      display_kind: Bar
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:pearl-room
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:pearl-room
+  - id: sol-proof:venus:cloud-deck
+    kind: Destination
+    fields:
+      Presentable:
+        name: Cloud Deck
+        description: A public rail above the sulfur haze.
+    metadata:
+      local_id: cloud-deck
+      display_kind: Tourist Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:cloud-deck
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:cloud-deck
+  - id: sol-proof:earth
+    kind: Planet
+    fields:
+      Presentable:
+        name: Earth
+        description: Old money, crowded ports, and licensed violence.
+      OrbitalBody:
+        orbital_type: Planet
+        parent: null
+        default_landing_path: []
+    metadata:
+      local_id: earth
+      source_type: Planet
+  - id: sol-proof:earth:blue-anchor
+    kind: Destination
+    fields:
+      Presentable:
+        name: Blue Anchor
+        description: Bounty clerks and dockhands keep separate corners.
+    metadata:
+      local_id: blue-anchor
+      display_kind: Bar
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:blue-anchor
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:blue-anchor
+  - id: sol-proof:earth:old-harbor
+    kind: Destination
+    fields:
+      Presentable:
+        name: Old Harbor
+        description: A preserved coast under too many cameras.
+    metadata:
+      local_id: old-harbor
+      display_kind: Tourist Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:old-harbor
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:old-harbor
+  - id: sol-proof:earth:statue-of-liberty
+    kind: Destination
+    fields:
+      Presentable:
+        name: Statue of Liberty
+        description: Quaint.
+    metadata:
+      local_id: statue-of-liberty
+      display_kind: Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:statue-of-liberty
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:statue-of-liberty
+  - id: sol-proof:luna
+    kind: Moon
+    fields:
+      Presentable:
+        name: Luna
+        description: Low-gravity ports and hard vacuum etiquette.
+      OrbitalBody:
+        orbital_type: Moon
+        parent: sol-proof:earth
+        default_landing_path: []
+    metadata:
+      local_id: luna
+      source_type: Moon
+  - id: sol-proof:luna:gray-mare
+    kind: Destination
+    fields:
+      Presentable:
+        name: Gray Mare
+        description: Quiet booths, cheap oxygen, expensive secrets.
+    metadata:
+      local_id: gray-mare
+      display_kind: Bar
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:gray-mare
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:gray-mare
+  - id: sol-proof:luna:tranquility
+    kind: Destination
+    fields:
+      Presentable:
+        name: Tranquility
+        description: A fenced relic field watched by bored guards.
+    metadata:
+      local_id: tranquility
+      display_kind: Tourist Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:tranquility
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:tranquility
+  - id: sol-proof:mars
+    kind: Planet
+    fields:
+      Presentable:
+        name: Mars
+        description: Red dust, veteran syndicates, and frontier courts.
+      OrbitalBody:
+        orbital_type: Planet
+        parent: null
+        default_landing_path: []
+    metadata:
+      local_id: mars
+      source_type: Planet
+  - id: sol-proof:mars:rust-choir
+    kind: Destination
+    fields:
+      Presentable:
+        name: Rust Choir
+        description: A loud cellar where warrants change hands.
+    metadata:
+      local_id: rust-choir
+      display_kind: Bar
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:rust-choir
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:rust-choir
+  - id: sol-proof:mars:valles-gate
+    kind: Destination
+    fields:
+      Presentable:
+        name: Valles Gate
+        description: A canyon lift descending into red shadow.
+    metadata:
+      local_id: valles-gate
+      display_kind: Tourist Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:valles-gate
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:valles-gate
+  - id: sol-proof:ceres
+    kind: Planet
+    fields:
+      Presentable:
+        name: Ceres
+        description: A hollowed rock with belt politics in every corridor.
+      OrbitalBody:
+        orbital_type: Planet
+        parent: null
+        default_landing_path: []
+    metadata:
+      local_id: ceres
+      source_type: Planet
+  - id: sol-proof:ceres:stone-cup
+    kind: Destination
+    fields:
+      Presentable:
+        name: Stone Cup
+        description: Belters argue routes over bitter recycled gin.
+    metadata:
+      local_id: stone-cup
+      display_kind: Bar
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:stone-cup
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:stone-cup
+  - id: sol-proof:ceres:dawn-vault
+    kind: Destination
+    fields:
+      Presentable:
+        name: Dawn Vault
+        description: An old probe shrine behind pressure glass.
+    metadata:
+      local_id: dawn-vault
+      display_kind: Tourist Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:dawn-vault
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:dawn-vault
+  - id: sol-proof:belt-exchange
+    kind: Station
+    fields:
+      Presentable:
+        name: Belt Exchange
+        description: A freehold market parked between claim lines.
+      OrbitalBody:
+        orbital_type: Station
+        parent: null
+        default_landing_path: []
+    metadata:
+      local_id: belt-exchange
+      source_type: Station
+  - id: sol-proof:belt-exchange:ledger-bar
+    kind: Destination
+    fields:
+      Presentable:
+        name: Ledger Bar
+        description: Every table has a broker, a debtor, or both.
+    metadata:
+      local_id: ledger-bar
+      display_kind: Bar
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:ledger-bar
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:ledger-bar
+  - id: sol-proof:belt-exchange:spin-garden
+    kind: Destination
+    fields:
+      Presentable:
+        name: Spin Garden
+        description: Three trees grown under contractual sunlight.
+    metadata:
+      local_id: spin-garden
+      display_kind: Tourist Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:spin-garden
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:spin-garden
+  - id: sol-proof:belt-exchange:rig-manager-s-office
+    kind: Destination
+    fields:
+      Presentable:
+        name: Rig Manager's Office
+        description: A cramped office with rig schedules, stale coffee, and art on
+          the wall.
+    metadata:
+      local_id: rig-manager-s-office
+      display_kind: Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:rig-manager-s-office
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:rig-manager-s-office
+  - id: sol-proof:belt-exchange:rig-manager-s-office:object:admire-the-decor
+    kind: StoryObject
+    fields:
+      Presentable:
+        name: Admire the decor
+        description: A poster pin-up of a scantily clad Antarran "actress", complete
+          with blue lipstick kiss. "From one hometown spawn to another -- Adira Kiwalanali".
+    metadata:
+      local_id: admire-the-decor
+      interactions:
+      - Examine
+      collectable: false
+      visible_when: []
+      visible_unless: []
+    rules: []
+  - id: sol-proof:jupiter
+    kind: Planet
+    fields:
+      Presentable:
+        name: Jupiter
+        description: Deep gravity, huge storms, and corporate patrols.
+      OrbitalBody:
+        orbital_type: Planet
+        parent: null
+        default_landing_path: []
+    metadata:
+      local_id: jupiter
+      source_type: Planet
+  - id: sol-proof:jupiter:red-spotter
+    kind: Destination
+    fields:
+      Presentable:
+        name: Red Spotter
+        description: Storm tourists and repo crews share the rail.
+    metadata:
+      local_id: red-spotter
+      display_kind: Bar
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:red-spotter
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:red-spotter
+  - id: sol-proof:jupiter:amalthea-view
+    kind: Destination
+    fields:
+      Presentable:
+        name: Amalthea View
+        description: A shielded balcony facing the inner moons.
+    metadata:
+      local_id: amalthea-view
+      display_kind: Tourist Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:amalthea-view
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:amalthea-view
+  - id: sol-proof:ganymede
+    kind: Moon
+    fields:
+      Presentable:
+        name: Ganymede
+        description: Ice ports, farm domes, and careful neutrality.
+      OrbitalBody:
+        orbital_type: Moon
+        parent: sol-proof:jupiter
+        default_landing_path: []
+    metadata:
+      local_id: ganymede
+      source_type: Moon
+  - id: sol-proof:ganymede:ice-cellar
+    kind: Destination
+    fields:
+      Presentable:
+        name: Ice Cellar
+        description: Warm lamps, cold walls, no open weapons.
+    metadata:
+      local_id: ice-cellar
+      display_kind: Bar
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:ice-cellar
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:ice-cellar
+  - id: sol-proof:ganymede:green-dome
+    kind: Destination
+    fields:
+      Presentable:
+        name: Green Dome
+        description: A farm arcology smelling faintly of soil.
+    metadata:
+      local_id: green-dome
+      display_kind: Tourist Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:green-dome
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:green-dome
+  - id: barnard-gate
+    kind: System
+    fields:
+      Presentable:
+        name: Barnard Gate
+        description: ''
+      StarSystem:
+        star_type: M-type red dwarf
+        x: -250000.0
+        y: 90000.0
+        hops:
+        - sol-proof
+        - wolf-359
+    metadata:
+      local_id: barnard-gate
+  - id: barnard-gate:cinder
+    kind: Planet
+    fields:
+      Presentable:
+        name: Cinder
+        description: A cold red world with stubborn refinery towns.
+      OrbitalBody:
+        orbital_type: Planet
+        parent: null
+        default_landing_path: []
+    metadata:
+      local_id: cinder
+      source_type: Planet
+  - id: barnard-gate:cinder:red-wick
+    kind: Destination
+    fields:
+      Presentable:
+        name: Red Wick
+        description: Shift bosses drink beside silent bounty crews.
+    metadata:
+      local_id: red-wick
+      display_kind: Bar
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:red-wick
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:red-wick
+  - id: barnard-gate:cinder:ash-flats
+    kind: Destination
+    fields:
+      Presentable:
+        name: Ash Flats
+        description: A rust-black plain under a dim red sun.
+    metadata:
+      local_id: ash-flats
+      display_kind: Tourist Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:ash-flats
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:ash-flats
+  - id: barnard-gate:gatehouse
+    kind: Station
+    fields:
+      Presentable:
+        name: Gatehouse
+        description: A customs wheel watching the Solward lane.
+      OrbitalBody:
+        orbital_type: Station
+        parent: null
+        default_landing_path: []
+    metadata:
+      local_id: gatehouse
+      source_type: Station
+  - id: barnard-gate:gatehouse:lock-nine
+    kind: Destination
+    fields:
+      Presentable:
+        name: Lock Nine
+        description: Inspectors pretend not to hear useful things.
+    metadata:
+      local_id: lock-nine
+      display_kind: Bar
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:lock-nine
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:lock-nine
+  - id: barnard-gate:gatehouse:mirror-walk
+    kind: Destination
+    fields:
+      Presentable:
+        name: Mirror Walk
+        description: A viewport ring facing old traffic scars.
+    metadata:
+      local_id: mirror-walk
+      display_kind: Tourist Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:mirror-walk
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:mirror-walk
+  - id: sirius-wake
+    kind: System
+    fields:
+      Presentable:
+        name: Sirius Wake
+        description: ''
+      StarSystem:
+        star_type: A-type main sequence
+        x: 320000.0
+        y: -60000.0
+        hops:
+        - sol-proof
+        - eos-chain
+    metadata:
+      local_id: sirius-wake
+  - id: sirius-wake:whiteharbor
+    kind: Station
+    fields:
+      Presentable:
+        name: Whiteharbor
+        description: A bright transfer port with expensive silence.
+      OrbitalBody:
+        orbital_type: Station
+        parent: null
+        default_landing_path: []
+    metadata:
+      local_id: whiteharbor
+      source_type: Station
+  - id: sirius-wake:whiteharbor:blue-knife
+    kind: Destination
+    fields:
+      Presentable:
+        name: Blue Knife
+        description: Couriers trade sealed favors over clear liquor.
+    metadata:
+      local_id: blue-knife
+      display_kind: Bar
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:blue-knife
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:blue-knife
+  - id: sirius-wake:whiteharbor:dazzle-deck
+    kind: Destination
+    fields:
+      Presentable:
+        name: Dazzle Deck
+        description: Filtered glass against a punishing white star.
+    metadata:
+      local_id: dazzle-deck
+      display_kind: Tourist Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:dazzle-deck
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:dazzle-deck
+  - id: sirius-wake:marrow
+    kind: Planet
+    fields:
+      Presentable:
+        name: Marrow
+        description: A mined shell with polished corporate districts.
+      OrbitalBody:
+        orbital_type: Planet
+        parent: null
+        default_landing_path: []
+    metadata:
+      local_id: marrow
+      source_type: Planet
+  - id: sirius-wake:marrow:gold-room
+    kind: Destination
+    fields:
+      Presentable:
+        name: Gold Room
+        description: Everything costs too much, including names.
+    metadata:
+      local_id: gold-room
+      display_kind: Bar
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:gold-room
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:gold-room
+  - id: sirius-wake:marrow:core-lift
+    kind: Destination
+    fields:
+      Presentable:
+        name: Core Lift
+        description: A glass descent through exhausted strata.
+    metadata:
+      local_id: core-lift
+      display_kind: Tourist Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:core-lift
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:core-lift
+  - id: wolf-359
+    kind: System
+    fields:
+      Presentable:
+        name: Wolf 359
+        description: ''
+      StarSystem:
+        star_type: M-type flare star
+        x: -470000.0
+        y: 160000.0
+        hops:
+        - barnard-gate
+    metadata:
+      local_id: wolf-359
+  - id: wolf-359:flarehold
+    kind: Station
+    fields:
+      Presentable:
+        name: Flarehold
+        description: A shielded outpost that goes dark on schedule.
+      OrbitalBody:
+        orbital_type: Station
+        parent: null
+        default_landing_path: []
+    metadata:
+      local_id: flarehold
+      source_type: Station
+  - id: wolf-359:flarehold:the-shutter
+    kind: Destination
+    fields:
+      Presentable:
+        name: The Shutter
+        description: Patrons count storms between unpaid debts.
+    metadata:
+      local_id: the-shutter
+      display_kind: Bar
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:the-shutter
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:the-shutter
+  - id: wolf-359:flarehold:storm-blind
+    kind: Destination
+    fields:
+      Presentable:
+        name: Storm Blind
+        description: A bunker window opened only between flares.
+    metadata:
+      local_id: storm-blind
+      display_kind: Tourist Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:storm-blind
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:storm-blind
+  - id: eos-chain
+    kind: System
+    fields:
+      Presentable:
+        name: Eos Chain
+        description: ''
+      StarSystem:
+        star_type: K-type orange dwarf
+        x: 570000.0
+        y: -130000.0
+        hops:
+        - sirius-wake
+    metadata:
+      local_id: eos-chain
+  - id: eos-chain:thread
+    kind: Station
+    fields:
+      Presentable:
+        name: Thread
+        description: A tethered moon town with careful loyalties.
+      OrbitalBody:
+        orbital_type: Station
+        parent: null
+        default_landing_path: []
+    metadata:
+      local_id: thread
+      source_type: Station
+  - id: eos-chain:thread:spindle
+    kind: Destination
+    fields:
+      Presentable:
+        name: Spindle
+        description: Locals pause when strangers use real names.
+    metadata:
+      local_id: spindle
+      display_kind: Bar
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:spindle
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:spindle
+  - id: eos-chain:thread:tether-view
+    kind: Destination
+    fields:
+      Presentable:
+        name: Tether View
+        description: A cable vanishing into orange light.
+    metadata:
+      local_id: tether-view
+      display_kind: Tourist Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:tether-view
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:tether-view
+  assertions:
+  - relation: At
+    args:
+    - ref: sol-proof:mercury
+    - ref: sol-proof
+  - relation: At
+    args:
+    - ref: sol-proof:mercury:terminus-bar
+    - ref: sol-proof:mercury
+  - relation: At
+    args:
+    - ref: sol-proof:mercury:caloris-rim
+    - ref: sol-proof:mercury
+  - relation: At
+    args:
+    - ref: sol-proof:mercury:fire-pits
+    - ref: sol-proof:mercury
+  - relation: At
+    args:
+    - ref: sol-proof:venus
+    - ref: sol-proof
+  - relation: At
+    args:
+    - ref: sol-proof:venus:pearl-room
+    - ref: sol-proof:venus
+  - relation: At
+    args:
+    - ref: sol-proof:venus:cloud-deck
+    - ref: sol-proof:venus
+  - relation: At
+    args:
+    - ref: sol-proof:earth
+    - ref: sol-proof
+  - relation: At
+    args:
+    - ref: sol-proof:earth:blue-anchor
+    - ref: sol-proof:earth
+  - relation: At
+    args:
+    - ref: sol-proof:earth:old-harbor
+    - ref: sol-proof:earth
+  - relation: At
+    args:
+    - ref: sol-proof:earth:statue-of-liberty
+    - ref: sol-proof:earth
+  - relation: At
+    args:
+    - ref: sol-proof:luna
+    - ref: sol-proof
+  - relation: At
+    args:
+    - ref: sol-proof:luna:gray-mare
+    - ref: sol-proof:luna
+  - relation: At
+    args:
+    - ref: sol-proof:luna:tranquility
+    - ref: sol-proof:luna
+  - relation: At
+    args:
+    - ref: sol-proof:mars
+    - ref: sol-proof
+  - relation: At
+    args:
+    - ref: sol-proof:mars:rust-choir
+    - ref: sol-proof:mars
+  - relation: At
+    args:
+    - ref: sol-proof:mars:valles-gate
+    - ref: sol-proof:mars
+  - relation: At
+    args:
+    - ref: sol-proof:ceres
+    - ref: sol-proof
+  - relation: At
+    args:
+    - ref: sol-proof:ceres:stone-cup
+    - ref: sol-proof:ceres
+  - relation: At
+    args:
+    - ref: sol-proof:ceres:dawn-vault
+    - ref: sol-proof:ceres
+  - relation: At
+    args:
+    - ref: sol-proof:belt-exchange
+    - ref: sol-proof
+  - relation: At
+    args:
+    - ref: sol-proof:belt-exchange:ledger-bar
+    - ref: sol-proof:belt-exchange
+  - relation: At
+    args:
+    - ref: sol-proof:belt-exchange:spin-garden
+    - ref: sol-proof:belt-exchange
+  - relation: At
+    args:
+    - ref: sol-proof:belt-exchange:rig-manager-s-office
+    - ref: sol-proof:belt-exchange
+  - relation: At
+    args:
+    - ref: sol-proof:belt-exchange:rig-manager-s-office:object:admire-the-decor
+    - ref: sol-proof:belt-exchange:rig-manager-s-office
+  - relation: At
+    args:
+    - ref: sol-proof:jupiter
+    - ref: sol-proof
+  - relation: At
+    args:
+    - ref: sol-proof:jupiter:red-spotter
+    - ref: sol-proof:jupiter
+  - relation: At
+    args:
+    - ref: sol-proof:jupiter:amalthea-view
+    - ref: sol-proof:jupiter
+  - relation: At
+    args:
+    - ref: sol-proof:ganymede
+    - ref: sol-proof
+  - relation: At
+    args:
+    - ref: sol-proof:ganymede:ice-cellar
+    - ref: sol-proof:ganymede
+  - relation: At
+    args:
+    - ref: sol-proof:ganymede:green-dome
+    - ref: sol-proof:ganymede
+  - relation: At
+    args:
+    - ref: barnard-gate:cinder
+    - ref: barnard-gate
+  - relation: At
+    args:
+    - ref: barnard-gate:cinder:red-wick
+    - ref: barnard-gate:cinder
+  - relation: At
+    args:
+    - ref: barnard-gate:cinder:ash-flats
+    - ref: barnard-gate:cinder
+  - relation: At
+    args:
+    - ref: barnard-gate:gatehouse
+    - ref: barnard-gate
+  - relation: At
+    args:
+    - ref: barnard-gate:gatehouse:lock-nine
+    - ref: barnard-gate:gatehouse
+  - relation: At
+    args:
+    - ref: barnard-gate:gatehouse:mirror-walk
+    - ref: barnard-gate:gatehouse
+  - relation: At
+    args:
+    - ref: sirius-wake:whiteharbor
+    - ref: sirius-wake
+  - relation: At
+    args:
+    - ref: sirius-wake:whiteharbor:blue-knife
+    - ref: sirius-wake:whiteharbor
+  - relation: At
+    args:
+    - ref: sirius-wake:whiteharbor:dazzle-deck
+    - ref: sirius-wake:whiteharbor
+  - relation: At
+    args:
+    - ref: sirius-wake:marrow
+    - ref: sirius-wake
+  - relation: At
+    args:
+    - ref: sirius-wake:marrow:gold-room
+    - ref: sirius-wake:marrow
+  - relation: At
+    args:
+    - ref: sirius-wake:marrow:core-lift
+    - ref: sirius-wake:marrow
+  - relation: At
+    args:
+    - ref: wolf-359:flarehold
+    - ref: wolf-359
+  - relation: At
+    args:
+    - ref: wolf-359:flarehold:the-shutter
+    - ref: wolf-359:flarehold
+  - relation: At
+    args:
+    - ref: wolf-359:flarehold:storm-blind
+    - ref: wolf-359:flarehold
+  - relation: At
+    args:
+    - ref: eos-chain:thread
+    - ref: eos-chain
+  - relation: At
+    args:
+    - ref: eos-chain:thread:spindle
+    - ref: eos-chain:thread
+  - relation: At
+    args:
+    - ref: eos-chain:thread:tether-view
+    - ref: eos-chain:thread
+  facts: []

@@ -1,6 +1,6 @@
 # Examples
 
-These are valid older story datasets kept for reference.
+These are valid YAML story datasets kept for reference.
 
-- `blank/story_systems.json`: the minimal empty-system starting point.
-- `sol-proof/story_systems.json`: the earlier Sol-like proof story.
+- `blank/story.qualms.yaml`: the minimal empty-system starting point.
+- `sol-proof/story.qualms.yaml`: the Sol-like proof story.

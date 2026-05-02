@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import copy
 import importlib.util
-import json
 import sys
 import tempfile
 import unittest
@@ -11,8 +10,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 STELLAR = ROOT / "stories" / "stellar" / "story.qualms.yaml"
-BLANK = ROOT / "examples" / "blank" / "story_systems.json"
-SOL_PROOF = ROOT / "examples" / "sol-proof" / "story_systems.json"
+BLANK = ROOT / "examples" / "blank" / "story.qualms.yaml"
+SOL_PROOF = ROOT / "examples" / "sol-proof" / "story.qualms.yaml"
 
 
 def load_story_module():
@@ -29,17 +28,12 @@ def load_story_module():
 dq = load_story_module()
 
 
-def raw_story(path: Path | None = None) -> dict:
-    if path is not None:
-        return json.loads(path.read_text(encoding="utf-8"))
-    return dq.world_to_raw(dq.load_world(STELLAR))
+def story_raw(path: Path = STELLAR) -> dict:
+    return dq.world_to_raw(dq.load_world(path))
 
 
 def load_raw(raw: dict):
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = Path(tmpdir) / "story_systems.json"
-        path.write_text(json.dumps(raw), encoding="utf-8")
-        return dq.load_world(path)
+    return dq.load_world_from_raw(raw)
 
 
 def destination_by_ids(world, *destination_ids: str):
@@ -51,7 +45,7 @@ def destination_by_ids(world, *destination_ids: str):
     return destination
 
 
-class LegacyLoaderTests(unittest.TestCase):
+class StoryLoaderTests(unittest.TestCase):
     def test_story_directory_prefers_yaml_when_present(self) -> None:
         self.assertEqual(dq.resolve_data_file(ROOT / "stories" / "stellar"), ROOT / "stories" / "stellar" / "story.qualms.yaml")
 
@@ -70,7 +64,6 @@ class LegacyLoaderTests(unittest.TestCase):
 
             self.assertEqual(world.start_system, "empty-system")
             self.assertTrue((story_dir / "story.qualms.yaml").exists())
-            self.assertFalse((story_dir / "story_systems.json").exists())
 
     def test_initial_location_matches_current_story_start(self) -> None:
         world = dq.load_world(STELLAR)
@@ -85,14 +78,14 @@ class LegacyLoaderTests(unittest.TestCase):
         self.assertEqual(dq.destination_at_path(orbital, state.destination_path).id, "mining-colony-5")
 
     def test_loader_rejects_duplicate_system_ids(self) -> None:
-        raw = raw_story()
+        raw = story_raw()
         raw["systems"].append(copy.deepcopy(raw["systems"][0]))
 
         with self.assertRaisesRegex(ValueError, "system IDs must be unique"):
             load_raw(raw)
 
     def test_loader_rejects_duplicate_orbital_ids(self) -> None:
-        raw = raw_story()
+        raw = story_raw()
         orbitals = raw["systems"][0]["orbitals"]
         orbitals.append(copy.deepcopy(orbitals[0]))
 
@@ -100,7 +93,7 @@ class LegacyLoaderTests(unittest.TestCase):
             load_raw(raw)
 
     def test_loader_rejects_unknown_moon_parent(self) -> None:
-        raw = raw_story()
+        raw = story_raw()
         raw["systems"][0]["orbitals"][1]["parent"] = "missing-parent"
 
         with self.assertRaisesRegex(ValueError, "parent references unknown orbital"):
@@ -163,25 +156,22 @@ class LegacyLoaderTests(unittest.TestCase):
             load_raw(raw)
 
     def test_yaml_save_updates_only_yaml_story_file(self) -> None:
-        raw = raw_story()
+        raw = story_raw()
         with tempfile.TemporaryDirectory() as tmpdir:
             story_dir = Path(tmpdir)
-            json_path = story_dir / "story_systems.json"
             yaml_path = story_dir / "story.qualms.yaml"
-            json_path.write_text(json.dumps({"systems": [{"name": "Vexas"}]}), encoding="utf-8")
             world = dq.load_world_from_raw(raw)
-            from qualms.legacy import write_legacy_world_yaml
+            from qualms.story_writer import write_story_world_yaml
 
-            write_legacy_world_yaml(world, yaml_path)
+            write_story_world_yaml(world, yaml_path)
             edited = dq.edit_system(world, yaml_path, world.start_system, "Edited", "Edited description.")
 
             self.assertEqual(edited.system_by_id(world.start_system).name, "Edited")
-            self.assertEqual(json.loads(json_path.read_text(encoding="utf-8"))["systems"][0]["name"], "Vexas")
             self.assertEqual(dq.load_world(yaml_path).system_by_id(world.start_system).name, "Edited")
             self.assertTrue(yaml_path.read_text(encoding="utf-8").startswith("qualms:"))
 
 
-class LegacyBehaviorTests(unittest.TestCase):
+class StoryBehaviorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.world = dq.load_world(STELLAR)
         self.state = dq.initial_game_state(self.world, editor_enabled=False)

@@ -7,11 +7,13 @@ import unittest
 from pathlib import Path
 
 from qualms import ActionAttempt, RulesEngine, load_game_definition
-from qualms.legacy import legacy_world_to_game_definition, legacy_world_to_yaml_data, write_legacy_world_yaml
+from qualms.story_writer import story_world_to_yaml_data, write_story_world_yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
 STELLAR_YAML = ROOT / "stories" / "stellar" / "story.qualms.yaml"
+BLANK_YAML = ROOT / "examples" / "blank" / "story.qualms.yaml"
+SOL_PROOF_YAML = ROOT / "examples" / "sol-proof" / "story.qualms.yaml"
 
 
 def load_story_module():
@@ -28,7 +30,7 @@ def load_story_module():
 dq = load_story_module()
 
 
-def count_legacy_entities(world) -> int:
+def count_local_entities(world) -> int:
     total = 1  # player
     for system in world.systems:
         total += 1
@@ -51,42 +53,49 @@ def count_destinations(destinations) -> int:
     return total
 
 
-class LegacyYamlMigrationTests(unittest.TestCase):
+class StoryYamlProjectionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.world = dq.load_world(STELLAR_YAML)
 
-    def test_legacy_world_compiles_to_runtime_definition(self) -> None:
-        definition = legacy_world_to_game_definition(self.world)
+    def test_story_yaml_loads_as_runtime_definition(self) -> None:
+        definition = load_game_definition(STELLAR_YAML)
         state = definition.instantiate()
-        id_map = definition.metadata["legacy_id_map"]
+        id_map = definition.metadata["local_id_map"]
 
-        self.assertEqual(len(definition.initial_entities), count_legacy_entities(self.world))
+        self.assertEqual(len(definition.initial_entities), count_local_entities(self.world))
         self.assertTrue(state.test("At", [id_map["portrait-of-enrick"], id_map["pointless-bar"]]))
         self.assertTrue(state.test("DockedAt", [id_map["canary"], id_map["impact-crater"]]))
 
-    def test_legacy_yaml_converter_output_loads(self) -> None:
+    def test_story_yaml_writer_output_loads(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             output = Path(tmpdir) / "story.qualms.yaml"
-            write_legacy_world_yaml(self.world, output)
+            write_story_world_yaml(self.world, output)
 
             definition = load_game_definition(output)
 
-        self.assertEqual(len(definition.initial_entities), count_legacy_entities(self.world))
-        self.assertIn("legacy_id_map", definition.metadata)
-        self.assertIn("control-console", definition.metadata["legacy_id_map"])
+        self.assertEqual(len(definition.initial_entities), count_local_entities(self.world))
+        self.assertIn("local_id_map", definition.metadata)
+        self.assertIn("control-console", definition.metadata["local_id_map"])
 
-    def test_checked_in_converted_story_loads(self) -> None:
+    def test_checked_in_story_loads(self) -> None:
         definition = load_game_definition(STELLAR_YAML)
         state = definition.instantiate()
 
-        self.assertEqual(len(definition.initial_entities), count_legacy_entities(self.world))
+        self.assertEqual(len(definition.initial_entities), count_local_entities(self.world))
         self.assertIn("player", state.entities)
 
-    def test_converted_use_rule_controls_canary(self) -> None:
-        definition = legacy_world_to_game_definition(self.world)
+    def test_checked_in_examples_load(self) -> None:
+        for path in (BLANK_YAML, SOL_PROOF_YAML):
+            with self.subTest(path=path):
+                definition = load_game_definition(path)
+                state = definition.instantiate()
+                self.assertIn("player", state.entities)
+
+    def test_use_rule_controls_canary(self) -> None:
+        definition = load_game_definition(STELLAR_YAML)
         state = definition.instantiate()
         engine = RulesEngine(definition)
-        id_map = definition.metadata["legacy_id_map"]
+        id_map = definition.metadata["local_id_map"]
 
         result = engine.attempt(
             state,
@@ -105,11 +114,11 @@ class LegacyYamlMigrationTests(unittest.TestCase):
         self.assertTrue(state.test("ControlledBy", [id_map["canary"], "player"]))
         self.assertTrue(state.memory.has("ship:canary:control"))
 
-    def test_converted_before_rule_blocks_lunar_surface(self) -> None:
-        definition = legacy_world_to_game_definition(self.world)
+    def test_before_rule_blocks_lunar_surface(self) -> None:
+        definition = load_game_definition(STELLAR_YAML)
         state = definition.instantiate()
         engine = RulesEngine(definition)
-        id_map = definition.metadata["legacy_id_map"]
+        id_map = definition.metadata["local_id_map"]
 
         result = engine.attempt(
             state,
@@ -126,8 +135,8 @@ class LegacyYamlMigrationTests(unittest.TestCase):
         self.assertIn("cold-boiling", result.events[0]["text"])
         self.assertFalse(state.test("At", ["player", id_map["lunar-surface"]]))
 
-    def test_converter_produces_schema_sections(self) -> None:
-        data = legacy_world_to_yaml_data(self.world)
+    def test_story_writer_produces_schema_sections(self) -> None:
+        data = story_world_to_yaml_data(self.world)
 
         self.assertEqual(data["qualms"], "0.1")
         self.assertEqual(data["id"], "stellar")
