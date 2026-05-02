@@ -1,15 +1,28 @@
-# Dark Qualms
+# Qualms
 
-Dark Qualms is a story-first bounty-hunter game prototype. The project is now organized around an interface-independent story graph, with a maintained curses interface and a paused Godot prototype.
+Qualms is a prototype for a rules-driven story engine and a nova-like game built on top of it. The long-term goal is to define a compact declarative model for game rules that can be projected into different genres, interfaces, and implementations while preserving the same core behavior.
+
+The current playable game is still Dark Qualms: a story-first bounty-hunter prototype with a maintained curses interface. The current data file is JSON, but the design direction is a YAML schema with genre-agnostic primitives: entities, traits, relations, actions, rules, and effects/assertions. Genre-specific concepts such as systems, orbitals, ships, people, inventory, and travel should be expressed by authored preludes and story content rather than hard-coded as engine categories.
+
+## Specs
+
+Technical direction now lives in `specs/`:
+
+- `specs/rules-engine.md`: runtime model, UML-style class/interface sketch, and action resolution sequence.
+- `specs/story-yaml-schema.md`: rigorous YAML schema specification for engine definitions, prelude definitions, and story content.
+- `specs/migration-plan.md`: plan for migrating current story data and the curses parser/engine toward the new model.
+
+`story_declarative.txt` is an older design sketch. It is useful context, but it currently mixes engine primitives, nova-specific content, and implementation notes more than the new specs should.
 
 ## Layout
 
+- `specs/`: technical design documents for the rules engine and future YAML schema.
 - `stories/`: active story data. The current story is `stories/stellar/story_systems.json`.
 - `curses/`: maintained text interface for playing and editing the story graph.
-- `godot/`: unmaintained 2D orbital-flight prototype; kept for possible future interface work.
+- `godot/`: paused 2D orbital-flight prototype; kept for possible future interface work.
 - `examples/`: valid older story datasets kept for reference.
 
-The story model currently defines systems, star types, graph hops, orbitals (`Planet`, `Moon`, `Station`), recursive local destinations, objects that support interactions such as examine, take, or use, NPCs that support examine and talk, destination sequences, and simple fact-gated before rules.
+The current story model defines systems, star types, graph hops, orbitals (`Planet`, `Moon`, `Station`), recursive local destinations, objects that support interactions such as examine, take, or use, NPCs that support examine and talk, destination sequences, and simple fact-gated before rules.
 
 ## Run
 
@@ -91,9 +104,9 @@ Dump the defined narrative surface:
 - Orbiting/approaching screen: edit the current orbital name and description.
 - Destination description screen: edit that destination name and description.
 
-## Story Data
+## Current Story Data
 
-A destination is deliberately explicit:
+The maintained game still loads the older JSON shape. A destination is deliberately explicit:
 
 ```json
 {
