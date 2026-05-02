@@ -68,6 +68,17 @@ definitions:
     - id: Port
 
     - id: Social
+      actions:
+        - id: Talk
+          params:
+            - id: actor
+              type: ref<Actor>
+            - id: target
+              type: ref<Social>
+          requires: true
+          default:
+            - emit:
+                text: "They have nothing to say."
 
     - id: Identifiable
       fields:
@@ -195,6 +206,17 @@ definitions:
             args:
               - { var: ship }
               - { var: destination_system }
+
+    - id: PowerUp
+      params:
+        - id: actor
+          type: ref<Actor>
+        - id: target
+          type: ref
+      requires: true
+      default:
+        - emit:
+            text: "Nothing happens."
 
   kinds:
     - id: System

@@ -94,6 +94,8 @@ def compile_documents(docs: list[dict[str, Any]]) -> GameDefinition:
 
     for doc in docs:
         context = doc["id"]
+        if "metadata" in doc:
+            metadata.update(copy.deepcopy(require_mapping(doc, "metadata", context, default={})))
         definitions = require_mapping(doc, "definitions", context, default={})
         for raw_trait in require_list(definitions, "traits", f"{context}.definitions", default=[]):
             trait = parse_trait(raw_trait, f"{context}.definitions.traits")

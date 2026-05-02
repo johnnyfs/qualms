@@ -287,6 +287,20 @@ definitions:
                 trait: Presentable
                 field: description
 
+    - id: Enter
+      params:
+        - id: actor
+          type: ref<Actor>
+        - id: destination
+          type: ref<Location>
+      requires: true
+      default:
+        - assert:
+            relation: At
+            args:
+              - { var: actor }
+              - { var: destination }
+
   kinds:
     - id: Thing
       traits:

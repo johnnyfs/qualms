@@ -1,0 +1,771 @@
+qualms: '0.1'
+id: stellar
+imports:
+- ../../stories/prelude/nova-qualms.qualms.yaml
+metadata:
+  legacy_id_map:
+    empty-system: empty-system
+    bolorus: empty-system:bolorus
+    abandoned-mining-platform: empty-system:bolorus:abandoned-mining-platform
+    rig-managers-office: empty-system:bolorus:abandoned-mining-platform:rig-managers-office
+    art-on-the-wall: empty-system:bolorus:abandoned-mining-platform:rig-managers-office:object:art-on-the-wall
+    rainbow: empty-system:rainbow
+    mining-colony-5: empty-system:rainbow:mining-colony-5
+    pointless-bar: empty-system:rainbow:mining-colony-5:pointless-bar
+    portrait-of-enrick: empty-system:rainbow:mining-colony-5:pointless-bar:object:portrait-of-enrick
+    stu: empty-system:rainbow:mining-colony-5:pointless-bar:npc:stu
+    pointless-settlement: empty-system:rainbow:mining-colony-5:pointless-settlement
+    your-place: empty-system:rainbow:mining-colony-5:pointless-settlement:your-place
+    your-journal: empty-system:rainbow:mining-colony-5:pointless-settlement:your-place:object:your-journal
+    airlock: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock
+    spare-expedition-suit: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:object:spare-expedition-suit
+    lunar-surface: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface
+    abandoned-quarry: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:abandoned-quarry
+    active-mine: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine
+    impact-crater: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine:impact-crater
+    canary: canary
+    control-console: canary:object:control-console
+    collapsed-entrance: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine:collapsed-entrance
+story:
+  start:
+    actor: player
+    system: empty-system
+    location: empty-system:rainbow:mining-colony-5
+  entities:
+  - id: player
+    kind: Player
+    fields:
+      Presentable:
+        name: Player
+        description: ''
+    metadata:
+      role: player
+  - id: empty-system
+    kind: System
+    fields:
+      Presentable:
+        name: Vexas
+        description: A mined-out husk, a century past its prime.
+      StarSystem:
+        star_type: Unspecified
+        x: 0.0
+        y: 0.0
+        hops: []
+    metadata:
+      legacy_id: empty-system
+  - id: empty-system:bolorus
+    kind: Planet
+    fields:
+      Presentable:
+        name: Rainbow
+        description: A once-vibrant gas giant, now strip-mined to a brown ball of
+          exhaust.
+      OrbitalBody:
+        orbital_type: Planet
+        parent: null
+        default_landing_path: []
+    metadata:
+      legacy_id: bolorus
+      legacy_type: Planet
+  - id: empty-system:bolorus:abandoned-mining-platform
+    kind: Destination
+    fields:
+      Presentable:
+        name: Abandoned Mining Platform
+        description: Solar-powered maintenance drones keep it minimally operational,
+          but it could sink into the clouds any day now.
+    metadata:
+      legacy_id: abandoned-mining-platform
+      legacy_kind: Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:abandoned-mining-platform
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:abandoned-mining-platform
+  - id: empty-system:bolorus:abandoned-mining-platform:rig-managers-office
+    kind: Destination
+    fields:
+      Presentable:
+        name: Rig Manager's Office
+        description: Strangely clean, given how long it's been abandoned. There's
+          no life here to generate dust, you guess. There is however some truly sophisticated
+          art on the wall.
+    metadata:
+      legacy_id: rig-managers-office
+      legacy_kind: Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:rig-managers-office
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:rig-managers-office
+  - id: empty-system:bolorus:abandoned-mining-platform:rig-managers-office:object:art-on-the-wall
+    kind: StoryObject
+    traits:
+    - id: Portable
+    fields:
+      Presentable:
+        name: Art on the wall
+        description: 'It''s an old-fashioned paper pinup of a scantily-clad Antarran
+          "Actress." Under a blue lipstick print is a signature and the inscription:
+          "From one hometown spawn to another -- stay inscrutable, <3 Andira Manara."'
+    metadata:
+      legacy_id: art-on-the-wall
+      interactions:
+      - Examine
+      - Take
+      collectable: true
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: before:Take:0
+      phase: before
+      match:
+        action: Take
+        args:
+          item:
+            ref: empty-system:bolorus:abandoned-mining-platform:rig-managers-office:object:art-on-the-wall
+      when: true
+      effects:
+      - emit:
+          text: She's not your type.
+      control: stop
+  - id: empty-system:rainbow
+    kind: Moon
+    fields:
+      Presentable:
+        name: Blemish
+        description: The ugliest moon in the galaxy, home to a tapped-out irridium
+          mine and not much else.
+      OrbitalBody:
+        orbital_type: Moon
+        parent: empty-system:bolorus
+        default_landing_path:
+        - mining-colony-5
+        - pointless-settlement
+        - airlock
+        - lunar-surface
+    metadata:
+      legacy_id: rainbow
+      legacy_type: Moon
+  - id: empty-system:rainbow:mining-colony-5
+    kind: Destination
+    fields:
+      Presentable:
+        name: Mining Colony 5
+        description: Home sweet home. Sometimes you wonder what happened to colonies
+          one through four. If life here is any indication, they must have died of
+          boredom.
+    metadata:
+      legacy_id: mining-colony-5
+      legacy_kind: Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:mining-colony-5
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:mining-colony-5
+    - id: sequence:blemish-crash
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            ref: empty-system:rainbow:mining-colony-5
+      when:
+        all:
+        - fact:
+            id: visited:destination:pointless-bar
+        - fact:
+            id: visited:destination:pointless-settlement
+        - not:
+            fact:
+              id: sequence:blemish-crash:complete
+      effects:
+      - emit:
+          text: A flash of light streaks overhead. You hear an explosion from the
+            direction of the mines, the dome shakes, and the lights dim for a moment.
+      - set_fact:
+          id: sequence:blemish-crash:complete
+  - id: empty-system:rainbow:mining-colony-5:pointless-bar
+    kind: Destination
+    fields:
+      Presentable:
+        name: Pointless Bar
+        description: Alcohol is a depressant.
+    metadata:
+      legacy_id: pointless-bar
+      legacy_kind: Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:pointless-bar
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:pointless-bar
+  - id: empty-system:rainbow:mining-colony-5:pointless-bar:object:portrait-of-enrick
+    kind: StoryObject
+    traits:
+    - id: Portable
+    - id: Usable
+    fields:
+      Presentable:
+        name: Portrait of Enrick
+        description: A portrait of your Enrick, your old guardian hangs on the wall.
+    metadata:
+      legacy_id: portrait-of-enrick
+      interactions:
+      - Examine
+      - Take
+      - Use
+      collectable: true
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: before:Examine:0
+      phase: before
+      match:
+        action: Examine
+        args:
+          target:
+            ref: empty-system:rainbow:mining-colony-5:pointless-bar:object:portrait-of-enrick
+      when: true
+      effects:
+      - emit:
+          text: Everyone's favorite all-around great guy. Too bad he died in a tunnel
+            collapse when you were still a child. Ever since you've been a "ward of
+            the company," working to earn your way out of indenture.
+      control: stop
+    - id: use:control-console:0
+      phase: instead
+      match:
+        action: Use
+        args:
+          source:
+            ref: empty-system:rainbow:mining-colony-5:pointless-bar:object:portrait-of-enrick
+          target:
+            ref: canary:object:control-console
+      when: true
+      effects:
+      - emit:
+          text: The iris whirs with approval, and the console powers up.
+      - assert:
+          relation: ControlledBy
+          args:
+          - ref: canary
+          - ref: player
+      - set_fact:
+          id: ship:canary:owned
+      - set_fact:
+          id: ship:canary:control
+      control: stop
+  - id: empty-system:rainbow:mining-colony-5:pointless-bar:npc:stu
+    kind: NPC
+    fields:
+      Presentable:
+        name: Stu
+        description: Old Stupor sits at the bar, living up to his name.
+        examine_description: His real name is Stu, but you call him 'Stupor' because
+          you are very clever.
+    metadata:
+      legacy_id: stu
+      interactions:
+      - Examine
+      - Talk
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: before:Talk:0
+      phase: before
+      match:
+        action: Talk
+        args:
+          target:
+            ref: empty-system:rainbow:mining-colony-5:pointless-bar:npc:stu
+      when: true
+      effects:
+      - emit:
+          text: We call him stupor for a reason.
+      control: stop
+  - id: empty-system:rainbow:mining-colony-5:pointless-settlement
+    kind: Destination
+    fields:
+      Presentable:
+        name: Pointless Settlement
+        description: It keeps us all alive, for some reason.
+    metadata:
+      legacy_id: pointless-settlement
+      legacy_kind: Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:pointless-settlement
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:pointless-settlement
+  - id: empty-system:rainbow:mining-colony-5:pointless-settlement:your-place
+    kind: Destination
+    fields:
+      Presentable:
+        name: Your place
+        description: Just enough room to sleep, with a fold-out desk and chair for
+          reading and a collapsible combination toilet and shower.
+    metadata:
+      legacy_id: your-place
+      legacy_kind: Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:your-place
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:your-place
+  - id: empty-system:rainbow:mining-colony-5:pointless-settlement:your-place:object:your-journal
+    kind: StoryObject
+    fields:
+      Presentable:
+        name: Your journal
+        description: Everyone hates me, etc.
+    metadata:
+      legacy_id: your-journal
+      interactions:
+      - Examine
+      collectable: false
+      visible_when: []
+      visible_unless: []
+    rules: []
+  - id: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock
+    kind: Destination
+    fields:
+      Presentable:
+        name: Airlock
+        description: Connects the dreary dome to the even drearier lunar surface.
+    metadata:
+      legacy_id: airlock
+      legacy_kind: Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:airlock
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:airlock
+  - id: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:object:spare-expedition-suit
+    kind: StoryObject
+    traits:
+    - id: Portable
+    - id: Equipment
+      fields:
+        slot: Exosuit
+    fields:
+      Presentable:
+        name: Spare expedition suit
+        description: An exciting name for what is actually just the minimum amount
+          of kaptex necessary to keep you from dying immediately.
+    metadata:
+      legacy_id: spare-expedition-suit
+      interactions:
+      - Examine
+      - Take
+      collectable: true
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: before:Take:0
+      phase: before
+      match:
+        action: Take
+        args:
+          item:
+            ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:object:spare-expedition-suit
+      when:
+        not:
+          fact:
+            id: sequence:blemish-crash:complete
+      effects:
+      - emit:
+          text: The last thing you want is for your fellow crewmen to see you galavanting
+            around outside -- you're supposed to be home sick.
+      control: stop
+  - id: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface
+    kind: Destination
+    fields:
+      Presentable:
+        name: Lunar Surface
+        description: Barren.
+    metadata:
+      legacy_id: lunar-surface
+      legacy_kind: Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:lunar-surface
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:lunar-surface
+    - id: before:Enter:0
+      phase: before
+      match:
+        action: Enter
+        args:
+          destination:
+            ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface
+      when:
+        not:
+          fact:
+            id: equipped:slot:Exosuit
+      effects:
+      - emit:
+          text: As unbearable as life is here, you still prefer it to cold-boiling
+            in an irradiated vaccuum.
+      control: stop
+  - id: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:abandoned-quarry
+    kind: Destination
+    fields:
+      Presentable:
+        name: Abandoned Quarry
+        description: Abandoned for a reason.
+    metadata:
+      legacy_id: abandoned-quarry
+      legacy_kind: Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:abandoned-quarry
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:abandoned-quarry
+  - id: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine
+    kind: Destination
+    fields:
+      Presentable:
+        name: Active Mine
+        description: You picked a good day to play hookie.
+    metadata:
+      legacy_id: active-mine
+      legacy_kind: Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:active-mine
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:active-mine
+    - id: sequence:active-mine-impact-site
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine
+      when:
+        not:
+          fact:
+            id: sequence:active-mine-impact-site:complete
+      effects:
+      - emit:
+          text: What used to be the mine entrance is now a crater half the size of
+            a kickball field. Its surface is hemispherical and as smooth as glass.
+      - emit:
+          text: At its center sits a small yellow ship, sleek, sloop-sized, looking
+            almost undamaged.
+      - emit:
+          text: You've read about such things -- ships overshoot their ftl coordinates
+            and their warp fields flatten and irradiate everything in the vicinity,
+            including the passengers, while leaving the ship itself intact.
+      - set_fact:
+          id: sequence:active-mine-impact-site:complete
+  - id: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine:impact-crater
+    kind: Destination
+    fields:
+      Presentable:
+        name: Impact Crater
+        description: Utter destruction.
+    metadata:
+      legacy_id: impact-crater
+      legacy_kind: Destination
+      port: false
+      visible_when:
+      - ship:canary:at:impact-crater
+      visible_unless: []
+    rules:
+    - id: visited:impact-crater
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:impact-crater
+  - id: canary
+    kind: Ship
+    fields:
+      Presentable:
+        name: Canary
+        description: The AUD Canary. AUD? You've never heard it. It looks built for
+          speed -- long, sleek, all cockpit and engine, not much room for cargo or
+          passengers. There's a hatch on top.
+      Vehicle:
+        abilities: []
+    metadata:
+      legacy_id: canary
+      unlock: true
+      controlled: false
+      equipment_slots: []
+      display_names:
+      - text: ship
+        unless:
+        - ship:canary:identified
+      - text: AUD Canary
+        when:
+        - ship:canary:identified
+      interior_descriptions:
+      - text: Eerily empty. Not so much as one irradiated corpse. If there was a pilot,
+          he either ejected or was vaporized.
+        unless:
+        - ship:canary:owned
+      taglines:
+      - text: A sleek yellow sloop sits at the heart of the crater, without so much
+          as a scratch.
+        when:
+        - ship:canary:at:impact-crater
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: before:Examine:0
+      phase: before
+      match:
+        action: Examine
+        args:
+          target:
+            ref: canary
+      when:
+        relation:
+          id: At
+          args:
+          - ref: canary
+          - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine:impact-crater
+      effects:
+      - emit:
+          text: Smooth, yellow, almost seamless except for a hatch on top and the
+            letters AUD Canary etched into the side. What is AUD?
+      - set_fact:
+          id: ship:canary:identified
+      control: stop
+  - id: canary:object:control-console
+    kind: StoryObject
+    fields:
+      Presentable:
+        name: Control console
+        description: It's elegant but old-fashioned, state-of-the-art high-end maybe
+          a generation ago. There's a stick and a hud and a windshield, and a nav
+          map on your right that suggests it's jump-capable.
+    metadata:
+      legacy_id: control-console
+      interactions:
+      - Examine
+      - Power up
+      collectable: false
+      visible_when: []
+      visible_unless:
+      - ship:canary:owned
+    rules:
+    - id: before:Power-up:0
+      phase: before
+      match:
+        action: PowerUp
+        args:
+          target:
+            ref: canary:object:control-console
+      when: true
+      effects:
+      - emit:
+          text: Nothing happens. An iris in the center of the hud whirs disapprovingly
+            as if it doesn't like your face.
+      control: stop
+  - id: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine:collapsed-entrance
+    kind: Destination
+    fields:
+      Presentable:
+        name: Collapsed Entrance
+        description: There's no way anyone survived this.
+    metadata:
+      legacy_id: collapsed-entrance
+      legacy_kind: Destination
+      port: false
+      visible_when:
+      - ship:canary:at:impact-crater
+      visible_unless: []
+    rules:
+    - id: visited:collapsed-entrance
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:collapsed-entrance
+  assertions:
+  - relation: At
+    args:
+    - ref: empty-system:bolorus
+    - ref: empty-system
+  - relation: At
+    args:
+    - ref: empty-system:bolorus:abandoned-mining-platform
+    - ref: empty-system:bolorus
+  - relation: At
+    args:
+    - ref: empty-system:bolorus:abandoned-mining-platform:rig-managers-office
+    - ref: empty-system:bolorus:abandoned-mining-platform
+  - relation: At
+    args:
+    - ref: empty-system:bolorus:abandoned-mining-platform:rig-managers-office:object:art-on-the-wall
+    - ref: empty-system:bolorus:abandoned-mining-platform:rig-managers-office
+  - relation: At
+    args:
+    - ref: empty-system:rainbow
+    - ref: empty-system
+  - relation: At
+    args:
+    - ref: empty-system:rainbow:mining-colony-5
+    - ref: empty-system:rainbow
+  - relation: At
+    args:
+    - ref: empty-system:rainbow:mining-colony-5:pointless-bar
+    - ref: empty-system:rainbow:mining-colony-5
+  - relation: At
+    args:
+    - ref: empty-system:rainbow:mining-colony-5:pointless-bar:object:portrait-of-enrick
+    - ref: empty-system:rainbow:mining-colony-5:pointless-bar
+  - relation: At
+    args:
+    - ref: empty-system:rainbow:mining-colony-5:pointless-bar:npc:stu
+    - ref: empty-system:rainbow:mining-colony-5:pointless-bar
+  - relation: At
+    args:
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement
+    - ref: empty-system:rainbow:mining-colony-5
+  - relation: At
+    args:
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:your-place
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement
+  - relation: At
+    args:
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:your-place:object:your-journal
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:your-place
+  - relation: At
+    args:
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement
+  - relation: At
+    args:
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:object:spare-expedition-suit
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock
+  - relation: At
+    args:
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock
+  - relation: At
+    args:
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:abandoned-quarry
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface
+  - relation: At
+    args:
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface
+  - relation: At
+    args:
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine:impact-crater
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine
+  - relation: DockedAt
+    args:
+    - ref: canary
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine:impact-crater
+  - relation: At
+    args:
+    - ref: canary:object:control-console
+    - ref: canary
+  - relation: At
+    args:
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine:collapsed-entrance
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine
+  facts: []
