@@ -1,0 +1,307 @@
+qualms: "0.1"
+id: core-prelude
+
+definitions:
+  traits:
+    - id: Presentable
+      fields:
+        - id: name
+          type: str
+          default: ""
+        - id: description
+          type: str
+          default: ""
+        - id: examine_description
+          type: str
+          default: ""
+
+    - id: Actor
+
+    - id: Location
+
+    - id: Relocatable
+      fields:
+        - id: location
+          type: ref<Location>?
+          default: null
+      relations:
+        - id: At
+          params:
+            - id: subject
+              type: ref<Relocatable>
+            - id: location
+              type: ref<Location>
+          get:
+            eq:
+              - field:
+                  entity: { var: subject }
+                  trait: Relocatable
+                  field: location
+              - { var: location }
+          set:
+            - set_field:
+                entity: { var: subject }
+                trait: Relocatable
+                field: location
+                value: { var: location }
+      actions:
+        - id: Move
+          params:
+            - id: actor
+              type: ref<Actor>?
+              default: null
+            - id: subject
+              type: ref<Relocatable>
+            - id: destination
+              type: ref<Location>
+          requires: true
+          default:
+            - assert:
+                relation: At
+                args:
+                  - { var: subject }
+                  - { var: destination }
+
+    - id: Container
+      relations:
+        - id: Contains
+          params:
+            - id: container
+              type: ref<Container>
+            - id: item
+              type: ref<Relocatable>
+          get:
+            relation:
+              id: At
+              args:
+                - { var: item }
+                - { var: container }
+          set:
+            - assert:
+                relation: At
+                args:
+                  - { var: item }
+                  - { var: container }
+
+    - id: Portable
+      actions:
+        - id: Take
+          params:
+            - id: actor
+              type: ref<Actor>
+            - id: item
+              type: ref<Portable>
+          requires: true
+          default:
+            - assert:
+                relation: CarriedBy
+                args:
+                  - { var: actor }
+                  - { var: item }
+
+        - id: Drop
+          params:
+            - id: actor
+              type: ref<Actor>
+            - id: item
+              type: ref<Portable>
+            - id: destination
+              type: ref<Location>
+          requires: true
+          default:
+            - assert:
+                relation: At
+                args:
+                  - { var: item }
+                  - { var: destination }
+
+    - id: Usable
+      actions:
+        - id: Use
+          params:
+            - id: actor
+              type: ref<Actor>
+            - id: source
+              type: ref<Usable>
+            - id: target
+              type: ref?
+              default: null
+          requires: true
+          default:
+            - emit:
+                text: "Nothing happens."
+
+    - id: Equipment
+      fields:
+        - id: slot
+          type: str
+          default: ""
+        - id: equipped_by
+          type: ref<Actor>?
+          default: null
+      relations:
+        - id: Equipped
+          params:
+            - id: actor
+              type: ref<Actor>
+            - id: item
+              type: ref<Equipment>
+          get:
+            eq:
+              - field:
+                  entity: { var: item }
+                  trait: Equipment
+                  field: equipped_by
+              - { var: actor }
+          set:
+            - set_field:
+                entity: { var: item }
+                trait: Equipment
+                field: equipped_by
+                value: { var: actor }
+      actions:
+        - id: Equip
+          params:
+            - id: actor
+              type: ref<Actor>
+            - id: item
+              type: ref<Equipment>
+          requires: true
+          default:
+            - assert:
+                relation: Equipped
+                args:
+                  - { var: actor }
+                  - { var: item }
+
+        - id: Unequip
+          params:
+            - id: actor
+              type: ref<Actor>
+            - id: item
+              type: ref<Equipment>
+          requires: true
+          default:
+            - set_field:
+                entity: { var: item }
+                trait: Equipment
+                field: equipped_by
+                value: null
+
+    - id: Ownable
+      fields:
+        - id: owner
+          type: ref<Actor>?
+          default: null
+      relations:
+        - id: OwnedBy
+          params:
+            - id: item
+              type: ref<Ownable>
+            - id: actor
+              type: ref<Actor>
+          get:
+            eq:
+              - field:
+                  entity: { var: item }
+                  trait: Ownable
+                  field: owner
+              - { var: actor }
+          set:
+            - set_field:
+                entity: { var: item }
+                trait: Ownable
+                field: owner
+                value: { var: actor }
+
+  relations:
+    - id: CarriedBy
+      params:
+        - id: actor
+          type: ref<Actor>
+        - id: item
+          type: ref<Relocatable>
+      get:
+        relation:
+          id: At
+          args:
+            - { var: item }
+            - { var: actor }
+      set:
+        - assert:
+            relation: At
+            args:
+              - { var: item }
+              - { var: actor }
+
+    - id: Named
+      params:
+        - id: entity
+          type: ref<Presentable>
+        - id: name
+          type: str
+      get:
+        eq:
+          - field:
+              entity: { var: entity }
+              trait: Presentable
+              field: name
+          - { var: name }
+
+    - id: Visible
+      params:
+        - id: entity
+          type: ref
+      get: true
+
+  actions:
+    - id: Name
+      params:
+        - id: actor
+          type: ref<Actor>?
+          default: null
+        - id: target
+          type: ref<Presentable>
+      requires: true
+      default:
+        - emit:
+            text:
+              field:
+                entity: { var: target }
+                trait: Presentable
+                field: name
+
+    - id: Examine
+      params:
+        - id: actor
+          type: ref<Actor>?
+          default: null
+        - id: target
+          type: ref<Presentable>
+      requires: true
+      default:
+        - emit:
+            text:
+              field:
+                entity: { var: target }
+                trait: Presentable
+                field: description
+
+  kinds:
+    - id: Thing
+      traits:
+        - id: Presentable
+
+    - id: Place
+      traits:
+        - id: Presentable
+        - id: Location
+        - id: Container
+
+    - id: Person
+      traits:
+        - id: Presentable
+        - id: Actor
+        - id: Location
+        - id: Container
+        - id: Relocatable

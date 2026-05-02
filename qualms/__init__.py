@@ -19,6 +19,7 @@ from .core import (
     TraitInstance,
     WorldState,
 )
+from .yaml_loader import SchemaError, load_game_definition, load_world_state
 
 __all__ = [
     "ActionAttempt",
@@ -38,4 +39,7 @@ __all__ = [
     "TraitDefinition",
     "TraitInstance",
     "WorldState",
+    "SchemaError",
+    "load_game_definition",
+    "load_world_state",
 ]

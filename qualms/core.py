@@ -219,6 +219,7 @@ class GameDefinition:
     initial_entities: tuple[EntitySpec, ...] = ()
     initial_assertions: tuple[dict[str, Any], ...] = ()
     initial_facts: tuple[dict[str, Any], ...] = ()
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "traits", dict(self.traits))
@@ -231,13 +232,23 @@ class GameDefinition:
         for trait_def in list(self.traits.values()):
             for relation in trait_def.relations:
                 if relation.id in self.relations:
-                    raise ValueError(f"duplicate relation {relation.id}")
+                    if self.relations[relation.id] != relation:
+                        raise ValueError(f"duplicate relation {relation.id}")
+                    continue
                 self.relations[relation.id] = relation
             for action in trait_def.actions:
                 if action.id in self.actions:
-                    raise ValueError(f"duplicate action {action.id}")
+                    if self.actions[action.id] != action:
+                        raise ValueError(f"duplicate action {action.id}")
+                    continue
                 self.actions[action.id] = action
-        contributed_rules = [rule for trait_def in self.traits.values() for rule in trait_def.rules]
+        existing_rule_ids = {rule.id for rule in self.rules}
+        contributed_rules = [
+            rule
+            for trait_def in self.traits.values()
+            for rule in trait_def.rules
+            if rule.id not in existing_rule_ids
+        ]
         if contributed_rules:
             object.__setattr__(self, "rules", (*self.rules, *contributed_rules))
 

@@ -1,0 +1,276 @@
+qualms: "0.1"
+id: nova-qualms-prelude
+imports:
+  - core.qualms.yaml
+
+definitions:
+  traits:
+    - id: StarSystem
+      fields:
+        - id: star_type
+          type: str
+          default: "Unspecified"
+        - id: x
+          type: float
+          default: 0.0
+        - id: y
+          type: float
+          default: 0.0
+        - id: hops
+          type: list<ref<Location>>
+          default: []
+
+    - id: OrbitalBody
+      fields:
+        - id: orbital_type
+          type: str
+          default: "Planet"
+        - id: parent
+          type: ref<Location>?
+          default: null
+        - id: default_landing_path
+          type: list<id>
+          default: []
+
+    - id: Vehicle
+      fields:
+        - id: orbiting
+          type: ref<Location>?
+          default: null
+        - id: abilities
+          type: list<id>
+          default: []
+      relations:
+        - id: InOrbit
+          params:
+            - id: ship
+              type: ref<Vehicle>
+            - id: orbital
+              type: ref<Location>
+          get:
+            eq:
+              - field:
+                  entity: { var: ship }
+                  trait: Vehicle
+                  field: orbiting
+              - { var: orbital }
+          set:
+            - set_field:
+                entity: { var: ship }
+                trait: Vehicle
+                field: orbiting
+                value: { var: orbital }
+
+    - id: Boardable
+
+    - id: Jumpable
+
+    - id: Port
+
+    - id: Social
+
+    - id: Identifiable
+      fields:
+        - id: identified_by
+          type: list<ref<Actor>>
+          default: []
+
+  relations:
+    - id: DockedAt
+      params:
+        - id: ship
+          type: ref<Vehicle>
+        - id: destination
+          type: ref<Location>
+      get:
+        relation:
+          id: At
+          args:
+            - { var: ship }
+            - { var: destination }
+      set:
+        - set_field:
+            entity: { var: ship }
+            trait: Vehicle
+            field: orbiting
+            value: null
+        - assert:
+            relation: At
+            args:
+              - { var: ship }
+              - { var: destination }
+
+    - id: ControlledBy
+      params:
+        - id: ship
+          type: ref<Ownable>
+        - id: actor
+          type: ref<Actor>
+      get:
+        relation:
+          id: OwnedBy
+          args:
+            - { var: ship }
+            - { var: actor }
+      set:
+        - assert:
+            relation: OwnedBy
+            args:
+              - { var: ship }
+              - { var: actor }
+
+  actions:
+    - id: Board
+      params:
+        - id: actor
+          type: ref<Actor>
+        - id: ship
+          type: ref<Boardable>
+      requires: true
+      default:
+        - set_fact:
+            id: Aboard
+            args:
+              - { var: actor }
+              - { var: ship }
+
+    - id: Disembark
+      params:
+        - id: actor
+          type: ref<Actor>
+        - id: ship
+          type: ref<Boardable>
+      requires: true
+      default:
+        - clear_fact:
+            id: Aboard
+            args:
+              - { var: actor }
+              - { var: ship }
+
+    - id: TakeOff
+      params:
+        - id: actor
+          type: ref<Actor>
+        - id: ship
+          type: ref<Vehicle>
+        - id: orbital
+          type: ref<Location>
+      requires: true
+      default:
+        - assert:
+            relation: InOrbit
+            args:
+              - { var: ship }
+              - { var: orbital }
+
+    - id: Land
+      params:
+        - id: actor
+          type: ref<Actor>
+        - id: ship
+          type: ref<Vehicle>
+        - id: destination
+          type: ref<Location>
+      requires: true
+      default:
+        - assert:
+            relation: DockedAt
+            args:
+              - { var: ship }
+              - { var: destination }
+
+    - id: Jump
+      params:
+        - id: actor
+          type: ref<Actor>
+        - id: ship
+          type: ref<Vehicle>
+        - id: destination_system
+          type: ref<Location>
+      requires: true
+      default:
+        - assert:
+            relation: At
+            args:
+              - { var: ship }
+              - { var: destination_system }
+
+  kinds:
+    - id: System
+      traits:
+        - id: Presentable
+        - id: Location
+        - id: Container
+        - id: StarSystem
+
+    - id: Planet
+      traits:
+        - id: Presentable
+        - id: Location
+        - id: Container
+        - id: Relocatable
+        - id: OrbitalBody
+      fields:
+        OrbitalBody:
+          orbital_type: "Planet"
+
+    - id: Moon
+      traits:
+        - id: Presentable
+        - id: Location
+        - id: Container
+        - id: Relocatable
+        - id: OrbitalBody
+      fields:
+        OrbitalBody:
+          orbital_type: "Moon"
+
+    - id: Station
+      traits:
+        - id: Presentable
+        - id: Location
+        - id: Container
+        - id: Relocatable
+        - id: OrbitalBody
+      fields:
+        OrbitalBody:
+          orbital_type: "Station"
+
+    - id: Destination
+      traits:
+        - id: Presentable
+        - id: Location
+        - id: Container
+        - id: Relocatable
+
+    - id: StoryObject
+      traits:
+        - id: Presentable
+        - id: Relocatable
+
+    - id: NPC
+      traits:
+        - id: Presentable
+        - id: Actor
+        - id: Relocatable
+        - id: Social
+
+    - id: Ship
+      traits:
+        - id: Presentable
+        - id: Location
+        - id: Container
+        - id: Relocatable
+        - id: Vehicle
+        - id: Boardable
+        - id: Ownable
+        - id: Identifiable
+
+    - id: Player
+      traits:
+        - id: Presentable
+        - id: Actor
+        - id: Location
+        - id: Container
+        - id: Relocatable
