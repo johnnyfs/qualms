@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_PATH = PROJECT_ROOT / "stories" / "stellar" / "story_systems.json"
 ORBITAL_TYPES = {"Planet", "Moon", "Station"}
 OPTION_KINDS = {"Bar", "Tourist Destination", "Destination"}
-OBJECT_INTERACTIONS = {"Examine", "Take", "Use"}
+OBJECT_INTERACTIONS = {"Examine", "Take", "Use", "Power up"}
 NPC_INTERACTIONS = {"Examine", "Talk"}
 SHIP_INTERACTIONS = {"Examine", "Board"}
 DESTINATION_INTERACTIONS = {"Enter"}
@@ -32,6 +32,7 @@ class BeforeRule:
     message: str
     when: tuple[str, ...] = ()
     unless: tuple[str, ...] = ()
+    on_complete: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,15 @@ class Sequence:
 
 
 @dataclass(frozen=True)
+class UseRule:
+    target: str
+    messages: tuple[str, ...]
+    on_complete: tuple[str, ...] = ()
+    when: tuple[str, ...] = ()
+    unless: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class StoryObject:
     id: str
     name: str
@@ -52,6 +62,7 @@ class StoryObject:
     collectable: bool = False
     equipment_slot: str | None = None
     before: tuple[BeforeRule, ...] = ()
+    use_rules: tuple[UseRule, ...] = ()
     visible_when: tuple[str, ...] = ()
     visible_unless: tuple[str, ...] = ()
 
@@ -81,9 +92,13 @@ class Ship:
     name: str
     description: str
     unlock: bool = False
+    controlled: bool = False
     equipment_slots: tuple[str, ...] = ()
     abilities: tuple[str, ...] = ()
+    objects: tuple[StoryObject, ...] = ()
     before: tuple[BeforeRule, ...] = ()
+    display_names: tuple[ConditionalText, ...] = ()
+    interior_descriptions: tuple[ConditionalText, ...] = ()
     taglines: tuple[ConditionalText, ...] = ()
     visible_when: tuple[str, ...] = ()
     visible_unless: tuple[str, ...] = ()
@@ -156,6 +171,7 @@ class GameState:
     view: str = "system"
     map_return_view: str = "system"
     inventory_return_view: str = "system"
+    use_return_view: str = "inventory"
     orbital_id: str | None = None
     docked_path: list[int] = field(default_factory=list)
     destination_path: list[int] = field(default_factory=list)
@@ -165,10 +181,12 @@ class GameState:
     ships: dict[str, Ship] = field(default_factory=dict)
     inventory_index: int = 0
     inventory: dict[str, StoryObject] = field(default_factory=dict)
+    use_source_item_id: str | None = None
     equipment: dict[str, str] = field(default_factory=dict)
     object_locations: dict[str, str] = field(default_factory=dict)
     ship_locations: dict[str, str] = field(default_factory=dict)
     continue_message: str = ""
+    continue_on_complete: tuple[str, ...] = ()
     sequence_messages: tuple[str, ...] = ()
     sequence_index: int = 0
     sequence_on_complete: tuple[str, ...] = ()
@@ -325,6 +343,7 @@ def load_objects(raw_objects: list, context: str) -> tuple[StoryObject, ...]:
                 collectable=object_collectable(object_raw, interactions),
                 equipment_slot=optional_string(object_raw, "equipment_slot", object_context),
                 before=load_before_rules(object_raw.get("before", []), f"{object_context}.before", OBJECT_INTERACTIONS),
+                use_rules=load_use_rules(object_raw.get("use_rules", []), f"{object_context}.use_rules"),
                 visible_when=load_fact_conditions(object_raw.get("visible_when", []), f"{object_context}.visible_when"),
                 visible_unless=load_fact_conditions(object_raw.get("visible_unless", []), f"{object_context}.visible_unless"),
             )
@@ -372,9 +391,13 @@ def load_ships(raw_ships: list, context: str) -> tuple[Ship, ...]:
                 name=require_string(ship_raw, "name", ship_context),
                 description=require_string(ship_raw, "description", ship_context),
                 unlock=bool(ship_raw.get("unlock", False)),
+                controlled=bool(ship_raw.get("controlled", False)),
                 equipment_slots=load_string_list(ship_raw.get("equipment_slots", []), f"{ship_context}.equipment_slots"),
                 abilities=load_string_list(ship_raw.get("abilities", []), f"{ship_context}.abilities"),
+                objects=load_objects(ship_raw.get("objects", []), f"{ship_context}.objects"),
                 before=load_before_rules(ship_raw.get("before", []), f"{ship_context}.before", SHIP_INTERACTIONS),
+                display_names=load_conditional_texts(ship_raw.get("display_names", []), f"{ship_context}.display_names"),
+                interior_descriptions=load_conditional_texts(ship_raw.get("interior_descriptions", []), f"{ship_context}.interior_descriptions"),
                 taglines=load_conditional_texts(ship_raw.get("taglines", []), f"{ship_context}.taglines"),
                 visible_when=load_fact_conditions(ship_raw.get("visible_when", []), f"{ship_context}.visible_when"),
                 visible_unless=load_fact_conditions(ship_raw.get("visible_unless", []), f"{ship_context}.visible_unless"),
@@ -448,6 +471,33 @@ def load_before_rules(raw_rules: list, context: str, allowed_interactions: set[s
             BeforeRule(
                 interaction=interaction,
                 message=require_string(rule_raw, "message", rule_context),
+                when=load_fact_conditions(rule_raw.get("when", []), f"{rule_context}.when"),
+                unless=load_fact_conditions(rule_raw.get("unless", []), f"{rule_context}.unless"),
+                on_complete=load_fact_conditions(rule_raw.get("on_complete", []), f"{rule_context}.on_complete"),
+            )
+        )
+    return tuple(rules)
+
+
+def load_use_rules(raw_rules: object, context: str) -> tuple[UseRule, ...]:
+    if not isinstance(raw_rules, list):
+        raise ValueError(f"{context} must be a list")
+    rules: list[UseRule] = []
+    for rule_index, rule_raw in enumerate(raw_rules):
+        rule_context = f"{context}[{rule_index}]"
+        if not isinstance(rule_raw, dict):
+            raise ValueError(f"{rule_context} must be an object")
+        messages = load_fact_conditions(rule_raw.get("messages", []), f"{rule_context}.messages")
+        message = rule_raw.get("message")
+        if isinstance(message, str) and message.strip():
+            messages = (message, *messages)
+        if not messages:
+            raise ValueError(f"{rule_context}.messages must not be empty")
+        rules.append(
+            UseRule(
+                target=require_string(rule_raw, "target", rule_context),
+                messages=messages,
+                on_complete=load_fact_conditions(rule_raw.get("on_complete", []), f"{rule_context}.on_complete"),
                 when=load_fact_conditions(rule_raw.get("when", []), f"{rule_context}.when"),
                 unless=load_fact_conditions(rule_raw.get("unless", []), f"{rule_context}.unless"),
             )
@@ -774,6 +824,7 @@ def landing_option_to_raw(option: LandingOption) -> dict:
                 "collectable": story_object.collectable,
                 **({"equipment_slot": story_object.equipment_slot} if story_object.equipment_slot else {}),
                 "before": before_rules_to_raw(story_object.before),
+                "use_rules": use_rules_to_raw(story_object.use_rules),
                 **({"visible_when": list(story_object.visible_when)} if story_object.visible_when else {}),
                 **({"visible_unless": list(story_object.visible_unless)} if story_object.visible_unless else {}),
             }
@@ -798,9 +849,27 @@ def landing_option_to_raw(option: LandingOption) -> dict:
                 "name": ship.name,
                 "description": ship.description,
                 "unlock": ship.unlock,
+                "controlled": ship.controlled,
                 "equipment_slots": list(ship.equipment_slots),
                 "abilities": list(ship.abilities),
+                "objects": [
+                    {
+                        "id": story_object.id,
+                        "name": story_object.name,
+                        "description": story_object.description,
+                        "interactions": list(story_object.interactions),
+                        "collectable": story_object.collectable,
+                        **({"equipment_slot": story_object.equipment_slot} if story_object.equipment_slot else {}),
+                        "before": before_rules_to_raw(story_object.before),
+                        "use_rules": use_rules_to_raw(story_object.use_rules),
+                        **({"visible_when": list(story_object.visible_when)} if story_object.visible_when else {}),
+                        **({"visible_unless": list(story_object.visible_unless)} if story_object.visible_unless else {}),
+                    }
+                    for story_object in ship.objects
+                ],
                 "before": before_rules_to_raw(ship.before),
+                "display_names": conditional_texts_to_raw(ship.display_names),
+                "interior_descriptions": conditional_texts_to_raw(ship.interior_descriptions),
                 "taglines": conditional_texts_to_raw(ship.taglines),
                 **({"visible_when": list(ship.visible_when)} if ship.visible_when else {}),
                 **({"visible_unless": list(ship.visible_unless)} if ship.visible_unless else {}),
@@ -828,6 +897,24 @@ def before_rules_to_raw(rules: tuple[BeforeRule, ...]) -> list[dict]:
         raw_rule = {
             "interaction": rule.interaction,
             "message": rule.message,
+        }
+        if rule.when:
+            raw_rule["when"] = list(rule.when)
+        if rule.unless:
+            raw_rule["unless"] = list(rule.unless)
+        if rule.on_complete:
+            raw_rule["on_complete"] = list(rule.on_complete)
+        raw_rules.append(raw_rule)
+    return raw_rules
+
+
+def use_rules_to_raw(rules: tuple[UseRule, ...]) -> list[dict]:
+    raw_rules = []
+    for rule in rules:
+        raw_rule = {
+            "target": rule.target,
+            "messages": list(rule.messages),
+            "on_complete": list(rule.on_complete),
         }
         if rule.when:
             raw_rule["when"] = list(rule.when)
@@ -1028,6 +1115,7 @@ def add_object(
             "interactions": list(interactions),
             "collectable": "Take" in interactions,
             "before": [],
+            "use_rules": [],
         }
     )
     destination_raw.pop("details", None)
@@ -1596,7 +1684,7 @@ def draw_orbit(stdscr: curses.window, state: GameState, orbital: Orbital) -> Non
     lines.extend([
         "L: land",
         "I: inventory",
-        "T: return to system",
+        "T: travel in-system",
         "Q: quit",
     ])
     game_window(stdscr, state, 72, lines)
@@ -1635,7 +1723,7 @@ def draw_option(stdscr: curses.window, state: GameState, orbital: Orbital, optio
         for ship in visible_ships:
             lines.append(ship_tagline(state, option, ship))
         for choice in ship_choices:
-            lines.append(f"{choice_number}. {choice.target.name} [{choice.interaction}]")
+            lines.append(f"{choice_number}. {interaction_choice_label(state, choice)} [{choice.interaction}]")
             choice_number += 1
         lines.append("")
 
@@ -1648,7 +1736,7 @@ def draw_option(stdscr: curses.window, state: GameState, orbital: Orbital, optio
     lines.append("")
     boardable_ships = boardable_ships_for_destination(state, option)
     if len(boardable_ships) == 1:
-        lines.append(f"B: board {boardable_ships[0].name}")
+        lines.append(f"B: board {ship_display_name(state, boardable_ships[0])}")
     elif boardable_ships:
         lines.append("B: board ship")
     if state.destination_path != state.docked_path:
@@ -1666,11 +1754,19 @@ def draw_boarded_ship(stdscr: curses.window, state: GameState) -> None:
     lines = [
         f"On board the {name}",
         "",
-        "T: take off",
-        "G: go back",
-        "I: inventory",
-        "Q: quit",
     ]
+    description = ship_interior_description(state, ship)
+    if description:
+        lines.extend([description, ""])
+    object_choices = ship_object_choices(state, ship)
+    if object_choices:
+        lines.append("Objects:")
+        for index, choice in enumerate(object_choices, start=1):
+            lines.append(f"{index}. {choice.target.name} [{choice.interaction}]")
+        lines.append("")
+    if ship is not None and ship_controlled_by_player(state, ship):
+        lines.append("T: take off")
+    lines.extend(["G: go back", "I: inventory", "Q: quit"])
     game_window(stdscr, state, 72, lines)
 
 
@@ -1756,7 +1852,38 @@ def draw_inventory(stdscr: curses.window, state: GameState) -> None:
         selected = items[state.inventory_index]
         if selected.equipment_slot:
             lines.append("E: equip")
+        if "Use" in selected.interactions:
+            lines.append("U: use")
     lines.extend(["G: go back", "Q: quit"])
+    centered_window(stdscr, 72, lines)
+
+
+def draw_use_scope(stdscr: curses.window, state: GameState) -> None:
+    source = selected_use_source(state)
+    title = f"Use: {source.name}" if source is not None else "Use"
+    lines = [
+        title,
+        "",
+        "1. on an object in your inventory",
+        "2. on something in the room",
+        "",
+        "G: go back",
+        "Q: quit",
+    ]
+    centered_window(stdscr, 72, lines)
+
+
+def draw_use_targets(stdscr: curses.window, world: StoryWorld, state: GameState) -> None:
+    source = selected_use_source(state)
+    title = f"Use: {source.name}" if source is not None else "Use"
+    targets = use_targets(world, state)
+    lines = [title, ""]
+    if targets:
+        for index, target in enumerate(targets, start=1):
+            lines.append(f"{index}. {target.name}")
+    else:
+        lines.append("Nothing.")
+    lines.extend(["", "G: go back", "Q: quit"])
     centered_window(stdscr, 72, lines)
 
 
@@ -1776,6 +1903,10 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
             draw_continue_message(stdscr, state)
         elif sequence_active(state):
             draw_sequence(stdscr, state)
+        elif state.view == "use_scope":
+            draw_use_scope(stdscr, state)
+        elif state.view in {"use_room_target", "use_inventory_target"}:
+            draw_use_targets(stdscr, world, state)
         elif state.view == "inventory":
             draw_inventory(stdscr, state)
         elif state.view == "jump":
@@ -1815,6 +1946,8 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
 
         if state.continue_message:
             state.continue_message = ""
+            apply_outcomes(state, state.continue_on_complete)
+            state.continue_on_complete = ()
             continue
 
         if sequence_active(state):
@@ -1829,6 +1962,14 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
             state.view = "inventory"
             state.interaction_index = None
             clear_notice(state)
+            continue
+
+        if state.view == "use_scope":
+            handle_use_scope_input(state, key)
+            continue
+
+        if state.view in {"use_room_target", "use_inventory_target"}:
+            handle_use_target_input(world, state, key)
             continue
 
         if state.view == "inventory":
@@ -1872,7 +2013,12 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
                 clear_notice(state)
                 continue
             if boarded_ship_at_destination(state, selected_destination):
-                if key in (ord("t"), ord("T")):
+                ship = boarded_ship(state)
+                ship_choices = ship_object_choices(state, ship)
+                index = key - ord("1")
+                if 0 <= index < len(ship_choices):
+                    handle_interaction_choice(state, ship_choices[index], index)
+                elif key in (ord("t"), ord("T")) and ship is not None and ship_controlled_by_player(state, ship):
                     take_off_from_destination(state)
                 elif key in (ord("g"), ord("G")):
                     state.boarded_ship_id = None
@@ -1886,7 +2032,7 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
                 child_index, child_destination = visible_destination_entries_list[index - len(interaction_choices)]
                 blocked_message = destination_before_rule_message(state, child_destination)
                 if blocked_message is not None:
-                    state.continue_message = blocked_message
+                    start_continue_message(state, blocked_message)
                 else:
                     state.destination_path.append(child_index)
             elif key in (ord("b"), ord("B")):
@@ -1990,7 +2136,7 @@ def handle_inventory_input(state: GameState, key: int) -> None:
     selected = items[state.inventory_index]
 
     if key in (ord("x"), ord("X")):
-        state.continue_message = selected.description
+        start_continue_message(state, selected.description)
         return
 
     if key in (ord("e"), ord("E")):
@@ -1998,6 +2144,33 @@ def handle_inventory_input(state: GameState, key: int) -> None:
             state.message = "You cannot equip that."
             return
         state.equipment[selected.equipment_slot] = selected.id
+
+    if key in (ord("u"), ord("U")) and "Use" in selected.interactions:
+        state.use_source_item_id = selected.id
+        state.use_return_view = state.inventory_return_view
+        state.view = "use_scope"
+
+
+def handle_use_scope_input(state: GameState, key: int) -> None:
+    if key == ord("1"):
+        state.view = "use_inventory_target"
+        return
+    if key == ord("2"):
+        state.view = "use_room_target"
+        return
+    if key in (ord("g"), ord("G")):
+        state.view = "inventory"
+        return
+
+
+def handle_use_target_input(world: StoryWorld, state: GameState, key: int) -> None:
+    if key in (ord("g"), ord("G")):
+        state.view = "use_scope"
+        return
+    targets = use_targets(world, state)
+    index = key - ord("1")
+    if 0 <= index < len(targets):
+        use_item_on_target(state, targets[index])
 
 
 def inventory_items(state: GameState) -> list[StoryObject]:
@@ -2064,6 +2237,9 @@ def collect_objects_by_id(destinations: tuple[LandingOption, ...], objects: dict
     for destination in destinations:
         for story_object in destination.objects:
             objects[story_object.id] = story_object
+        for ship in destination.ships:
+            for story_object in ship.objects:
+                objects[story_object.id] = story_object
         collect_objects_by_id(destination.destinations, objects)
 
 
@@ -2121,6 +2297,9 @@ def initial_game_state(world: StoryWorld, editor_enabled: bool) -> GameState:
     state = GameState(system_id=world.start_system, editor_enabled=editor_enabled)
     state.ships = ships_by_id(world)
     state.ship_locations = authored_ship_locations(world)
+    controlled_ships = [ship.id for ship in state.ships.values() if ship.controlled]
+    if controlled_ships:
+        state.player_ship_id = controlled_ships[0]
     if world.start_orbital_id is None:
         return state
 
@@ -2184,6 +2363,17 @@ def visible_objects_for_destination(state: GameState, destination: LandingOption
     ]
 
 
+def visible_objects_for_ship(state: GameState, ship: Ship | None) -> list[StoryObject]:
+    if ship is None:
+        return []
+    return [
+        story_object
+        for story_object in ship.objects
+        if object_is_at_authored_location(state, story_object)
+        and fact_conditions_met(state, story_object.visible_when, story_object.visible_unless)
+    ]
+
+
 def visible_npcs_for_destination(state: GameState, destination: LandingOption) -> list[NPC]:
     return [
         npc
@@ -2215,6 +2405,12 @@ def boarded_ship(state: GameState) -> Ship | None:
     return state.ships.get(state.boarded_ship_id)
 
 
+def selected_use_source(state: GameState) -> StoryObject | None:
+    if state.use_source_item_id is None:
+        return None
+    return state.inventory.get(state.use_source_item_id)
+
+
 def boarded_ship_at_destination(state: GameState, destination: LandingOption) -> bool:
     return (
         state.boarded_ship_id is not None
@@ -2227,14 +2423,17 @@ def board_ship_at_destination(state: GameState, destination: LandingOption) -> N
     if not ships:
         return
     ship = ships[0]
-    if ship.unlock:
-        state.player_ship_id = ship.id
     state.boarded_ship_id = ship.id
+    state.facts.add(f"ship:{ship.id}:visited")
+    state.facts.add(f"ship:{ship.id}:identified")
     clear_notice(state)
 
 
 def take_off_from_destination(state: GameState) -> None:
     if state.boarded_ship_id is None or state.orbital_id is None:
+        return
+    ship = boarded_ship(state)
+    if ship is None or not ship_controlled_by_player(state, ship):
         return
     state.ship_locations[state.boarded_ship_id] = f"orbit:{state.system_id}:{state.orbital_id}"
     state.last_orbital_by_system[state.system_id] = state.orbital_id
@@ -2259,6 +2458,10 @@ def land_boarded_ship(state: GameState, orbital: Orbital, landing_path: list[int
     if destination is not None:
         state.ship_locations[state.boarded_ship_id] = destination.id
         state.boarded_ship_id = None
+
+
+def ship_controlled_by_player(state: GameState, ship: Ship) -> bool:
+    return state.player_ship_id == ship.id
 
 
 def visible_destination_entries(state: GameState, destination: LandingOption) -> list[tuple[int, LandingOption]]:
@@ -2288,7 +2491,23 @@ def ship_tagline(state: GameState, destination: LandingOption, ship: Ship) -> st
         if fact_conditions_met(state, tagline.when, tagline.unless):
             return tagline.text
     disposition = "docked" if destination.port else "parked"
-    return f"The {ship.name} is {disposition} here."
+    return f"The {ship_display_name(state, ship)} is {disposition} here."
+
+
+def ship_display_name(state: GameState, ship: Ship) -> str:
+    for display_name in ship.display_names:
+        if fact_conditions_met(state, display_name.when, display_name.unless):
+            return display_name.text
+    return ship.name
+
+
+def ship_interior_description(state: GameState, ship: Ship | None) -> str:
+    if ship is None:
+        return ""
+    for description in ship.interior_descriptions:
+        if fact_conditions_met(state, description.when, description.unless):
+            return description.text
+    return ""
 
 
 def ship_choices_for_destination(state: GameState, destination: LandingOption) -> list[InteractionChoice]:
@@ -2296,6 +2515,14 @@ def ship_choices_for_destination(state: GameState, destination: LandingOption) -
     for ship in visible_ships_for_destination(state, destination):
         for interaction in ship_interactions(ship):
             choices.append(InteractionChoice("ship", ship, interaction))
+    return choices
+
+
+def ship_object_choices(state: GameState, ship: Ship | None) -> list[InteractionChoice]:
+    choices: list[InteractionChoice] = []
+    for story_object in visible_objects_for_ship(state, ship):
+        for interaction in story_object.interactions:
+            choices.append(InteractionChoice("object", story_object, interaction))
     return choices
 
 
@@ -2307,21 +2534,27 @@ def destination_interaction_choices(state: GameState, destination: LandingOption
     ]
 
 
+def interaction_choice_label(state: GameState, choice: InteractionChoice) -> str:
+    if isinstance(choice.target, Ship):
+        return ship_display_name(state, choice.target)
+    return choice.target.name
+
+
 def handle_interaction_choice(state: GameState, choice: InteractionChoice, choice_index: int) -> None:
-    blocked_message = before_rule_message(state, choice)
-    if blocked_message is not None:
-        state.continue_message = blocked_message
+    rule = before_rule_for_choice(state, choice)
+    if rule is not None:
+        start_continue_message(state, rule.message, rule.on_complete)
         state.interaction_index = None
         return
     if choice.kind == "object" and choice.interaction == "Take":
         story_object = choice.target
         if isinstance(story_object, StoryObject):
             if not story_object.collectable:
-                state.continue_message = "You cannot take that."
+                start_continue_message(state, "You cannot take that.")
                 state.interaction_index = None
                 return
             if story_object.id in state.inventory:
-                state.continue_message = "You already have that."
+                start_continue_message(state, "You already have that.")
                 state.interaction_index = None
                 return
             state.inventory[story_object.id] = story_object
@@ -2330,14 +2563,56 @@ def handle_interaction_choice(state: GameState, choice: InteractionChoice, choic
             state.interaction_index = None
             clear_notice(state)
             return
-    state.continue_message = interaction_description(choice)
+    start_continue_message(state, interaction_description(choice))
     state.interaction_index = None
 
 
+def use_targets(world: StoryWorld, state: GameState) -> list[StoryObject]:
+    if state.view == "use_inventory_target":
+        source_id = state.use_source_item_id
+        return [item for item in inventory_items(state) if item.id != source_id]
+    if state.view != "use_room_target":
+        return []
+    ship = boarded_ship(state)
+    if ship is not None:
+        return visible_objects_for_ship(state, ship)
+    if state.orbital_id is None:
+        return []
+    try:
+        orbital = orbital_by_id(world.system_by_id(state.system_id), state.orbital_id)
+    except KeyError:
+        return []
+    destination = destination_at_path(orbital, state.destination_path)
+    if destination is None:
+        return []
+    return visible_objects_for_destination(state, destination)
+
+
+def use_item_on_target(state: GameState, target: StoryObject) -> None:
+    source = selected_use_source(state)
+    if source is None:
+        state.view = "inventory"
+        return
+    for rule in source.use_rules:
+        if rule.target == target.id and fact_conditions_met(state, rule.when, rule.unless):
+            state.view = state.use_return_view
+            state.use_source_item_id = None
+            start_message_sequence(state, rule.messages, rule.on_complete)
+            return
+    state.view = state.use_return_view
+    state.use_source_item_id = None
+    start_continue_message(state, "Nothing happens.")
+
+
 def before_rule_message(state: GameState, choice: InteractionChoice) -> str | None:
+    rule = before_rule_for_choice(state, choice)
+    return rule.message if rule is not None else None
+
+
+def before_rule_for_choice(state: GameState, choice: InteractionChoice) -> BeforeRule | None:
     for rule in choice.target.before:
         if rule.interaction == choice.interaction and fact_conditions_met(state, rule.when, rule.unless):
-            return rule.message
+            return rule
     return None
 
 
@@ -2357,11 +2632,20 @@ def enter_destination(state: GameState, destination: LandingOption) -> None:
 
 
 def start_sequence(state: GameState, sequence: Sequence) -> None:
+    start_message_sequence(state, sequence.messages, sequence.on_complete)
+
+
+def start_continue_message(state: GameState, message: str, on_complete: tuple[str, ...] = ()) -> None:
+    state.continue_message = message
+    state.continue_on_complete = on_complete
+
+
+def start_message_sequence(state: GameState, messages: tuple[str, ...], on_complete: tuple[str, ...] = ()) -> None:
     clear_notice(state)
     state.interaction_index = None
-    state.sequence_messages = sequence.messages
+    state.sequence_messages = messages
     state.sequence_index = 0
-    state.sequence_on_complete = sequence.on_complete
+    state.sequence_on_complete = on_complete
 
 
 def sequence_active(state: GameState) -> bool:
@@ -2374,10 +2658,19 @@ def advance_sequence(state: GameState) -> None:
     if state.sequence_index < len(state.sequence_messages) - 1:
         state.sequence_index += 1
         return
-    state.facts.update(state.sequence_on_complete)
+    apply_outcomes(state, state.sequence_on_complete)
     state.sequence_messages = ()
     state.sequence_index = 0
     state.sequence_on_complete = ()
+
+
+def apply_outcomes(state: GameState, outcomes: tuple[str, ...]) -> None:
+    for outcome in outcomes:
+        parts = outcome.split(":")
+        if len(parts) == 3 and parts[0] == "ship" and parts[2] == "control":
+            state.player_ship_id = parts[1]
+        else:
+            state.facts.add(outcome)
 
 
 def visited_destination_fact(destination: LandingOption) -> str:
@@ -2405,6 +2698,7 @@ def state_has_fact(state: GameState, fact: str) -> bool:
 
 def clear_notice(state: GameState) -> None:
     state.continue_message = ""
+    state.continue_on_complete = ()
 
 
 def interaction_description(choice: InteractionChoice) -> str:
@@ -2421,6 +2715,10 @@ def interaction_description(choice: InteractionChoice) -> str:
         if isinstance(choice.target, StoryObject) and not choice.target.collectable:
             return "You cannot take that."
         return f"Taken: {choice.target.name}"
+    if choice.interaction == "Power up":
+        return "Nothing happens."
+    if choice.interaction == "Use":
+        return "Nothing happens."
     return choice.target.description
 
 
@@ -2877,9 +3175,7 @@ def dump_destination(option: LandingOption, lines: list[str], prefix: str) -> No
         for message in sequence.messages:
             lines.append(f"         {message}")
     for index, story_object in enumerate(option.objects, start=1):
-        lines.append(f"      {prefix}o{index}. {story_object.name} [{', '.join(story_object.interactions)}]: {story_object.description}")
-        for rule in story_object.before:
-            lines.append(f"         before {rule.interaction}{condition_suffix(rule.when, rule.unless)}: {rule.message}")
+        dump_object(story_object, lines, f"      {prefix}o{index}.")
     for index, npc in enumerate(option.npcs, start=1):
         lines.append(f"      {prefix}n{index}. {npc.name} [{', '.join(npc.interactions)}]: {npc.description}")
         for rule in npc.before:
@@ -2888,16 +3184,40 @@ def dump_destination(option: LandingOption, lines: list[str], prefix: str) -> No
         lines.append(f"      {prefix}h{index}. {ship.name} [Ship]: {ship.description}")
         if ship.unlock:
             lines.append("         unlock: true")
+        if ship.controlled:
+            lines.append("         controlled: true")
         if ship.equipment_slots:
             lines.append("         slots: " + ", ".join(ship.equipment_slots))
         if ship.abilities:
             lines.append("         abilities: " + ", ".join(ship.abilities))
+        for object_index, story_object in enumerate(ship.objects, start=1):
+            dump_object(story_object, lines, f"         h{index}.o{object_index}.")
+        for display_name in ship.display_names:
+            lines.append(f"         display name{condition_suffix(display_name.when, display_name.unless)}: {display_name.text}")
+        for description in ship.interior_descriptions:
+            lines.append(f"         interior{condition_suffix(description.when, description.unless)}: {description.text}")
         for tagline in ship.taglines:
             lines.append(f"         tagline{condition_suffix(tagline.when, tagline.unless)}: {tagline.text}")
         for rule in ship.before:
             lines.append(f"         before {rule.interaction}{condition_suffix(rule.when, rule.unless)}: {rule.message}")
+            if rule.on_complete:
+                lines.append("            outcomes: " + ", ".join(rule.on_complete))
     for index, child in enumerate(option.destinations, start=1):
         dump_destination(child, lines, f"   {prefix}{index}.")
+
+
+def dump_object(story_object: StoryObject, lines: list[str], prefix: str) -> None:
+    lines.append(f"{prefix} {story_object.name} [{', '.join(story_object.interactions)}]: {story_object.description}")
+    for rule in story_object.before:
+        lines.append(f"         before {rule.interaction}{condition_suffix(rule.when, rule.unless)}: {rule.message}")
+        if rule.on_complete:
+            lines.append("            outcomes: " + ", ".join(rule.on_complete))
+    for rule in story_object.use_rules:
+        lines.append(f"         use on {rule.target}{condition_suffix(rule.when, rule.unless)}")
+        for message in rule.messages:
+            lines.append(f"            {message}")
+        if rule.on_complete:
+            lines.append("            outcomes: " + ", ".join(rule.on_complete))
 
 
 def condition_suffix(when: tuple[str, ...], unless: tuple[str, ...]) -> str:

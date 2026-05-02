@@ -1,0 +1,593 @@
+########################
+# UNIVERSAL CODE MODEL #
+########################
+
+This is a compact code-level model, not a file format.  It uses first-class
+language features for the things a general engine should know intrinsically:
+classes, abstract classes, interfaces, traits/components, enums, generics,
+typed references, typed actions, typed relations, and typed rules.
+
+Game-authored affordances are explicit traits.  The point is to avoid hard
+coding "object", "ship", "person", and "destination" as separate rule worlds.
+They are entities with different class defaults and different trait sets.
+
+#######
+# KEY #
+#######
+
+abstract class A
+interface I
+trait T
+class B : A, I
+enum E = A | B
+type Alias = Type
+
+- field: Type
+* ref: Ref<Type>
++ method(args) -> Type
+? optional
+[T] list
+{T} set
+(K -> V) map
+T | U union
+<T> generic
+Entity with TraitName = entity whose TraitSet grants that capability
+:= derived or generated
+-- constraint/comment
+
+
+#######################
+# IDENTIFIERS / REFS  #
+#######################
+
+type LocalId = string          -- unique inside its declared sibling scope
+type UID = string              -- globally unique inside one game definition
+type PrototypeId = string      -- stable id for cloneable templates
+type InstanceId = string       -- generated id for runtime instances
+type TraitId = string
+type RelationId = string
+type ActionType = string
+type FactId = string
+type Value = scalar | Ref<Entity> | [Value] | (string -> Value)
+type Vec2 = (float, float)
+type Ref<T: Entity> = UID      -- reference by immutable uid
+
+class PathComponent
+  - id: LocalId
+  - namespace: Class<Entity>?  -- used when sibling classes need separate names
+
+class OriginPath
+  - parts: [PathComponent]
+  - entity_class: Class<Entity>
+  - uid := join(parts.namespace?, parts.id, ".")
+
+Rules:
+  - Authored unique entities get a UID from their starting declaration path.
+  - Relocatable unique entities keep that UID forever after moving.
+  - LocalId uniqueness is required only within the declaring sibling scope.
+  - Runtime clones use InstanceId and retain a pointer to PrototypeId.
+
+
+#####################
+# CORE OBJECT MODEL #
+#####################
+
+abstract class Entity
+  - id: LocalId
+  - uid: UID
+  - origin: OriginPath
+  - title: Presentation<Name>
+  - description: Presentation<Description>
+  - traits: TraitSet
+  - rules: RuleBook
+
+interface RuleHost
+  - rules: RuleBook
+
+interface Positioned
+  - position: Vec2
+
+class TraitSet
+  - traits: (TraitId -> Trait)
+  + has<T: Trait>() -> bool
+  + get<T: Trait>() -> T?
+  + add(trait: Trait) -> void
+  + remove(trait_id: TraitId) -> void
+
+interface Trait
+  - id: TraitId
+  - grants: {Capability}
+  - relations: {RelationType}
+  - actions: {ActionType}
+  - mutable: bool
+
+enum Capability =
+    Presentable
+  | Place
+  | Container
+  | Portal
+  | Actor
+  | Visitor
+  | Vehicle
+  | Boardable
+  | Portable
+  | Usable
+  | Equipment
+  | Ownable
+  | Identifiable
+  | Social
+
+
+#########################
+# STRUCTURAL WORLD TYPES #
+#########################
+
+class System : Entity, Positioned, RuleHost
+  - star_type: string
+  - orbitals: [Orbital]
+  - hops: [Ref<System>]
+
+class Orbital : Entity, Positioned, RuleHost
+  - orbital_type: OrbitalType
+  * parent: Ref<Orbital>?
+  - destinations: [Destination]
+
+enum OrbitalType = Planet | Moon | Station | Encounter
+
+-- Systems and Orbitals are mostly topology.  Travel within a System is from
+-- Orbital to Orbital while aboard a Vehicle-capable Entity.
+
+
+###########################
+# ENTITY SUBCLASS DEFAULTS #
+###########################
+
+class Destination : Entity
+  traits default:
+    PlaceTrait
+    ContainerTrait
+    PresentableTrait
+
+class Thing : Entity
+  traits default:
+    PresentableTrait
+
+class Ship : Entity
+  traits default:
+    PresentableTrait
+    PlaceTrait
+    ContainerTrait
+    BoardableTrait
+    VehicleTrait
+    OwnableTrait
+    IdentifiableTrait
+
+class Person : Entity
+  traits default:
+    PresentableTrait
+    ActorTrait
+    VisitorTrait
+    ContainerTrait as InventoryTrait
+    SocialTrait
+
+class Player : Person
+  traits default:
+    ControllerTrait<PlayerInput>
+
+class NPC : Person
+  traits default:
+    ControllerTrait<ScriptedBehavior>
+
+-- Subclasses give the code a useful nominal vocabulary.
+-- Traits give authors mixable behavior without subclass explosion.
+
+
+##########################
+# MIXABLE ATTRIBUTE TYPES #
+##########################
+
+trait PresentableTrait : Trait
+  - grants: {Presentable}
+  - visible: Predicate = true
+  - scenery: bool = false
+  - observe: Presentation<Observation>?
+  - title: Presentation<Name>?
+  - description: Presentation<Description>?
+  - initial: Presentation<Observation>?
+  - actions: {Observe, Name, Examine}
+
+trait PlaceTrait : Trait
+  - grants: {Place}
+  - enter_policy: EntryPolicy = Open
+  - exit_policy: ExitPolicy = Open
+  - paths: [Ref<Destination>]
+  - actions: {Enter, Exit}
+  - relations: {LocatedIn}
+
+trait ContainerTrait : Trait
+  - grants: {Container}
+  - accepts: Predicate<Entity> = true
+  - capacity: Capacity = Unbounded
+  - relations: {ContainedIn}
+
+trait InventoryTrait : ContainerTrait
+  - accepts: Predicate<Entity> = has_trait(PortableTrait)
+  - relation_alias: Carries
+
+trait PortableTrait : Trait
+  - grants: {Portable}
+  - actions: {Take, Drop}
+  - relations: {ContainedIn, CarriedBy}
+
+trait UsableTrait : Trait
+  - grants: {Usable}
+  - use_targets: Predicate<Entity> = any
+  - actions: {Use}
+
+trait EquipmentTrait : Trait
+  - grants: {Equipment}
+  - slot: EquipmentSlot
+  - actions: {Equip, Unequip}
+  - relations: {EquippedBy}
+
+trait ActorTrait : Trait
+  - grants: {Actor}
+  - controller: Controller
+  - actions: {Observe, Examine, Enter, Exit, Take, Drop, Use, Talk}
+
+trait VisitorTrait : Trait
+  - grants: {Visitor}
+  * location: Ref<Entity with Place>? := state.location_of(host)
+  - relations: {LocatedIn, Aboard}
+
+trait VehicleTrait : Trait
+  - grants: {Vehicle}
+  - travel_modes: {TravelMode}
+  - actions: {Travel, Launch, Land, Dock, Undock}
+  - requires_actor: Predicate<Entity with Actor>
+
+trait BoardableTrait : Trait
+  - grants: {Boardable}
+  - boarding_policy: EntryPolicy = Open
+  - actions: {Board, Disembark}
+  - relations: {Aboard}
+
+trait OwnableTrait : Trait
+  - grants: {Ownable}
+  - actions: {Claim, Transfer}
+  - relations: {OwnedBy}
+
+trait IdentifiableTrait : Trait
+  - grants: {Identifiable}
+  - identified_by_default: bool = false
+  - relations: {IdentifiedBy, KnownAs}
+
+trait SocialTrait : Trait
+  - grants: {Social}
+  - topics: [Topic]
+  - actions: {Talk, Ask, Tell}
+
+trait ControllerTrait<C: Controller> : Trait
+  - controller: C
+
+
+################
+# PRESENTATION #
+################
+
+class Presentation<T>
+  - default: T
+  - variants: [PresentationRule<T>]
+  + resolve(context: PresentationContext) -> T
+
+class PresentationRule<T>
+  - when: Predicate = true
+  - value: T
+  - effect: [Effect] = []
+  - stop_default: bool = true
+
+type Name = string
+type Description = string
+type Observation = string
+
+-- Presentation is not text-only.  A text interface renders strings; a visual
+-- interface can map the same states to labels, meshes, sprites, prompts,
+-- silhouettes, highlights, or backdrop treatment.
+
+
+#############
+# RELATIONS #
+#############
+
+class RelationType<S: Entity, O: Entity>
+  - id: RelationId
+  - subject_requires: Predicate<S>
+  - object_requires: Predicate<O>
+  - cardinality: Cardinality
+  - inverse: RelationType<O, S>?
+  - persistence: Current | Remembered | Both
+
+class Edge<S: Entity, O: Entity>
+  * subject: Ref<S>
+  - relation: RelationType<S, O>
+  * object: Ref<O>
+
+class RelationGraph
+  - current_edges: {Edge}
+  - remembered_edges: {Edge}
+  + get(subject, relation) -> [Ref<Entity>]
+  + set(subject, relation, object, persistence?) -> void
+  + clear(subject, relation, object?) -> void
+  + move(subject, container) -> void
+
+Relations:
+  LocatedIn   : Entity with Visitor   -> Entity with Place      -- one current location
+  ContainedIn : Entity                 -> Entity with Container  -- one current container
+  CarriedBy   : Entity with Portable   -> Entity with Actor      -- inventory
+  EquippedBy  : Entity with Equipment  -> Entity with Actor      -- one per slot
+  Aboard      : Entity with Actor      -> Entity with Boardable  -- actor inside vehicle/place
+  OwnedBy     : Entity with Ownable    -> Entity with Actor|Faction
+  IdentifiedBy: Entity with Identifiable -> Entity with Actor
+  KnownAs     : Entity with Identifiable -> NameKnowledge
+  DockedAt    : Entity with Vehicle    -> Entity with Place|Orbital
+  Orbiting    : Entity with Vehicle    -> Orbital
+  Approaching : Entity with Vehicle    -> Orbital
+
+-- Current physical state is graph state.
+-- Persistent relations are opt-in remembered_edges.
+-- Non-relational story memory lives in MemoryStore.
+
+
+#########
+# FACTS #
+#########
+
+interface Predicate
+  + evaluate(state: WorldState, actor: Entity?) -> bool
+
+class Fact : Predicate
+  - id: FactId
+  - args: [Value|Ref<Entity>]
+
+class MemoryStore
+  - facts: {Fact}
+  + set(fact) -> void
+  + clear(fact) -> void
+  + has(fact) -> bool
+
+Common remembered facts:
+  Visited(actor, place)
+  Observed(actor, entity)
+  Examined(actor, entity)
+  SequenceComplete(id)
+  Knows(actor, fact|topic|entity)
+  Flag(id)
+
+Predicates can query current relation edges, remembered relation edges, or
+remembered facts.
+
+class WorldState
+  - entities: EntityIndex
+  - relations: RelationGraph
+  - memory: MemoryStore
+  - clock: GameClock
+
+
+###########
+# ACTIONS #
+###########
+
+abstract class Action
+  * actor: Ref<Entity with Actor>?
+  - type: ActionType
+  - source: Ref<Entity>?
+  - target: Ref<Entity>?
+  - args: (string -> Value)
+
+class Observe : Action
+  * target: Ref<Entity with Presentable>
+
+class Name : Action
+  * target: Ref<Entity>
+
+class Examine : Action
+  * target: Ref<Entity with Presentable>
+
+class Enter : Action
+  * target: Ref<Entity with Place>
+  * from: Ref<Entity with Place>?
+
+class Exit : Action
+  * from: Ref<Entity with Place>
+  * to: Ref<Entity with Place>?
+
+class Board : Action
+  * target: Ref<Entity with Boardable>
+
+class Disembark : Action
+  * from: Ref<Entity with Boardable>
+
+class Take : Action
+  * target: Ref<Entity with Portable>
+
+class Drop : Action
+  * target: Ref<Entity with Portable>
+
+class Use : Action
+  * source: Ref<Entity with Usable>
+  * target: Ref<Entity>?
+
+class Equip : Action
+  * target: Ref<Entity with Equipment>
+
+class Talk : Action
+  * target: Ref<Entity with Social>
+  * topic: Topic?
+
+class Travel : Action
+  * vehicle: Ref<Entity with Vehicle>
+  * from: Ref<Orbital>
+  * to: Ref<Orbital>
+
+class Launch : Action
+  * vehicle: Ref<Entity with Vehicle>
+  * from: Ref<Entity with Place>
+  * to: Ref<Orbital>
+
+class Land : Action
+  * vehicle: Ref<Entity with Vehicle>
+  * from: Ref<Orbital>
+  * to: Ref<Entity with Place>
+
+
+#########
+# RULES #
+#########
+
+class RuleBook
+  - rules: [Rule]
+  + matching(action, phase, state) -> [Rule]
+
+class Rule<A: Action>
+  - phase: RulePhase
+  - match: ActionPattern<A>
+  - when: Predicate = true
+  - effects: [Effect]
+  - stop_default: bool = false
+  - priority: int = 0
+
+enum RulePhase = Before | Instead | After | Presentation
+
+class ActionPattern<A: Action>
+  - action_type: Class<A>
+  * actor: Ref<Entity>?
+  * source: Ref<Entity>?
+  * target: Ref<Entity>?
+
+abstract class Effect
+  + apply(state: WorldState, action: Action) -> void
+
+Effects:
+  SetRelation(subject, relation, object)
+  ClearRelation(subject, relation, object?)
+  SetFact(fact)
+  ClearFact(fact)
+  Present(value)
+  StartSequence(sequence_id)
+  GrantTrait(entity, trait)
+  RevokeTrait(entity, trait_id)
+  CreateInstance(prototype_id, container)
+  DestroyEntity(entity)
+
+Action pipeline:
+  1. derive available actions from actor + target traits + state
+  2. run Before rules; any stop_default blocks default behavior
+  3. run Instead rules; first stop_default replaces default behavior
+  4. run default action implementation
+  5. run After rules
+  6. resolve Presentation rules for interface output
+
+
+########################
+# PROTOTYPES / CLONING #
+########################
+
+class Prototype<E: Entity>
+  - id: PrototypeId
+  - entity_class: Class<E>
+  - default_title: Presentation<Name>
+  - default_description: Presentation<Description>
+  - default_traits: TraitSet
+  - default_rules: RuleBook
+
+class Instance<E: Entity> : Entity
+  - instance_id: InstanceId
+  * prototype: Ref<Prototype<E>>
+
+-- Unique authored ships/items/people use Entity UID.
+-- Non-unique cargo, equipment, enemies, and spawned ships use Prototype+Instance.
+
+
+########################
+# COMPOSITION EXAMPLES #
+########################
+
+Destination "impact-crater" : Destination
+  traits:
+    PlaceTrait
+    ContainerTrait
+    PresentableTrait
+
+Ship "canary" : Ship
+  uid := "vexas.rainbow.mining-colony-5.pointless-settlement.airlock.lunar-surface.active-mine.impact-crater.ship.canary"
+  traits:
+    PresentableTrait
+    PlaceTrait
+    ContainerTrait
+    BoardableTrait
+    VehicleTrait
+    OwnableTrait
+    IdentifiableTrait
+  presentation:
+    Name default: "Canary"
+    Name unless IdentifiedBy(canary, player): "mysterious yellow ship"
+    Observe when LocatedIn(canary, impact-crater):
+      "A sleek yellow sloop sits at the heart of the crater."
+  rules:
+    Before Examine(target=canary)
+      when LocatedIn(canary, impact-crater)
+      effects:
+        Present("Smooth, yellow, almost seamless except for a hatch on top and the letters AUD Canary etched into the side.")
+        SetRelation(canary, IdentifiedBy, player, Remembered)
+      stop_default: true
+
+Thing "portrait-of-enrick" : Thing
+  traits:
+    PresentableTrait
+    PortableTrait
+    UsableTrait
+  rules:
+    After Use(source=portrait-of-enrick, target=control-console)
+      effects:
+        Present("The iris whirs with approval, and the console powers up.")
+        SetRelation(canary, OwnedBy, player)
+
+Thing "spare-expedition-suit" : Thing
+  traits:
+    PresentableTrait
+    PortableTrait
+    EquipmentTrait(slot=Exosuit)
+
+Destination "lunar-surface" : Destination
+  rules:
+    Before Enter(target=lunar-surface)
+      unless EquippedBy(spare-expedition-suit, player)
+      effects:
+        Present("As unbearable as life is here, you still prefer it to cold-boiling in an irradiated vacuum.")
+      stop_default: true
+
+NPC "stu" : NPC
+  traits:
+    PresentableTrait
+    ActorTrait
+    VisitorTrait
+    SocialTrait
+  rules:
+    Before Talk(target=stu)
+      effects:
+        Present("We call him Stupor for a reason.")
+      stop_default: true
+
+
+#####################
+# DESIGN CONSTRAINTS #
+#####################
+
+1. Rules match Actions, not UI commands.
+2. Interfaces choose how to render Present/Observe/Name/Examine results.
+3. Entity subclasses provide stable nominal categories for code.
+4. Traits/components provide dynamic, mixable authored behavior.
+5. Current state is a relation graph.
+6. Past state is explicit memory, not an automatic history of every edge.
+7. Ship, Person, Thing, and Destination rules share one action pipeline.
+8. Systems and Orbitals remain structural topology with their own simple rules.
