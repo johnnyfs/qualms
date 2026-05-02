@@ -2,7 +2,7 @@
 
 Qualms is a prototype for a rules-driven story engine and a nova-like game built on top of it. The long-term goal is to define a compact declarative model for game rules that can be projected into different genres, interfaces, and implementations while preserving the same core behavior.
 
-The current playable game is still Dark Qualms: a story-first bounty-hunter prototype with a maintained curses interface. The current data file is JSON, but the design direction is a YAML schema with genre-agnostic primitives: entities, traits, relations, actions, rules, and effects/assertions. Genre-specific concepts such as systems, orbitals, ships, people, inventory, and travel should be expressed by authored preludes and story content rather than hard-coded as engine categories.
+The current playable game is still Dark Qualms: a story-first bounty-hunter prototype with a maintained curses interface. The maintained story source is now `story.qualms.yaml`, backed by a generated `story_systems.json` compatibility artifact while the curses editor finishes migrating. The YAML schema uses genre-agnostic primitives: entities, traits, relations, actions, rules, and effects/assertions. Genre-specific concepts such as systems, orbitals, ships, people, inventory, and travel are expressed by authored preludes and story content rather than hard-coded as engine categories.
 
 ## Specs
 
@@ -17,7 +17,7 @@ Technical direction now lives in `specs/`:
 ## Layout
 
 - `specs/`: technical design documents for the rules engine and future YAML schema.
-- `stories/`: active story data. The current story is `stories/stellar/story_systems.json`.
+- `stories/`: active story data. The current story is `stories/stellar/story.qualms.yaml`.
 - `curses/`: maintained text interface for playing and editing the story graph.
 - `godot/`: paused 2D orbital-flight prototype; kept for possible future interface work.
 - `examples/`: valid older story datasets kept for reference.
@@ -41,7 +41,7 @@ Run with the in-game editor exposed:
 Both scripts use the curses interface. By default they load:
 
 ```sh
-stories/stellar/story_systems.json
+stories/stellar/story.qualms.yaml
 ```
 
 Run against another story directory:
@@ -50,7 +50,7 @@ Run against another story directory:
 ./run.sh ./examples/sol-proof
 ```
 
-The game reads and writes `story_systems.json` inside that directory. You can also pass a direct JSON file path:
+The game prefers `story.qualms.yaml` inside that directory when present, while also reading and writing `story_systems.json` as a compatibility file. You can also pass a direct JSON file path:
 
 ```sh
 ./run.sh ./examples/blank/story_systems.json
@@ -106,7 +106,7 @@ Dump the defined narrative surface:
 
 ## Current Story Data
 
-The maintained game still loads the older JSON shape. A destination is deliberately explicit:
+The YAML story is compiled through `stories/prelude/nova-qualms.qualms.yaml`. The older JSON shape is still generated and used by the current curses dataclasses during the transition. A destination in the compatibility JSON is deliberately explicit:
 
 ```json
 {

@@ -18,9 +18,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from qualms import ActionAttempt, RulesEngine
-from qualms.legacy import legacy_world_to_game_definition
+from qualms.legacy import legacy_world_to_game_definition, write_legacy_world_yaml
+from qualms.yaml_loader import load_game_definition
 
-DATA_PATH = PROJECT_ROOT / "stories" / "stellar" / "story_systems.json"
+DATA_PATH = PROJECT_ROOT / "stories" / "stellar"
 ORBITAL_TYPES = {"Planet", "Moon", "Station"}
 OPTION_KINDS = {"Bar", "Tourist Destination", "Destination"}
 OBJECT_INTERACTIONS = {"Examine", "Take", "Use", "Power up"}
@@ -227,9 +228,18 @@ def blank_world_raw() -> dict:
 
 def resolve_data_file(path: Path) -> Path:
     if path.exists() and path.is_dir():
+        yaml_path = path / "story.qualms.yaml"
+        if yaml_path.exists():
+            return yaml_path
         return path / "story_systems.json"
-    if not path.exists() and path.suffix.lower() != ".json":
+    if not path.exists() and path.suffix.lower() not in {".json", ".yaml", ".yml"}:
         return path / "story_systems.json"
+    return path
+
+
+def compatibility_json_path(path: Path) -> Path:
+    if path.suffix.lower() in {".yaml", ".yml"}:
+        return path.with_name("story_systems.json")
     return path
 
 
@@ -625,7 +635,12 @@ def load_start_location(raw: dict, start_system: str) -> tuple[str | None, tuple
 
 
 def load_world(path: Path = DATA_PATH) -> StoryWorld:
-    raw = read_or_create_raw(path)
+    path = resolve_data_file(path)
+    if path.suffix.lower() in {".yaml", ".yml"}:
+        load_game_definition(path)
+        raw = read_or_create_raw(compatibility_json_path(path))
+    else:
+        raw = read_or_create_raw(path)
     if not isinstance(raw, dict):
         raise ValueError("root must be an object")
 
@@ -948,8 +963,13 @@ def conditional_texts_to_raw(texts: tuple[ConditionalText, ...]) -> list[dict]:
 
 
 def save_and_reload(path: Path, raw: dict) -> StoryWorld:
-    write_raw_world(path, raw)
-    return load_world(path)
+    json_path = compatibility_json_path(path)
+    write_raw_world(json_path, raw)
+    world = load_world(json_path)
+    if path.suffix.lower() in {".yaml", ".yml"}:
+        write_legacy_world_yaml(world, path)
+        return load_world(path)
+    return world
 
 
 def slugify(value: str, fallback: str) -> str:

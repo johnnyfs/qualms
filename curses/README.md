@@ -9,4 +9,4 @@ From the project root:
 ./run-dev.sh
 ```
 
-By default, the interface loads `../stories/stellar/story_systems.json`.
+By default, the interface loads `../stories/stellar/story.qualms.yaml` when present, using the sibling `story_systems.json` compatibility file for the current dataclass-backed UI.

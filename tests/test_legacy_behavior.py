@@ -50,8 +50,11 @@ def destination_by_ids(world, *destination_ids: str):
 
 
 class LegacyLoaderTests(unittest.TestCase):
+    def test_story_directory_prefers_yaml_when_present(self) -> None:
+        self.assertEqual(dq.resolve_data_file(ROOT / "stories" / "stellar"), ROOT / "stories" / "stellar" / "story.qualms.yaml")
+
     def test_current_stories_load_and_dump(self) -> None:
-        for path in (STELLAR, BLANK, SOL_PROOF):
+        for path in (ROOT / "stories" / "stellar", STELLAR, BLANK, SOL_PROOF):
             with self.subTest(path=path):
                 world = dq.load_world(path)
                 self.assertTrue(world.systems)
@@ -147,6 +150,23 @@ class LegacyLoaderTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "exceeds"):
             load_raw(raw)
+
+    def test_yaml_save_updates_json_compatibility_file(self) -> None:
+        raw = raw_story()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            story_dir = Path(tmpdir)
+            json_path = story_dir / "story_systems.json"
+            yaml_path = story_dir / "story.qualms.yaml"
+            json_path.write_text(json.dumps(raw), encoding="utf-8")
+            world = dq.load_world(json_path)
+            from qualms.legacy import write_legacy_world_yaml
+
+            write_legacy_world_yaml(world, yaml_path)
+            edited = dq.edit_system(world, yaml_path, world.start_system, "Edited", "Edited description.")
+
+            self.assertEqual(edited.system_by_id(world.start_system).name, "Edited")
+            self.assertEqual(json.loads(json_path.read_text(encoding="utf-8"))["systems"][0]["name"], "Edited")
+            self.assertTrue(yaml_path.read_text(encoding="utf-8").startswith("qualms:"))
 
 
 class LegacyBehaviorTests(unittest.TestCase):
