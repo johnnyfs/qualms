@@ -25,17 +25,18 @@ def load_legacy_module():
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Convert legacy story_systems.json to Qualms YAML")
-    parser.add_argument("input", nargs="?", type=Path, default=ROOT / "stories" / "stellar" / "story_systems.json")
-    parser.add_argument("output", nargs="?", type=Path, default=ROOT / "stories" / "stellar" / "story.qualms.yaml")
+    parser.add_argument("input", type=Path, help="Legacy story_systems.json file or directory")
+    parser.add_argument("output", nargs="?", type=Path, help="Output story.qualms.yaml path")
     args = parser.parse_args()
 
     legacy = load_legacy_module()
     from qualms.legacy import write_legacy_world_yaml
 
-    data_file = legacy.resolve_data_file(args.input)
+    data_file = args.input / "story_systems.json" if args.input.exists() and args.input.is_dir() else args.input
     world = legacy.load_world(data_file)
-    write_legacy_world_yaml(world, args.output)
-    print(f"wrote {args.output}")
+    output = args.output or data_file.with_name("story.qualms.yaml")
+    write_legacy_world_yaml(world, output)
+    print(f"wrote {output}")
     return 0
 
 

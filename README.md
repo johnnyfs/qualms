@@ -2,7 +2,7 @@
 
 Qualms is a prototype for a rules-driven story engine and a nova-like game built on top of it. The long-term goal is to define a compact declarative model for game rules that can be projected into different genres, interfaces, and implementations while preserving the same core behavior.
 
-The current playable game is still Dark Qualms: a story-first bounty-hunter prototype with a maintained curses interface. The maintained story source is now `story.qualms.yaml`, backed by a generated `story_systems.json` compatibility artifact while the curses editor finishes migrating. The YAML schema uses genre-agnostic primitives: entities, traits, relations, actions, rules, and effects/assertions. Genre-specific concepts such as systems, orbitals, ships, people, inventory, and travel are expressed by authored preludes and story content rather than hard-coded as engine categories.
+The current playable game is still Dark Qualms: a story-first bounty-hunter prototype with a maintained curses interface. The maintained story source is now `story.qualms.yaml`; the curses UI loads and edits that YAML file directly. The YAML schema uses genre-agnostic primitives: entities, traits, relations, actions, rules, and effects/assertions. Genre-specific concepts such as systems, orbitals, ships, people, inventory, and travel are expressed by authored preludes and story content rather than hard-coded as engine categories.
 
 ## Specs
 
@@ -47,16 +47,16 @@ stories/stellar/story.qualms.yaml
 Run against another story directory:
 
 ```sh
-./run.sh ./examples/sol-proof
+./run.sh ./stories/stellar
 ```
 
-The game prefers `story.qualms.yaml` inside that directory when present, while also reading and writing `story_systems.json` as a compatibility file. You can also pass a direct JSON file path:
+The game reads and writes `story.qualms.yaml` inside that directory. You can still pass a direct legacy JSON file path for old examples and conversion checks:
 
 ```sh
 ./run.sh ./examples/blank/story_systems.json
 ```
 
-If the data path is missing, empty, or contains `{}`, the game creates a blank world with one empty system so you can start authoring in-game.
+If the YAML data path is missing or empty, the game creates a blank YAML world with one empty system so you can start authoring in-game.
 
 Stories can optionally define `start_location` with a starting orbital and destination ID path. The current story starts docked at Mining Colony 5 on Blemish.
 
@@ -64,7 +64,7 @@ Validate story data without launching curses:
 
 ```sh
 ./run.sh --validate
-./run.sh ./examples/sol-proof --validate
+./run.sh ./examples/sol-proof/story_systems.json --validate
 ```
 
 Dump the defined narrative surface:
@@ -106,70 +106,26 @@ Dump the defined narrative surface:
 
 ## Current Story Data
 
-The YAML story is compiled through `stories/prelude/nova-qualms.qualms.yaml`. The older JSON shape is still generated and used by the current curses dataclasses during the transition. A destination in the compatibility JSON is deliberately explicit:
+The YAML story imports `stories/prelude/nova-qualms.qualms.yaml`, which imports the core prelude. Story content is authored as entities, trait field values, initial relation assertions, facts, and local rules. The curses UI projects that declarative model into its menu views while using the rules runtime for action resolution.
 
-```json
-{
-  "id": "earth",
-  "name": "Earth",
-  "type": "Planet",
-  "description": "Old money, crowded ports, and licensed violence.",
-  "landing_options": [
-    {
-      "kind": "Bar",
-      "name": "Blue Anchor",
-      "description": "Bounty clerks and dockhands keep separate corners.",
-      "objects": [
-        {
-          "id": "decor",
-          "name": "Admire the decor",
-          "description": "A specific thing to notice.",
-          "interactions": ["Examine", "Take"],
-          "collectable": true,
-          "before": [
-            {
-              "interaction": "Take",
-              "unless": ["sequence:example:complete"],
-              "message": "Leave it where it is."
-            }
-          ]
-        }
-      ],
-      "npcs": [
-        {
-          "id": "bartender",
-          "name": "Bartender",
-          "description": "The bartender watches the room.",
-          "examine_description": "Nothing gets past her.",
-          "interactions": ["Examine", "Talk"],
-          "before": [
-            {
-              "interaction": "Talk",
-              "message": "She is busy."
-            }
-          ]
-        }
-      ],
-      "destinations": []
-    }
-  ]
-}
-```
-
-The loader validates required fields, destination types, object and NPC interactions, duplicate IDs, moon parents, and at most 9 choices per menu. Landing destinations may contain nested `destinations`, forming a recursive graph, plus `objects`, `npcs`, and `sequences`. Objects and NPCs are denormalized in the menu by interaction, so one poster with `["Examine", "Take"]` appears as two numbered choices. Sequences and before rules can use `when` and `unless` fact lists.
+The loader validates the YAML schema, compiles preludes and story content into the runtime definition, then validates nova-like constraints such as duplicate IDs, moon parents, reciprocal hops, hop distance, and at most 9 choices per menu.
 
 Inventory opens with `I`. Inventory items can be examined with `X`; equippable items define an `equipment_slot` and can be equipped with `E`, replacing any item already in that slot. Rules can test equipment slots with facts like `equipped:slot:Exosuit`.
 
-Systems also define graph data:
+Systems define graph data through trait fields:
 
-```json
-{
-  "id": "sol-proof",
-  "name": "Sol Proof",
-  "star_type": "G-type main sequence",
-  "position_au": [0, 0],
-  "hops": ["barnard-gate", "sirius-wake"]
-}
+```yaml
+- id: sol-proof
+  kind: System
+  fields:
+    Presentable:
+      name: Sol Proof
+      description: Old money, crowded ports, and licensed violence.
+    StarSystem:
+      star_type: G-type main sequence
+      x: 0
+      y: 0
+      hops: [barnard-gate, sirius-wake]
 ```
 
 Hop links must be reciprocal, must point to known systems, and must stay under the current short-hop limit.

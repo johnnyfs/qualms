@@ -164,6 +164,7 @@ class StoryWorld:
     systems: tuple[System, ...]
     start_orbital_id: str | None = None
     start_destination_ids: tuple[str, ...] = ()
+    rules_definition: Any | None = None
 
     def system_by_id(self, system_id: str) -> System:
         for system in self.systems:
@@ -228,18 +229,9 @@ def blank_world_raw() -> dict:
 
 def resolve_data_file(path: Path) -> Path:
     if path.exists() and path.is_dir():
-        yaml_path = path / "story.qualms.yaml"
-        if yaml_path.exists():
-            return yaml_path
-        return path / "story_systems.json"
+        return path / "story.qualms.yaml"
     if not path.exists() and path.suffix.lower() not in {".json", ".yaml", ".yml"}:
-        return path / "story_systems.json"
-    return path
-
-
-def compatibility_json_path(path: Path) -> Path:
-    if path.suffix.lower() in {".yaml", ".yml"}:
-        return path.with_name("story_systems.json")
+        return path / "story.qualms.yaml"
     return path
 
 
@@ -260,6 +252,614 @@ def read_or_create_raw(path: Path) -> dict:
 def write_raw_world(path: Path, raw: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
+
+
+def write_blank_yaml_world(path: Path) -> None:
+    world = load_world_from_raw(blank_world_raw())
+    write_legacy_world_yaml(world, path)
+
+
+def yaml_definition_to_raw(definition: Any) -> dict:
+    specs = {spec.id: spec for spec in definition.initial_entities}
+    id_to_legacy = {
+        spec.id: spec.metadata.get("legacy_id", spec.id)
+        for spec in definition.initial_entities
+    }
+    legacy_map = definition.metadata.get("legacy_id_map", {})
+    for legacy_id, entity_id in legacy_map.items():
+        id_to_legacy.setdefault(entity_id, legacy_id)
+
+    at_locations: dict[str, str] = {}
+    docked_locations: dict[str, str] = {}
+    controlled_ships: set[str] = set()
+    for assertion in definition.initial_assertions:
+        relation = assertion.get("relation")
+        args = [expression_ref(arg) for arg in assertion.get("args", [])]
+        if relation == "At" and len(args) == 2 and args[0] and args[1]:
+            at_locations[args[0]] = args[1]
+        elif relation == "DockedAt" and len(args) == 2 and args[0] and args[1]:
+            docked_locations[args[0]] = args[1]
+        elif relation == "ControlledBy" and len(args) == 2 and args[0]:
+            controlled_ships.add(args[0])
+
+    raw_systems = []
+    for system_spec in entity_specs_by_kind(definition, {"System"}):
+        system_id = id_to_legacy_id(system_spec.id, id_to_legacy)
+        star_fields = spec_fields(system_spec, "StarSystem")
+        raw_systems.append(
+            {
+                "id": system_id,
+                "name": presentable_name(system_spec),
+                "star_type": str(star_fields.get("star_type", "Unspecified")),
+                "description": presentable_description(system_spec),
+                "position_au": [float(star_fields.get("x", 0.0)), float(star_fields.get("y", 0.0))],
+                "hops": [id_to_legacy_id(hop, id_to_legacy) for hop in star_fields.get("hops", [])],
+                "orbitals": [
+                    orbital_to_raw(
+                        orbital_spec,
+                        definition,
+                        id_to_legacy,
+                        at_locations,
+                        docked_locations,
+                        controlled_ships,
+                    )
+                    for orbital_spec in child_specs(definition, system_spec.id, at_locations, {"Planet", "Moon", "Station"})
+                ],
+            }
+        )
+
+    start = definition.metadata.get("start", {})
+    start_system = id_to_legacy_id(str(start.get("system", raw_systems[0]["id"] if raw_systems else "empty-system")), id_to_legacy)
+    raw = {
+        "start_system": start_system,
+        "systems": raw_systems,
+    }
+    start_location = start.get("location")
+    if isinstance(start_location, str):
+        destination_ids = destination_path_legacy_ids(start_location, at_locations, id_to_legacy, definition)
+        if destination_ids:
+            orbital_entity_id = destination_path_orbital(start_location, at_locations, definition)
+            raw["start_location"] = {
+                "system_id": start_system,
+                "orbital_id": id_to_legacy_id(orbital_entity_id, id_to_legacy) if orbital_entity_id else None,
+                "destination_ids": destination_ids,
+            }
+    return raw
+
+
+def orbital_to_raw(
+    spec: Any,
+    definition: Any,
+    id_to_legacy: dict[str, str],
+    at_locations: dict[str, str],
+    docked_locations: dict[str, str],
+    controlled_ships: set[str],
+) -> dict:
+    orbital_fields = spec_fields(spec, "OrbitalBody")
+    orbital_type = str(orbital_fields.get("orbital_type", spec.kind or "Planet"))
+    raw = {
+        "id": id_to_legacy_id(spec.id, id_to_legacy),
+        "name": presentable_name(spec),
+        "type": orbital_type,
+        "description": presentable_description(spec),
+        "landing_options": [
+            destination_to_raw(child, definition, id_to_legacy, at_locations, docked_locations, controlled_ships)
+            for child in child_specs(definition, spec.id, at_locations, {"Destination"})
+        ],
+    }
+    parent = orbital_fields.get("parent")
+    if parent:
+        raw["parent"] = id_to_legacy_id(str(parent), id_to_legacy)
+    default_landing_path = orbital_fields.get("default_landing_path", [])
+    if default_landing_path:
+        raw["default_landing_destination_ids"] = list(default_landing_path)
+    return raw
+
+
+def destination_to_raw(
+    spec: Any,
+    definition: Any,
+    id_to_legacy: dict[str, str],
+    at_locations: dict[str, str],
+    docked_locations: dict[str, str],
+    controlled_ships: set[str],
+) -> dict:
+    metadata = dict(spec.metadata)
+    before, sequences = destination_rules_to_legacy(spec, id_to_legacy, definition)
+    return {
+        "id": id_to_legacy_id(spec.id, id_to_legacy),
+        "kind": metadata.get("legacy_kind", "Destination"),
+        "name": presentable_name(spec),
+        "description": presentable_description(spec),
+        "objects": [
+            object_to_raw(child, id_to_legacy, definition)
+            for child in child_specs(definition, spec.id, at_locations, {"StoryObject"})
+        ],
+        "npcs": [
+            npc_to_raw(child, id_to_legacy, definition)
+            for child in child_specs(definition, spec.id, at_locations, {"NPC"})
+        ],
+        "ships": [
+            ship_to_raw(ship, definition, id_to_legacy, at_locations, docked_locations, controlled_ships)
+            for ship in docked_child_specs(definition, spec.id, docked_locations)
+        ],
+        "before": before_rules_to_raw(before),
+        "sequences": [
+            {
+                "id": sequence.id,
+                "when": list(sequence.when),
+                "unless": list(sequence.unless),
+                "messages": list(sequence.messages),
+                "on_complete": list(sequence.on_complete),
+            }
+            for sequence in sequences
+        ],
+        "destinations": [
+            destination_to_raw(child, definition, id_to_legacy, at_locations, docked_locations, controlled_ships)
+            for child in child_specs(definition, spec.id, at_locations, {"Destination"})
+        ],
+        **({"port": bool(metadata.get("port"))} if metadata.get("port") else {}),
+        **({"visible_when": list(metadata.get("visible_when", []))} if metadata.get("visible_when") else {}),
+        **({"visible_unless": list(metadata.get("visible_unless", []))} if metadata.get("visible_unless") else {}),
+    }
+
+
+def object_to_raw(spec: Any, id_to_legacy: dict[str, str], definition: Any) -> dict:
+    metadata = dict(spec.metadata)
+    before, use_rules = object_rules_to_legacy(spec, id_to_legacy, definition)
+    equipment_fields = trait_attachment_fields(spec, "Equipment")
+    return {
+        "id": id_to_legacy_id(spec.id, id_to_legacy),
+        "name": presentable_name(spec),
+        "description": presentable_description(spec),
+        "interactions": list(metadata.get("interactions", default_object_interactions(spec))),
+        "collectable": bool(metadata.get("collectable", has_trait_attachment(spec, "Portable"))),
+        **({"equipment_slot": equipment_fields.get("slot")} if equipment_fields.get("slot") else {}),
+        "before": before_rules_to_raw(before),
+        "use_rules": use_rules_to_raw(use_rules),
+        **({"visible_when": list(metadata.get("visible_when", []))} if metadata.get("visible_when") else {}),
+        **({"visible_unless": list(metadata.get("visible_unless", []))} if metadata.get("visible_unless") else {}),
+    }
+
+
+def npc_to_raw(spec: Any, id_to_legacy: dict[str, str], definition: Any) -> dict:
+    metadata = dict(spec.metadata)
+    before = before_rules_from_local_rules(spec, id_to_legacy, definition)
+    presentable = spec_fields(spec, "Presentable")
+    return {
+        "id": id_to_legacy_id(spec.id, id_to_legacy),
+        "name": presentable_name(spec),
+        "description": presentable_description(spec),
+        "examine_description": str(presentable.get("examine_description") or presentable_description(spec)),
+        "interactions": list(metadata.get("interactions", ("Examine", "Talk"))),
+        "before": before_rules_to_raw(before),
+        **({"visible_when": list(metadata.get("visible_when", []))} if metadata.get("visible_when") else {}),
+        **({"visible_unless": list(metadata.get("visible_unless", []))} if metadata.get("visible_unless") else {}),
+    }
+
+
+def ship_to_raw(
+    spec: Any,
+    definition: Any,
+    id_to_legacy: dict[str, str],
+    at_locations: dict[str, str],
+    docked_locations: dict[str, str],
+    controlled_ships: set[str],
+) -> dict:
+    metadata = dict(spec.metadata)
+    vehicle_fields = spec_fields(spec, "Vehicle")
+    return {
+        "id": id_to_legacy_id(spec.id, id_to_legacy),
+        "name": presentable_name(spec),
+        "description": presentable_description(spec),
+        "unlock": bool(metadata.get("unlock", False)),
+        "controlled": spec.id in controlled_ships or bool(metadata.get("controlled", False)),
+        "equipment_slots": list(metadata.get("equipment_slots", [])),
+        "abilities": list(vehicle_fields.get("abilities", metadata.get("abilities", []))),
+        "objects": [
+            object_to_raw(child, id_to_legacy, definition)
+            for child in child_specs(definition, spec.id, at_locations, {"StoryObject"})
+        ],
+        "before": before_rules_to_raw(before_rules_from_local_rules(spec, id_to_legacy, definition)),
+        "display_names": list(metadata.get("display_names", [])),
+        "interior_descriptions": list(metadata.get("interior_descriptions", [])),
+        "taglines": list(metadata.get("taglines", [])),
+        **({"visible_when": list(metadata.get("visible_when", []))} if metadata.get("visible_when") else {}),
+        **({"visible_unless": list(metadata.get("visible_unless", []))} if metadata.get("visible_unless") else {}),
+    }
+
+
+def load_world_from_raw(raw: dict, rules_definition: Any | None = None) -> StoryWorld:
+    if not isinstance(raw, dict):
+        raise ValueError("root must be an object")
+
+    start_system = require_string(raw, "start_system", "root")
+    systems: list[System] = []
+
+    for system_index, system_raw in enumerate(require_list(raw, "systems", "root")):
+        context = f"systems[{system_index}]"
+        if not isinstance(system_raw, dict):
+            raise ValueError(f"{context} must be an object")
+
+        orbitals: list[Orbital] = []
+        orbital_ids: set[str] = set()
+        orbital_raws = require_list(system_raw, "orbitals", context)
+        if len(orbital_raws) > 9:
+            raise ValueError(f"{context}.orbitals must contain no more than 9 destinations")
+
+        for orbital_index, orbital_raw in enumerate(orbital_raws):
+            orbital_context = f"{context}.orbitals[{orbital_index}]"
+            if not isinstance(orbital_raw, dict):
+                raise ValueError(f"{orbital_context} must be an object")
+
+            orbital_id = require_string(orbital_raw, "id", orbital_context)
+            if orbital_id in orbital_ids:
+                raise ValueError(f"{orbital_context}.id duplicates {orbital_id}")
+            orbital_ids.add(orbital_id)
+
+            orbital_type = require_string(orbital_raw, "type", orbital_context)
+            if orbital_type not in ORBITAL_TYPES:
+                raise ValueError(f"{orbital_context}.type must be one of {sorted(ORBITAL_TYPES)}")
+
+            options = load_landing_options(require_list(orbital_raw, "landing_options", orbital_context), f"{orbital_context}.landing_options")
+
+            parent = orbital_raw.get("parent")
+            if parent is not None and (not isinstance(parent, str) or not parent.strip()):
+                raise ValueError(f"{orbital_context}.parent must be a non-empty string when present")
+
+            orbitals.append(
+                Orbital(
+                    id=orbital_id,
+                    name=require_string(orbital_raw, "name", orbital_context),
+                    type=orbital_type,
+                    description=require_string(orbital_raw, "description", orbital_context),
+                    parent=parent,
+                    landing_options=options,
+                    default_landing_destination_ids=load_fact_conditions(
+                        orbital_raw.get("default_landing_destination_ids", []),
+                        f"{orbital_context}.default_landing_destination_ids",
+                    ),
+                )
+            )
+
+        systems.append(
+            System(
+                id=require_string(system_raw, "id", context),
+                name=require_string(system_raw, "name", context),
+                star_type=require_string(system_raw, "star_type", context),
+                description=str(system_raw.get("description", "")),
+                position_au=require_position(system_raw, context),
+                hops=tuple(require_string({"hop": hop}, "hop", f"{context}.hops[{index}]") for index, hop in enumerate(require_list(system_raw, "hops", context))),
+                orbitals=tuple(orbitals),
+            )
+        )
+
+    start_orbital_id, start_destination_ids = load_start_location(raw, start_system)
+    world = StoryWorld(
+        start_system=start_system,
+        systems=tuple(systems),
+        start_orbital_id=start_orbital_id,
+        start_destination_ids=start_destination_ids,
+        rules_definition=rules_definition,
+    )
+    validate_world(world)
+    return world
+
+
+def validate_world(world: StoryWorld) -> None:
+    world.system_by_id(world.start_system)
+    system_ids = {system.id for system in world.systems}
+    if len(system_ids) != len(world.systems):
+        raise ValueError("system IDs must be unique")
+
+    for system in world.systems:
+        if len(system.hops) > 9:
+            raise ValueError(f"{system.id}.hops must contain no more than 9 destinations")
+
+        ids = {orbital.id for orbital in system.orbitals}
+        for orbital in system.orbitals:
+            if orbital.parent is not None and orbital.parent not in ids:
+                raise ValueError(f"{system.id}.{orbital.id}.parent references unknown orbital {orbital.parent}")
+            if orbital.type == "Moon" and orbital.parent is None:
+                raise ValueError(f"{system.id}.{orbital.id} is a Moon and must define parent")
+            if orbital.default_landing_destination_ids:
+                try:
+                    destination_path_by_ids(orbital, orbital.default_landing_destination_ids)
+                except KeyError as error:
+                    raise ValueError(f"{system.id}.{orbital.id}.default_landing_destination_ids references unknown destination {error.args[0]}") from error
+
+        for hop_id in system.hops:
+            if hop_id not in system_ids:
+                raise ValueError(f"{system.id}.hops references unknown system {hop_id}")
+
+            hop_system = world.system_by_id(hop_id)
+            if system.id not in hop_system.hops:
+                raise ValueError(f"{system.id}.hops to {hop_id} must be reciprocal")
+
+            if system_distance_au(system, hop_system) > MAX_HOP_DISTANCE_AU:
+                raise ValueError(f"{system.id}.hops to {hop_id} exceeds {MAX_HOP_DISTANCE_AU:.0f} AU")
+    validate_start_location(world)
+
+
+def entity_specs_by_kind(definition: Any, kinds: set[str]) -> list[Any]:
+    return [spec for spec in definition.initial_entities if spec.kind in kinds]
+
+
+def child_specs(definition: Any, parent_id: str, locations: dict[str, str], kinds: set[str]) -> list[Any]:
+    return [
+        spec
+        for spec in definition.initial_entities
+        if spec.kind in kinds and locations.get(spec.id) == parent_id
+    ]
+
+
+def docked_child_specs(definition: Any, parent_id: str, locations: dict[str, str]) -> list[Any]:
+    return [
+        spec
+        for spec in definition.initial_entities
+        if spec.kind == "Ship" and locations.get(spec.id) == parent_id
+    ]
+
+
+def expression_ref(expression: Any) -> str | None:
+    if isinstance(expression, dict) and set(expression) == {"ref"}:
+        return str(expression["ref"])
+    if isinstance(expression, str):
+        return expression
+    return None
+
+
+def spec_fields(spec: Any, trait_id: str) -> dict[str, Any]:
+    return dict(spec.fields.get(trait_id, {}))
+
+
+def presentable_name(spec: Any) -> str:
+    return str(spec_fields(spec, "Presentable").get("name", spec.metadata.get("legacy_id", spec.id)))
+
+
+def presentable_description(spec: Any) -> str:
+    return str(spec_fields(spec, "Presentable").get("description", ""))
+
+
+def has_trait_attachment(spec: Any, trait_id: str) -> bool:
+    return any(attachment.id == trait_id for attachment in spec.traits)
+
+
+def trait_attachment_fields(spec: Any, trait_id: str) -> dict[str, Any]:
+    fields = dict(spec.fields.get(trait_id, {}))
+    for attachment in spec.traits:
+        if attachment.id == trait_id:
+            fields = {**attachment.fields, **fields}
+    return fields
+
+
+def default_object_interactions(spec: Any) -> list[str]:
+    interactions = ["Examine"]
+    if has_trait_attachment(spec, "Portable"):
+        interactions.append("Take")
+    if has_trait_attachment(spec, "Usable"):
+        interactions.append("Use")
+    return interactions
+
+
+def id_to_legacy_id(entity_id: str | None, id_to_legacy: dict[str, str]) -> str:
+    if entity_id is None:
+        return ""
+    return id_to_legacy.get(entity_id, entity_id)
+
+
+def destination_path_legacy_ids(location_id: str, locations: dict[str, str], id_to_legacy: dict[str, str], definition: Any) -> list[str]:
+    path: list[str] = []
+    spec_by_id = {spec.id: spec for spec in definition.initial_entities}
+    current: str | None = location_id
+    while current:
+        parent = locations.get(current)
+        if parent is None:
+            break
+        spec = spec_by_id.get(current)
+        if spec is not None and spec.kind == "Destination":
+            path.append(id_to_legacy_id(current, id_to_legacy))
+        if parent not in locations:
+            break
+        current = parent
+    path.reverse()
+    return path
+
+
+def destination_path_orbital(location_id: str, locations: dict[str, str], definition: Any) -> str | None:
+    current = location_id
+    spec_by_id = {spec.id: spec for spec in definition.initial_entities}
+    while current in locations:
+        parent = locations[current]
+        parent_spec = spec_by_id.get(parent)
+        if parent_spec is not None and parent_spec.kind in {"Planet", "Moon", "Station"}:
+            return parent
+        current = parent
+    return None
+
+
+def before_rules_from_local_rules(spec: Any, id_to_legacy: dict[str, str], definition: Any) -> tuple[BeforeRule, ...]:
+    rules: list[BeforeRule] = []
+    for rule in spec.rules:
+        if rule.phase != "before":
+            continue
+        message = first_emit_text(rule.effects)
+        if not message:
+            continue
+        interaction = interaction_for_action(rule.pattern.action)
+        if interaction is None:
+            continue
+        when, unless = predicate_to_fact_conditions(rule.guard, id_to_legacy, definition)
+        rules.append(
+            BeforeRule(
+                interaction=interaction,
+                message=message,
+                when=tuple(when),
+                unless=tuple(unless),
+                on_complete=tuple(outcomes_from_effects(rule.effects, id_to_legacy)),
+            )
+        )
+    return tuple(rules)
+
+
+def object_rules_to_legacy(spec: Any, id_to_legacy: dict[str, str], definition: Any) -> tuple[tuple[BeforeRule, ...], tuple[UseRule, ...]]:
+    before = before_rules_from_local_rules(spec, id_to_legacy, definition)
+    use_rules: list[UseRule] = []
+    for rule in spec.rules:
+        if rule.pattern.action != "Use" or rule.phase not in {"instead", "after"}:
+            continue
+        target_pattern = rule.pattern.args.get("target")
+        target_entity_id = expression_ref(target_pattern) if isinstance(target_pattern, dict) else None
+        if target_entity_id is None:
+            continue
+        messages = tuple(emit_texts(rule.effects))
+        if not messages:
+            continue
+        when, unless = predicate_to_fact_conditions(rule.guard, id_to_legacy, definition)
+        use_rules.append(
+            UseRule(
+                target=id_to_legacy_id(target_entity_id, id_to_legacy),
+                messages=messages,
+                on_complete=tuple(outcomes_from_effects(rule.effects, id_to_legacy)),
+                when=tuple(when),
+                unless=tuple(unless),
+            )
+        )
+    return before, tuple(use_rules)
+
+
+def destination_rules_to_legacy(spec: Any, id_to_legacy: dict[str, str], definition: Any) -> tuple[tuple[BeforeRule, ...], tuple[Sequence, ...]]:
+    before = before_rules_from_local_rules(spec, id_to_legacy, definition)
+    sequences: list[Sequence] = []
+    for rule in spec.rules:
+        if rule.phase != "after" or rule.pattern.action != "Enter" or not rule.id.startswith("sequence:"):
+            continue
+        messages = tuple(emit_texts(rule.effects))
+        if not messages:
+            continue
+        when, unless = predicate_to_fact_conditions(rule.guard, id_to_legacy, definition)
+        sequence_id = rule.id.removeprefix("sequence:")
+        sequences.append(
+            Sequence(
+                id=sequence_id,
+                when=tuple(when),
+                unless=tuple(unless),
+                messages=messages,
+                on_complete=tuple(outcomes_from_effects(rule.effects, id_to_legacy)),
+            )
+        )
+    return before, tuple(sequences)
+
+
+def interaction_for_action(action_id: str) -> str | None:
+    return {
+        "Enter": "Enter",
+        "Examine": "Examine",
+        "Take": "Take",
+        "Use": "Use",
+        "PowerUp": "Power up",
+        "Talk": "Talk",
+        "Board": "Board",
+    }.get(action_id)
+
+
+def first_emit_text(effects: tuple[dict[str, Any], ...]) -> str:
+    for text in emit_texts(effects):
+        return text
+    return ""
+
+
+def emit_texts(effects: tuple[dict[str, Any], ...]) -> list[str]:
+    texts: list[str] = []
+    for effect in effects:
+        emit = effect.get("emit") if isinstance(effect, dict) else None
+        if isinstance(emit, dict) and isinstance(emit.get("text"), str):
+            texts.append(emit["text"])
+    return texts
+
+
+def outcomes_from_effects(effects: tuple[dict[str, Any], ...], id_to_legacy: dict[str, str]) -> list[str]:
+    outcomes: list[str] = []
+    controlled_ship_ids: set[str] = set()
+    for effect in effects:
+        assertion = effect.get("assert") if isinstance(effect, dict) else None
+        if isinstance(assertion, dict) and assertion.get("relation") == "ControlledBy":
+            args = assertion.get("args", [])
+            ship_id = expression_ref(args[0]) if args else None
+            if ship_id:
+                controlled_ship_ids.add(id_to_legacy_id(ship_id, id_to_legacy))
+    for effect in effects:
+        fact = effect.get("set_fact") if isinstance(effect, dict) else None
+        if not isinstance(fact, dict):
+            continue
+        fact_id = fact.get("id")
+        if not isinstance(fact_id, str):
+            continue
+        if any(fact_id == f"ship:{ship_id}:owned" for ship_id in controlled_ship_ids):
+            continue
+        if fact_id not in outcomes:
+            outcomes.append(fact_id)
+    return outcomes
+
+
+def predicate_to_fact_conditions(predicate: Any, id_to_legacy: dict[str, str], definition: Any) -> tuple[list[str], list[str]]:
+    when: list[str] = []
+    unless: list[str] = []
+    collect_predicate_conditions(predicate, id_to_legacy, definition, when, unless, negated=False)
+    return when, unless
+
+
+def collect_predicate_conditions(
+    predicate: Any,
+    id_to_legacy: dict[str, str],
+    definition: Any,
+    when: list[str],
+    unless: list[str],
+    negated: bool,
+) -> None:
+    if predicate is True or predicate is None:
+        return
+    if isinstance(predicate, dict) and len(predicate) == 1:
+        op, operand = next(iter(predicate.items()))
+        if op == "all":
+            for item in operand:
+                collect_predicate_conditions(item, id_to_legacy, definition, when, unless, negated)
+            return
+        if op == "not":
+            collect_predicate_conditions(operand, id_to_legacy, definition, when, unless, not negated)
+            return
+    fact = fact_string_from_predicate(predicate, id_to_legacy, definition)
+    if fact:
+        target = unless if negated else when
+        if fact not in target:
+            target.append(fact)
+
+
+def fact_string_from_predicate(predicate: Any, id_to_legacy: dict[str, str], definition: Any) -> str | None:
+    if not isinstance(predicate, dict) or len(predicate) != 1:
+        return None
+    op, operand = next(iter(predicate.items()))
+    if op == "fact" and isinstance(operand, dict):
+        fact_id = operand.get("id")
+        args = operand.get("args", [])
+        if fact_id == "Aboard" and len(args) == 2:
+            ship_entity_id = expression_ref(args[1])
+            if ship_entity_id:
+                return f"ship:{id_to_legacy_id(ship_entity_id, id_to_legacy)}:boarded"
+        return fact_id if isinstance(fact_id, str) else None
+    if op == "relation" and isinstance(operand, dict):
+        relation_id = operand.get("id")
+        args = operand.get("args", [])
+        if relation_id == "At" and len(args) == 2:
+            subject_id = expression_ref(args[0])
+            location_id = expression_ref(args[1])
+            if subject_id and location_id:
+                return f"ship:{id_to_legacy_id(subject_id, id_to_legacy)}:at:{id_to_legacy_id(location_id, id_to_legacy)}"
+        if relation_id == "ControlledBy" and len(args) == 2:
+            ship_entity_id = expression_ref(args[0])
+            if ship_entity_id:
+                return f"ship:{id_to_legacy_id(ship_entity_id, id_to_legacy)}:owned"
+    return None
 
 
 def require_string(data: dict, field: str, context: str) -> str:
@@ -637,114 +1237,11 @@ def load_start_location(raw: dict, start_system: str) -> tuple[str | None, tuple
 def load_world(path: Path = DATA_PATH) -> StoryWorld:
     path = resolve_data_file(path)
     if path.suffix.lower() in {".yaml", ".yml"}:
-        load_game_definition(path)
-        raw = read_or_create_raw(compatibility_json_path(path))
-    else:
-        raw = read_or_create_raw(path)
-    if not isinstance(raw, dict):
-        raise ValueError("root must be an object")
-
-    start_system = require_string(raw, "start_system", "root")
-    systems: list[System] = []
-
-    for system_index, system_raw in enumerate(require_list(raw, "systems", "root")):
-        context = f"systems[{system_index}]"
-        if not isinstance(system_raw, dict):
-            raise ValueError(f"{context} must be an object")
-
-        orbitals: list[Orbital] = []
-        orbital_ids: set[str] = set()
-        orbital_raws = require_list(system_raw, "orbitals", context)
-        if len(orbital_raws) > 9:
-            raise ValueError(f"{context}.orbitals must contain no more than 9 destinations")
-
-        for orbital_index, orbital_raw in enumerate(orbital_raws):
-            orbital_context = f"{context}.orbitals[{orbital_index}]"
-            if not isinstance(orbital_raw, dict):
-                raise ValueError(f"{orbital_context} must be an object")
-
-            orbital_id = require_string(orbital_raw, "id", orbital_context)
-            if orbital_id in orbital_ids:
-                raise ValueError(f"{orbital_context}.id duplicates {orbital_id}")
-            orbital_ids.add(orbital_id)
-
-            orbital_type = require_string(orbital_raw, "type", orbital_context)
-            if orbital_type not in ORBITAL_TYPES:
-                raise ValueError(f"{orbital_context}.type must be one of {sorted(ORBITAL_TYPES)}")
-
-            options = load_landing_options(require_list(orbital_raw, "landing_options", orbital_context), f"{orbital_context}.landing_options")
-
-            parent = orbital_raw.get("parent")
-            if parent is not None and (not isinstance(parent, str) or not parent.strip()):
-                raise ValueError(f"{orbital_context}.parent must be a non-empty string when present")
-
-            orbitals.append(
-                Orbital(
-                    id=orbital_id,
-                    name=require_string(orbital_raw, "name", orbital_context),
-                    type=orbital_type,
-                    description=require_string(orbital_raw, "description", orbital_context),
-                    parent=parent,
-                    landing_options=options,
-                    default_landing_destination_ids=load_fact_conditions(
-                        orbital_raw.get("default_landing_destination_ids", []),
-                        f"{orbital_context}.default_landing_destination_ids",
-                    ),
-                )
-            )
-
-        systems.append(
-            System(
-                id=require_string(system_raw, "id", context),
-                name=require_string(system_raw, "name", context),
-                star_type=require_string(system_raw, "star_type", context),
-                description=str(system_raw.get("description", "")),
-                position_au=require_position(system_raw, context),
-                hops=tuple(require_string({"hop": hop}, "hop", f"{context}.hops[{index}]") for index, hop in enumerate(require_list(system_raw, "hops", context))),
-                orbitals=tuple(orbitals),
-            )
-        )
-
-    start_orbital_id, start_destination_ids = load_start_location(raw, start_system)
-    world = StoryWorld(
-        start_system=start_system,
-        systems=tuple(systems),
-        start_orbital_id=start_orbital_id,
-        start_destination_ids=start_destination_ids,
-    )
-    world.system_by_id(start_system)
-    system_ids = {system.id for system in world.systems}
-    if len(system_ids) != len(world.systems):
-        raise ValueError("system IDs must be unique")
-
-    for system in world.systems:
-        if len(system.hops) > 9:
-            raise ValueError(f"{system.id}.hops must contain no more than 9 destinations")
-
-        ids = {orbital.id for orbital in system.orbitals}
-        for orbital in system.orbitals:
-            if orbital.parent is not None and orbital.parent not in ids:
-                raise ValueError(f"{system.id}.{orbital.id}.parent references unknown orbital {orbital.parent}")
-            if orbital.type == "Moon" and orbital.parent is None:
-                raise ValueError(f"{system.id}.{orbital.id} is a Moon and must define parent")
-            if orbital.default_landing_destination_ids:
-                try:
-                    destination_path_by_ids(orbital, orbital.default_landing_destination_ids)
-                except KeyError as error:
-                    raise ValueError(f"{system.id}.{orbital.id}.default_landing_destination_ids references unknown destination {error.args[0]}") from error
-
-        for hop_id in system.hops:
-            if hop_id not in system_ids:
-                raise ValueError(f"{system.id}.hops references unknown system {hop_id}")
-
-            hop_system = world.system_by_id(hop_id)
-            if system.id not in hop_system.hops:
-                raise ValueError(f"{system.id}.hops to {hop_id} must be reciprocal")
-
-            if system_distance_au(system, hop_system) > MAX_HOP_DISTANCE_AU:
-                raise ValueError(f"{system.id}.hops to {hop_id} exceeds {MAX_HOP_DISTANCE_AU:.0f} AU")
-    validate_start_location(world)
-    return world
+        if not path.exists() or not path.read_text(encoding="utf-8").strip():
+            write_blank_yaml_world(path)
+        definition = load_game_definition(path)
+        return load_world_from_raw(yaml_definition_to_raw(definition), rules_definition=definition)
+    return load_world_from_raw(read_or_create_raw(path))
 
 
 def orbital_by_id(system: System, orbital_id: str) -> Orbital:
@@ -963,13 +1460,12 @@ def conditional_texts_to_raw(texts: tuple[ConditionalText, ...]) -> list[dict]:
 
 
 def save_and_reload(path: Path, raw: dict) -> StoryWorld:
-    json_path = compatibility_json_path(path)
-    write_raw_world(json_path, raw)
-    world = load_world(json_path)
     if path.suffix.lower() in {".yaml", ".yml"}:
+        world = load_world_from_raw(raw)
         write_legacy_world_yaml(world, path)
         return load_world(path)
-    return world
+    write_raw_world(path, raw)
+    return load_world(path)
 
 
 def slugify(value: str, fallback: str) -> str:
@@ -2372,7 +2868,7 @@ def initial_game_state(world: StoryWorld, editor_enabled: bool) -> GameState:
 
 
 def attach_rules_runtime(world: StoryWorld, state: GameState) -> None:
-    state.rules_definition = legacy_world_to_game_definition(world)
+    state.rules_definition = world.rules_definition or legacy_world_to_game_definition(world)
     state.rules_engine = RulesEngine(state.rules_definition)
     state.legacy_id_map = dict(state.rules_definition.metadata.get("legacy_id_map", {}))
     sync_rules_state_from_legacy(state)
@@ -3507,8 +4003,8 @@ def condition_suffix(when: tuple[str, ...], unless: tuple[str, ...]) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Dark Qualms story prototype")
-    parser.add_argument("data_path", nargs="?", type=Path, help="Data directory or story_systems.json file")
-    parser.add_argument("--data", type=Path, help="Data directory or story_systems.json file")
+    parser.add_argument("data_path", nargs="?", type=Path, help="Data directory, story.qualms.yaml file, or legacy story_systems.json file")
+    parser.add_argument("--data", type=Path, help="Data directory, story.qualms.yaml file, or legacy story_systems.json file")
     parser.add_argument("--editor", action="store_true", help="Expose in-game story editing commands")
     parser.add_argument("--validate", action="store_true")
     parser.add_argument("--dump", action="store_true")

@@ -11,7 +11,6 @@ from qualms.legacy import legacy_world_to_game_definition, legacy_world_to_yaml_
 
 
 ROOT = Path(__file__).resolve().parents[1]
-STELLAR = ROOT / "stories" / "stellar" / "story_systems.json"
 STELLAR_YAML = ROOT / "stories" / "stellar" / "story.qualms.yaml"
 
 
@@ -54,7 +53,7 @@ def count_destinations(destinations) -> int:
 
 class LegacyYamlMigrationTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.world = dq.load_world(STELLAR)
+        self.world = dq.load_world(STELLAR_YAML)
 
     def test_legacy_world_compiles_to_runtime_definition(self) -> None:
         definition = legacy_world_to_game_definition(self.world)

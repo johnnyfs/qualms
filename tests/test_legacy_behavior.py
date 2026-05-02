@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-STELLAR = ROOT / "stories" / "stellar" / "story_systems.json"
+STELLAR = ROOT / "stories" / "stellar" / "story.qualms.yaml"
 BLANK = ROOT / "examples" / "blank" / "story_systems.json"
 SOL_PROOF = ROOT / "examples" / "sol-proof" / "story_systems.json"
 
@@ -29,8 +29,10 @@ def load_story_module():
 dq = load_story_module()
 
 
-def raw_story(path: Path = STELLAR) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+def raw_story(path: Path | None = None) -> dict:
+    if path is not None:
+        return json.loads(path.read_text(encoding="utf-8"))
+    return dq.world_to_raw(dq.load_world(STELLAR))
 
 
 def load_raw(raw: dict):
@@ -60,6 +62,15 @@ class LegacyLoaderTests(unittest.TestCase):
                 self.assertTrue(world.systems)
                 self.assertIn(world.system_by_id(world.start_system), world.systems)
                 self.assertTrue(dq.dump_world(world))
+
+    def test_missing_story_directory_creates_blank_yaml_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            story_dir = Path(tmpdir) / "new-story"
+            world = dq.load_world(story_dir)
+
+            self.assertEqual(world.start_system, "empty-system")
+            self.assertTrue((story_dir / "story.qualms.yaml").exists())
+            self.assertFalse((story_dir / "story_systems.json").exists())
 
     def test_initial_location_matches_current_story_start(self) -> None:
         world = dq.load_world(STELLAR)
@@ -151,21 +162,22 @@ class LegacyLoaderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "exceeds"):
             load_raw(raw)
 
-    def test_yaml_save_updates_json_compatibility_file(self) -> None:
+    def test_yaml_save_updates_only_yaml_story_file(self) -> None:
         raw = raw_story()
         with tempfile.TemporaryDirectory() as tmpdir:
             story_dir = Path(tmpdir)
             json_path = story_dir / "story_systems.json"
             yaml_path = story_dir / "story.qualms.yaml"
-            json_path.write_text(json.dumps(raw), encoding="utf-8")
-            world = dq.load_world(json_path)
+            json_path.write_text(json.dumps({"systems": [{"name": "Vexas"}]}), encoding="utf-8")
+            world = dq.load_world_from_raw(raw)
             from qualms.legacy import write_legacy_world_yaml
 
             write_legacy_world_yaml(world, yaml_path)
             edited = dq.edit_system(world, yaml_path, world.start_system, "Edited", "Edited description.")
 
             self.assertEqual(edited.system_by_id(world.start_system).name, "Edited")
-            self.assertEqual(json.loads(json_path.read_text(encoding="utf-8"))["systems"][0]["name"], "Edited")
+            self.assertEqual(json.loads(json_path.read_text(encoding="utf-8"))["systems"][0]["name"], "Vexas")
+            self.assertEqual(dq.load_world(yaml_path).system_by_id(world.start_system).name, "Edited")
             self.assertTrue(yaml_path.read_text(encoding="utf-8").startswith("qualms:"))
 
 
