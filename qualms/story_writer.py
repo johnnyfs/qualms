@@ -140,6 +140,8 @@ class StoryYamlConverter:
             traits.append({"id": "Usable"})
         if story_object.equipment_slot:
             traits.append({"id": "Equipment", "fields": {"slot": story_object.equipment_slot}})
+        if getattr(story_object, "fuel_station", False):
+            traits.append({"id": "FuelStation"})
         self.add_entity(
             object_id,
             "StoryObject",
@@ -149,6 +151,7 @@ class StoryYamlConverter:
                 "local_id": story_object.id,
                 "interactions": list(story_object.interactions),
                 "collectable": story_object.collectable,
+                **({"fuel_station": True} if getattr(story_object, "fuel_station", False) else {}),
                 "visible_when": list(story_object.visible_when),
                 "visible_unless": list(story_object.visible_unless),
             },
@@ -369,6 +372,9 @@ def outcome_effects(outcomes: tuple[str, ...], id_map: dict[str, str]) -> list[d
             ship_id = id_map.get(parts[1], safe_id(parts[1]))
             effects.append({"assert": {"relation": "ControlledBy", "args": [{"ref": ship_id}, {"ref": "player"}]}})
             effects.append({"set_fact": {"id": f"ship:{parts[1]}:owned"}})
+        if len(parts) == 3 and parts[0] == "fuel-station" and parts[2] == "active":
+            station_id = id_map.get(parts[1], safe_id(parts[1]))
+            effects.append({"assert": {"relation": "FuelStationActive", "args": [{"ref": station_id}]}})
         effects.append({"set_fact": {"id": outcome}})
     return effects
 

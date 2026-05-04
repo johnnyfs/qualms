@@ -1,0 +1,62 @@
+{
+  "qualms_save": 1,
+  "state": {
+    "boarded_ship_id": "canary",
+    "destination_path": [],
+    "docked_path": [],
+    "equipment": {
+      "Exosuit": "spare-expedition-suit"
+    },
+    "facts": [
+      "equipped:slot:Exosuit",
+      "fuel-station:fueling-station:active",
+      "sequence:active-mine-impact-site:complete",
+      "sequence:blemish-crash:complete",
+      "ship:canary:boarded",
+      "ship:canary:identified",
+      "ship:canary:owned",
+      "ship:canary:visited",
+      "visited:destination:abandoned-mining-platform",
+      "visited:destination:abandoned-quarry",
+      "visited:destination:active-mine",
+      "visited:destination:airlock",
+      "visited:destination:collapsed-entrance",
+      "visited:destination:command-center",
+      "visited:destination:command-tower",
+      "visited:destination:impact-crater",
+      "visited:destination:lunar-surface",
+      "visited:destination:mining-colony-5",
+      "visited:destination:pointless-bar",
+      "visited:destination:pointless-settlement",
+      "visited:destination:rig-managers-office",
+      "visited:destination:your-place"
+    ],
+    "inventory": [
+      "portrait-of-enrick",
+      "spare-expedition-suit"
+    ],
+    "inventory_index": 0,
+    "inventory_return_view": "system",
+    "last_orbital_by_system": {
+      "empty-system": "bolorus"
+    },
+    "last_system_id": "empty-system",
+    "map_return_view": "system",
+    "menu_return_view": "system",
+    "object_locations": {
+      "portrait-of-enrick": "inventory",
+      "spare-expedition-suit": "inventory"
+    },
+    "orbital_id": "red-hole",
+    "player_ship_id": "canary",
+    "ship_fuel": {
+      "canary": 2
+    },
+    "ship_locations": {
+      "canary": "system:abegna"
+    },
+    "system_id": "abegna",
+    "use_return_view": "system",
+    "view": "system"
+  }
+}

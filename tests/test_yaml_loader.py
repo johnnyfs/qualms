@@ -32,6 +32,72 @@ class YamlLoaderTests(unittest.TestCase):
         self.assertIn("Move", core.actions)
         self.assertIn("Ship", nova.kinds)
         self.assertIn("DockedAt", nova.relations)
+        self.assertIn("FuelStation", nova.traits)
+        self.assertIn("Refuel", nova.actions)
+
+    def test_vehicle_jump_fuel_blocks_jumps_and_refuels(self) -> None:
+        path = write_yaml(
+            f"""
+            qualms: "0.1"
+            id: fuel-story
+            imports:
+              - "{NOVA_PRELUDE}"
+            story:
+              entities:
+                - id: player
+                  kind: Player
+                - id: a
+                  kind: System
+                - id: b
+                  kind: System
+                - id: ship
+                  kind: Ship
+                - id: station
+                  kind: StoryObject
+                  traits:
+                    - id: FuelStation
+              assertions:
+                - relation: At
+                  args:
+                    - {{ ref: ship }}
+                    - {{ ref: a }}
+            """
+        )
+        definition = load_game_definition(path)
+        state = definition.instantiate()
+        engine = RulesEngine(definition)
+
+        blocked = engine.attempt(
+            state,
+            ActionAttempt("Jump", {"actor": "player", "ship": "ship", "destination_system": "b"}),
+        )
+        self.assertEqual(blocked.status, "blocked")
+        self.assertEqual(blocked.events[0]["text"], "The ship needs jump fuel.")
+        self.assertTrue(state.test("At", ["ship", "a"]))
+
+        state.set_field("ship", "Vehicle", "jump_fuel", 2)
+        jumped = engine.attempt(
+            state,
+            ActionAttempt("Jump", {"actor": "player", "ship": "ship", "destination_system": "b"}),
+        )
+        self.assertEqual(jumped.status, "succeeded")
+        self.assertTrue(state.test("At", ["ship", "b"]))
+        self.assertEqual(state.get_field("ship", "Vehicle", "jump_fuel"), 1)
+
+        inactive = engine.attempt(
+            state,
+            ActionAttempt("Refuel", {"actor": "player", "ship": "ship", "station": "station"}),
+        )
+        self.assertEqual(inactive.status, "blocked")
+        self.assertEqual(inactive.events[0]["text"], "The fueling station is powered down.")
+
+        state.assert_relation("FuelStationActive", ["station"])
+        refueled = engine.attempt(
+            state,
+            ActionAttempt("Refuel", {"actor": "player", "ship": "ship", "station": "station"}),
+        )
+        self.assertEqual(refueled.status, "succeeded")
+        self.assertEqual(state.get_field("ship", "Vehicle", "jump_fuel"), 3)
 
     def test_minimal_story_instantiates_and_asserts_at(self) -> None:
         path = write_yaml(

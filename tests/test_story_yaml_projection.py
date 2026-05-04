@@ -114,6 +114,31 @@ class StoryYamlProjectionTests(unittest.TestCase):
         self.assertTrue(state.test("ControlledBy", [id_map["canary"], "player"]))
         self.assertTrue(state.memory.has("ship:canary:control"))
 
+    def test_story_writer_preserves_fuel_station_activation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = Path(tmpdir) / "story.qualms.yaml"
+            write_story_world_yaml(self.world, output)
+            definition = load_game_definition(output)
+        state = definition.instantiate()
+        engine = RulesEngine(definition)
+        id_map = definition.metadata["local_id_map"]
+
+        result = engine.attempt(
+            state,
+            ActionAttempt(
+                "PowerUp",
+                {
+                    "actor": "player",
+                    "target": id_map["fuel-station-controls"],
+                },
+            ),
+        )
+
+        self.assertEqual(result.status, "blocked")
+        self.assertEqual(result.events[0]["text"], "The old fueling station hums awake below.")
+        self.assertTrue(state.test("FuelStationActive", [id_map["fueling-station"]]))
+        self.assertTrue(state.memory.has("fuel-station:fueling-station:active"))
+
     def test_before_rule_blocks_lunar_surface(self) -> None:
         definition = load_game_definition(STELLAR_YAML)
         state = definition.instantiate()

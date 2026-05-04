@@ -79,9 +79,12 @@ Dump the defined narrative surface:
 - `I`: open inventory
 - `L`: leave system from the system screen; land from orbit or station approach
 - `T`: take off from the docked destination or return to the system destination list from orbit
+- `F`: refuel from inside a boarded ship when an active fueling station is available
 - `B`: back one level in a local destination graph
 - `M`: show the local map
-- `Q`: quit
+- `Q`: open the main menu
+
+The main menu provides Continue, New Game, Save, Restore, and Quit. Save and restore use JSON snapshots of runtime state. Press Enter at either filename prompt to reuse the last filename, or the default save path if none has been used yet.
 
 ## Editor Mode
 

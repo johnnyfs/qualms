@@ -521,6 +521,10 @@ def evaluate_expression(spec: ExpressionSpec, state: WorldState, bindings: Bindi
     if op == "field":
         entity_id = evaluate_expression(operand["entity"], state, bindings)
         return state.get_field(entity_id, operand["trait"], operand["field"])
+    if op == "add":
+        if not isinstance(operand, list):
+            raise ValueError("add expression expects a list")
+        return sum(evaluate_expression(item, state, bindings) for item in operand)
     if op == "allocate":
         prefix = str(evaluate_expression(operand, state, bindings))
         return state.allocate(prefix)

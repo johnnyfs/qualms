@@ -40,6 +40,9 @@ definitions:
         - id: abilities
           type: list<id>
           default: []
+        - id: jump_fuel
+          type: int
+          default: 0
       relations:
         - id: InOrbit
           params:
@@ -66,6 +69,30 @@ definitions:
     - id: Jumpable
 
     - id: Port
+
+    - id: FuelStation
+      fields:
+        - id: active
+          type: bool
+          default: false
+      relations:
+        - id: FuelStationActive
+          params:
+            - id: station
+              type: ref<FuelStation>
+          get:
+            eq:
+              - field:
+                  entity: { var: station }
+                  trait: FuelStation
+                  field: active
+              - true
+          set:
+            - set_field:
+                entity: { var: station }
+                trait: FuelStation
+                field: active
+                value: true
 
     - id: Social
       actions:
@@ -206,6 +233,17 @@ definitions:
             args:
               - { var: ship }
               - { var: destination_system }
+        - set_field:
+            entity: { var: ship }
+            trait: Vehicle
+            field: jump_fuel
+            value:
+              add:
+                - field:
+                    entity: { var: ship }
+                    trait: Vehicle
+                    field: jump_fuel
+                - -1
 
     - id: PowerUp
       params:
@@ -217,6 +255,63 @@ definitions:
       default:
         - emit:
             text: "Nothing happens."
+
+    - id: Refuel
+      params:
+        - id: actor
+          type: ref<Actor>
+        - id: ship
+          type: ref<Vehicle>
+        - id: station
+          type: ref<FuelStation>
+      requires: true
+      default:
+        - set_field:
+            entity: { var: ship }
+            trait: Vehicle
+            field: jump_fuel
+            value: 3
+        - emit:
+            text: "Jump fuel replenished."
+
+  rulebooks:
+    - id: jump-fuel
+      rules:
+        - id: block-jump-without-fuel
+          phase: before
+          match:
+            action: Jump
+            args:
+              ship: { bind: ship }
+          when:
+            compare:
+              left:
+                field:
+                  entity: { var: ship }
+                  trait: Vehicle
+                  field: jump_fuel
+              op: <=
+              right: 0
+          effects:
+            - emit:
+                text: "The ship needs jump fuel."
+          control: stop
+        - id: block-refuel-inactive-station
+          phase: before
+          match:
+            action: Refuel
+            args:
+              station: { bind: station }
+          when:
+            not:
+              relation:
+                id: FuelStationActive
+                args:
+                  - { var: station }
+          effects:
+            - emit:
+                text: "The fueling station is powered down."
+          control: stop
 
   kinds:
     - id: System

@@ -7,6 +7,10 @@ metadata:
     empty-system: empty-system
     bolorus: empty-system:bolorus
     abandoned-mining-platform: empty-system:bolorus:abandoned-mining-platform
+    fueling-station: empty-system:bolorus:abandoned-mining-platform:object:fueling-station
+    command-tower: empty-system:bolorus:abandoned-mining-platform:command-tower
+    command-center: empty-system:bolorus:abandoned-mining-platform:command-tower:command-center
+    fuel-station-controls: empty-system:bolorus:abandoned-mining-platform:command-tower:command-center:object:fuel-station-controls
     rig-managers-office: empty-system:bolorus:abandoned-mining-platform:rig-managers-office
     art-on-the-wall: empty-system:bolorus:abandoned-mining-platform:rig-managers-office:object:art-on-the-wall
     rainbow: empty-system:rainbow
@@ -26,6 +30,13 @@ metadata:
     canary: canary
     control-console: canary:object:control-console
     collapsed-entrance: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine:collapsed-entrance
+    abegna: abegna
+    abegna-a: abegna:abegna-a
+    abegna-b: abegna:abegna-b
+    abegna-c: abegna:abegna-c
+    ab-6: abegna:ab-6
+    red-hole: abegna:red-hole
+    ab-7: abegna:ab-7
 story:
   start:
     actor: player
@@ -50,7 +61,8 @@ story:
         star_type: Unspecified
         x: 0.0
         y: 0.0
-        hops: []
+        hops:
+        - abegna
     metadata:
       local_id: empty-system
   - id: empty-system:bolorus
@@ -91,6 +103,132 @@ story:
       effects:
       - set_fact:
           id: visited:destination:abandoned-mining-platform
+  - id: empty-system:bolorus:abandoned-mining-platform:object:fueling-station
+    kind: StoryObject
+    traits:
+    - id: FuelStation
+    fields:
+      Presentable:
+        name: Old fueling station
+        description: An old fueling station. It's powered down.
+    metadata:
+      local_id: fueling-station
+      interactions:
+      - Examine
+      collectable: false
+      fuel_station: true
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: before:Examine:empty
+      phase: before
+      match:
+        action: Examine
+        args:
+          target:
+            ref: empty-system:bolorus:abandoned-mining-platform:object:fueling-station
+      when:
+        fact:
+          id: fuel-station:fueling-station:empty
+      effects:
+      - emit:
+          text: The old fueling station is powered up, but empty.
+      control: stop
+    - id: before:Examine:active
+      phase: before
+      match:
+        action: Examine
+        args:
+          target:
+            ref: empty-system:bolorus:abandoned-mining-platform:object:fueling-station
+      when:
+        fact:
+          id: fuel-station:fueling-station:active
+      effects:
+      - emit:
+          text: The old fueling station hums with enough life to top off the Canary.
+      control: stop
+  - id: empty-system:bolorus:abandoned-mining-platform:command-tower
+    kind: Destination
+    fields:
+      Presentable:
+        name: Command Tower
+        description: A skeletal tower leans over the platform, the kind of structure
+          that looks taller when you are forced to climb it.
+    metadata:
+      local_id: command-tower
+      display_kind: Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:command-tower
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:command-tower
+  - id: empty-system:bolorus:abandoned-mining-platform:command-tower:command-center
+    kind: Destination
+    fields:
+      Presentable:
+        name: Command Center
+        description: The top of the tower is mostly consoles, warning labels, and
+          old coffee rings.
+    metadata:
+      local_id: command-center
+      display_kind: Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: visited:command-center
+      phase: after
+      match:
+        action: Enter
+        args:
+          destination:
+            var: this
+      effects:
+      - set_fact:
+          id: visited:destination:command-center
+  - id: empty-system:bolorus:abandoned-mining-platform:command-tower:command-center:object:fuel-station-controls
+    kind: StoryObject
+    fields:
+      Presentable:
+        name: Fuel station controls
+        description: A grimy panel with one remaining labeled function.
+    metadata:
+      local_id: fuel-station-controls
+      interactions:
+      - Examine
+      - Power up
+      collectable: false
+      visible_when: []
+      visible_unless: []
+    rules:
+    - id: power-up-fueling-station
+      phase: before
+      match:
+        action: PowerUp
+        args:
+          target:
+            ref: empty-system:bolorus:abandoned-mining-platform:command-tower:command-center:object:fuel-station-controls
+      when: true
+      effects:
+      - emit:
+          text: The old fueling station hums awake below.
+      - assert:
+          relation: FuelStationActive
+          args:
+          - ref: empty-system:bolorus:abandoned-mining-platform:object:fueling-station
+      - set_fact:
+          id: fuel-station:fueling-station:active
+      control: stop
   - id: empty-system:bolorus:abandoned-mining-platform:rig-managers-office
     kind: Destination
     fields:
@@ -243,7 +381,7 @@ story:
     fields:
       Presentable:
         name: Portrait of Enrick
-        description: A portrait of your Enrick, your old guardian hangs on the wall.
+        description: A portrait of Enrick, your old guardian.
     metadata:
       local_id: portrait-of-enrick
       interactions:
@@ -683,6 +821,98 @@ story:
       effects:
       - set_fact:
           id: visited:destination:collapsed-entrance
+  - id: abegna
+    kind: System
+    fields:
+      Presentable:
+        name: Abegna
+        description: Seedy, but minimally viable.
+      StarSystem:
+        star_type: Unspecified
+        x: 200000.0
+        y: 0.0
+        hops:
+        - empty-system
+    metadata:
+      local_id: abegna
+  - id: abegna:abegna-a
+    kind: Planet
+    fields:
+      Presentable:
+        name: Abegna A
+        description: Uninhabitable.
+      OrbitalBody:
+        orbital_type: Planet
+        parent: null
+        default_landing_path: []
+    metadata:
+      local_id: abegna-a
+      source_type: Planet
+  - id: abegna:abegna-b
+    kind: Planet
+    fields:
+      Presentable:
+        name: Abegna B
+        description: Uninhabitable.
+      OrbitalBody:
+        orbital_type: Planet
+        parent: null
+        default_landing_path: []
+    metadata:
+      local_id: abegna-b
+      source_type: Planet
+  - id: abegna:abegna-c
+    kind: Planet
+    fields:
+      Presentable:
+        name: Abegna C
+        description: Uninhabitable.
+      OrbitalBody:
+        orbital_type: Planet
+        parent: null
+        default_landing_path: []
+    metadata:
+      local_id: abegna-c
+      source_type: Planet
+  - id: abegna:ab-6
+    kind: Planet
+    fields:
+      Presentable:
+        name: AB-6
+        description: A small ice giant.
+      OrbitalBody:
+        orbital_type: Planet
+        parent: null
+        default_landing_path: []
+    metadata:
+      local_id: ab-6
+      source_type: Planet
+  - id: abegna:red-hole
+    kind: Station
+    fields:
+      Presentable:
+        name: Red Hole
+        description: As dens of iniquity go, it's nothing special.
+      OrbitalBody:
+        orbital_type: Station
+        parent: abegna:ab-6
+        default_landing_path: []
+    metadata:
+      local_id: red-hole
+      source_type: Station
+  - id: abegna:ab-7
+    kind: Moon
+    fields:
+      Presentable:
+        name: AB-7
+        description: The only thing more boring than a mine is a farm.
+      OrbitalBody:
+        orbital_type: Moon
+        parent: abegna:ab-6
+        default_landing_path: []
+    metadata:
+      local_id: ab-7
+      source_type: Moon
   assertions:
   - relation: At
     args:
@@ -692,6 +922,22 @@ story:
     args:
     - ref: empty-system:bolorus:abandoned-mining-platform
     - ref: empty-system:bolorus
+  - relation: At
+    args:
+    - ref: empty-system:bolorus:abandoned-mining-platform:object:fueling-station
+    - ref: empty-system:bolorus:abandoned-mining-platform
+  - relation: At
+    args:
+    - ref: empty-system:bolorus:abandoned-mining-platform:command-tower
+    - ref: empty-system:bolorus:abandoned-mining-platform
+  - relation: At
+    args:
+    - ref: empty-system:bolorus:abandoned-mining-platform:command-tower:command-center
+    - ref: empty-system:bolorus:abandoned-mining-platform:command-tower
+  - relation: At
+    args:
+    - ref: empty-system:bolorus:abandoned-mining-platform:command-tower:command-center:object:fuel-station-controls
+    - ref: empty-system:bolorus:abandoned-mining-platform:command-tower:command-center
   - relation: At
     args:
     - ref: empty-system:bolorus:abandoned-mining-platform:rig-managers-office
@@ -768,4 +1014,28 @@ story:
     args:
     - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine:collapsed-entrance
     - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine
+  - relation: At
+    args:
+    - ref: abegna:abegna-a
+    - ref: abegna
+  - relation: At
+    args:
+    - ref: abegna:abegna-b
+    - ref: abegna
+  - relation: At
+    args:
+    - ref: abegna:abegna-c
+    - ref: abegna
+  - relation: At
+    args:
+    - ref: abegna:ab-6
+    - ref: abegna
+  - relation: At
+    args:
+    - ref: abegna:red-hole
+    - ref: abegna
+  - relation: At
+    args:
+    - ref: abegna:ab-7
+    - ref: abegna
   facts: []

@@ -45,6 +45,15 @@ def destination_by_ids(world, *destination_ids: str):
     return destination
 
 
+def destination_by_ids_for_orbital(world, system_id: str, orbital_id: str, *destination_ids: str):
+    orbital = dq.orbital_by_id(world.system_by_id(system_id), orbital_id)
+    path = dq.destination_path_by_ids(orbital, tuple(destination_ids))
+    destination = dq.destination_at_path(orbital, list(path))
+    if destination is None:
+        raise AssertionError(f"destination not found: {destination_ids}")
+    return destination
+
+
 class StoryLoaderTests(unittest.TestCase):
     def test_story_directory_prefers_yaml_when_present(self) -> None:
         self.assertEqual(dq.resolve_data_file(ROOT / "stories" / "stellar"), ROOT / "stories" / "stellar" / "story.qualms.yaml")
@@ -273,6 +282,101 @@ class StoryBehaviorTests(unittest.TestCase):
         dq.land_boarded_ship(self.state, self.orbital, list(landing_path))
         self.assertEqual(self.state.ship_locations["canary"], "mining-colony-5")
         self.assertIsNone(self.state.boarded_ship_id)
+
+    def test_fuel_station_activation_and_refuel(self) -> None:
+        platform = destination_by_ids_for_orbital(self.world, "empty-system", "bolorus", "abandoned-mining-platform")
+        command_center = destination_by_ids_for_orbital(
+            self.world,
+            "empty-system",
+            "bolorus",
+            "abandoned-mining-platform",
+            "command-tower",
+            "command-center",
+        )
+        power_up = next(
+            choice
+            for choice in dq.object_choices_for_destination(self.state, command_center)
+            if choice.target.id == "fuel-station-controls" and choice.interaction == "Power up"
+        )
+
+        dq.handle_interaction_choice(self.state, power_up, choice_index=0)
+
+        self.assertIn("fuel-station:fueling-station:active", self.state.facts)
+        self.assertEqual(self.state.continue_message, "The old fueling station hums awake below.")
+        examine_station = next(
+            choice
+            for choice in dq.object_choices_for_destination(self.state, platform)
+            if choice.target.id == "fueling-station" and choice.interaction == "Examine"
+        )
+        dq.handle_interaction_choice(self.state, examine_station, choice_index=0)
+        self.assertEqual(
+            self.state.continue_message,
+            "The old fueling station hums with enough life to top off the Canary.",
+        )
+
+        self.state.player_ship_id = "canary"
+        self.state.boarded_ship_id = "canary"
+        self.state.ship_locations["canary"] = "abandoned-mining-platform"
+        self.state.ship_fuel["canary"] = 0
+
+        self.assertTrue(dq.can_refuel_boarded_ship(self.state, platform, self.state.ships["canary"]))
+        dq.refuel_boarded_ship(self.state, platform)
+
+        self.assertEqual(self.state.ship_fuel["canary"], 3)
+        self.assertEqual(self.state.continue_message, "Jump fuel replenished.")
+        self.assertIn("fuel-station:fueling-station:empty", self.state.facts)
+        self.assertFalse(dq.can_refuel_boarded_ship(self.state, platform, self.state.ships["canary"]))
+
+        self.state.continue_message = ""
+        dq.handle_interaction_choice(self.state, examine_station, choice_index=0)
+        self.assertEqual(
+            self.state.continue_message,
+            "The old fueling station is powered up, but empty.",
+        )
+
+    def test_jump_consumes_fuel_and_blocks_without_it(self) -> None:
+        abegna = self.world.system_by_id("abegna")
+        self.state.player_ship_id = "canary"
+        self.state.boarded_ship_id = "canary"
+        self.state.ship_locations["canary"] = "system:empty-system"
+        self.state.ship_fuel["canary"] = 1
+
+        result = dq.jump_boarded_ship_to_system(self.state, abegna)
+
+        self.assertEqual(result.status, "succeeded")
+        self.assertEqual(self.state.system_id, "abegna")
+        self.assertEqual(self.state.ship_locations["canary"], "system:abegna")
+        self.assertEqual(self.state.ship_fuel["canary"], 0)
+
+        self.state.system_id = "empty-system"
+        blocked = dq.jump_boarded_ship_to_system(self.state, abegna)
+
+        self.assertEqual(blocked.status, "blocked")
+        self.assertEqual(blocked.events[0]["text"], "The ship needs jump fuel.")
+        self.assertEqual(self.state.system_id, "empty-system")
+
+    def test_save_restore_round_trip_runtime_state(self) -> None:
+        self.state.player_ship_id = "canary"
+        self.state.boarded_ship_id = "canary"
+        self.state.ship_locations["canary"] = "system:abegna"
+        self.state.ship_fuel["canary"] = 2
+        self.state.facts.add("fuel-station:fueling-station:active")
+
+        saved = dq.game_state_to_save_data(self.state)
+        restored = dq.restore_game_state(self.world, saved, editor_enabled=False)
+
+        self.assertEqual(restored.player_ship_id, "canary")
+        self.assertEqual(restored.boarded_ship_id, "canary")
+        self.assertEqual(restored.ship_locations["canary"], "system:abegna")
+        self.assertEqual(restored.ship_fuel["canary"], 2)
+        self.assertIn("fuel-station:fueling-station:active", restored.facts)
+
+    def test_inventory_portrait_description_is_not_wall_bound(self) -> None:
+        portrait = dq.objects_by_id(self.world)["portrait-of-enrick"]
+        self.state.inventory[portrait.id] = portrait
+        self.state.object_locations[portrait.id] = "inventory"
+
+        self.assertNotIn("hangs on the wall", self.state.inventory[portrait.id].description)
 
 
 if __name__ == "__main__":
