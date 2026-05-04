@@ -1,5 +1,5 @@
 # Stories
 
-Story data lives here as interface-independent JSON. The curses interface currently defaults to `stellar/story_systems.json`.
+Story data lives here. The current source format is Qualms YAML.
 
-Each story directory should contain a `story_systems.json` file.
+Each story directory should contain a `story.qualms.yaml` file.

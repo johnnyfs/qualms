@@ -1,15 +1,28 @@
-# Dark Qualms
+# Qualms
 
-Dark Qualms is a story-first bounty-hunter game prototype. The project is now organized around an interface-independent story graph, with a maintained curses interface and a paused Godot prototype.
+Qualms is a prototype for a rules-driven story engine and a nova-like game built on top of it. The long-term goal is to define a compact declarative model for game rules that can be projected into different genres, interfaces, and implementations while preserving the same core behavior.
+
+The current playable game is still Dark Qualms: a story-first bounty-hunter prototype with a maintained curses interface. The maintained story source is now `story.qualms.yaml`; the curses UI loads and edits that YAML file directly. The YAML schema uses genre-agnostic primitives: entities, traits, relations, actions, rules, and effects/assertions. Genre-specific concepts such as systems, orbitals, ships, people, inventory, and travel are expressed by authored preludes and story content rather than hard-coded as engine categories.
+
+## Specs
+
+Technical direction now lives in `specs/`:
+
+- `specs/rules-engine.md`: runtime model, UML-style class/interface sketch, and action resolution sequence.
+- `specs/story-yaml-schema.md`: rigorous YAML schema specification for engine definitions, prelude definitions, and story content.
+- `specs/runtime-roadmap.md`: next implementation steps for tightening the YAML-driven runtime and editor.
+
+`story_declarative.txt` is an older design sketch. It is useful context, but it currently mixes engine primitives, nova-specific content, and implementation notes more than the new specs should.
 
 ## Layout
 
-- `stories/`: active story data. The current story is `stories/stellar/story_systems.json`.
+- `specs/`: technical design documents for the rules engine and future YAML schema.
+- `stories/`: active story data. The current story is `stories/stellar/story.qualms.yaml`.
 - `curses/`: maintained text interface for playing and editing the story graph.
-- `godot/`: unmaintained 2D orbital-flight prototype; kept for possible future interface work.
-- `examples/`: valid older story datasets kept for reference.
+- `godot/`: paused 2D orbital-flight prototype; kept for possible future interface work.
+- `examples/`: valid YAML sample story datasets kept for reference.
 
-The story model currently defines systems, star types, graph hops, orbitals (`Planet`, `Moon`, `Station`), recursive local destinations, objects that support interactions such as examine, take, or use, NPCs that support examine and talk, destination sequences, and simple fact-gated before rules.
+The current story model defines systems, star types, graph hops, orbitals (`Planet`, `Moon`, `Station`), recursive local destinations, objects that support interactions such as examine, take, or use, NPCs that support examine and talk, destination sequences, and simple fact-gated before rules.
 
 ## Run
 
@@ -28,22 +41,22 @@ Run with the in-game editor exposed:
 Both scripts use the curses interface. By default they load:
 
 ```sh
-stories/stellar/story_systems.json
+stories/stellar/story.qualms.yaml
 ```
 
 Run against another story directory:
 
 ```sh
-./run.sh ./examples/sol-proof
+./run.sh ./stories/stellar
 ```
 
-The game reads and writes `story_systems.json` inside that directory. You can also pass a direct JSON file path:
+The game reads and writes `story.qualms.yaml` inside that directory. Sample stories can be run by passing their directory:
 
 ```sh
-./run.sh ./examples/blank/story_systems.json
+./run.sh ./examples/blank
 ```
 
-If the data path is missing, empty, or contains `{}`, the game creates a blank world with one empty system so you can start authoring in-game.
+If the YAML data path is missing or empty, the game creates a blank YAML world with one empty system so you can start authoring in-game.
 
 Stories can optionally define `start_location` with a starting orbital and destination ID path. The current story starts docked at Mining Colony 5 on Blemish.
 
@@ -66,9 +79,12 @@ Dump the defined narrative surface:
 - `I`: open inventory
 - `L`: leave system from the system screen; land from orbit or station approach
 - `T`: take off from the docked destination or return to the system destination list from orbit
+- `F`: refuel from inside a boarded ship when an active fueling station is available
 - `B`: back one level in a local destination graph
 - `M`: show the local map
-- `Q`: quit
+- `Q`: open the main menu
+
+The main menu provides Continue, New Game, Save, Restore, and Quit. Save and restore use JSON snapshots of runtime state. Press Enter at either filename prompt to reuse the last filename, or the default save path if none has been used yet.
 
 ## Editor Mode
 
@@ -91,72 +107,28 @@ Dump the defined narrative surface:
 - Orbiting/approaching screen: edit the current orbital name and description.
 - Destination description screen: edit that destination name and description.
 
-## Story Data
+## Current Story Data
 
-A destination is deliberately explicit:
+The YAML story imports `stories/prelude/nova-qualms.qualms.yaml`, which imports the core prelude. Story content is authored as entities, trait field values, initial relation assertions, facts, and local rules. The curses UI projects that declarative model into its menu views while using the rules runtime for action resolution.
 
-```json
-{
-  "id": "earth",
-  "name": "Earth",
-  "type": "Planet",
-  "description": "Old money, crowded ports, and licensed violence.",
-  "landing_options": [
-    {
-      "kind": "Bar",
-      "name": "Blue Anchor",
-      "description": "Bounty clerks and dockhands keep separate corners.",
-      "objects": [
-        {
-          "id": "decor",
-          "name": "Admire the decor",
-          "description": "A specific thing to notice.",
-          "interactions": ["Examine", "Take"],
-          "collectable": true,
-          "before": [
-            {
-              "interaction": "Take",
-              "unless": ["sequence:example:complete"],
-              "message": "Leave it where it is."
-            }
-          ]
-        }
-      ],
-      "npcs": [
-        {
-          "id": "bartender",
-          "name": "Bartender",
-          "description": "The bartender watches the room.",
-          "examine_description": "Nothing gets past her.",
-          "interactions": ["Examine", "Talk"],
-          "before": [
-            {
-              "interaction": "Talk",
-              "message": "She is busy."
-            }
-          ]
-        }
-      ],
-      "destinations": []
-    }
-  ]
-}
-```
-
-The loader validates required fields, destination types, object and NPC interactions, duplicate IDs, moon parents, and at most 9 choices per menu. Landing destinations may contain nested `destinations`, forming a recursive graph, plus `objects`, `npcs`, and `sequences`. Objects and NPCs are denormalized in the menu by interaction, so one poster with `["Examine", "Take"]` appears as two numbered choices. Sequences and before rules can use `when` and `unless` fact lists.
+The loader validates the YAML schema, compiles preludes and story content into the runtime definition, then validates nova-like constraints such as duplicate IDs, moon parents, reciprocal hops, hop distance, and at most 9 choices per menu.
 
 Inventory opens with `I`. Inventory items can be examined with `X`; equippable items define an `equipment_slot` and can be equipped with `E`, replacing any item already in that slot. Rules can test equipment slots with facts like `equipped:slot:Exosuit`.
 
-Systems also define graph data:
+Systems define graph data through trait fields:
 
-```json
-{
-  "id": "sol-proof",
-  "name": "Sol Proof",
-  "star_type": "G-type main sequence",
-  "position_au": [0, 0],
-  "hops": ["barnard-gate", "sirius-wake"]
-}
+```yaml
+- id: sol-proof
+  kind: System
+  fields:
+    Presentable:
+      name: Sol Proof
+      description: Old money, crowded ports, and licensed violence.
+    StarSystem:
+      star_type: G-type main sequence
+      x: 0
+      y: 0
+      hops: [barnard-gate, sirius-wake]
 ```
 
 Hop links must be reciprocal, must point to known systems, and must stay under the current short-hop limit.

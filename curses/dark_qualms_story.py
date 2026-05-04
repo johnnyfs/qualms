@@ -5,15 +5,23 @@ import argparse
 import curses
 import json
 import re
+import sys
 import textwrap
 from curses import ascii
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DATA_PATH = PROJECT_ROOT / "stories" / "stellar" / "story_systems.json"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from qualms import ActionAttempt, ActionResult, RulesEngine
+from qualms.story_writer import write_story_world_yaml
+from qualms.yaml_loader import load_game_definition
+
+DATA_PATH = PROJECT_ROOT / "stories" / "stellar"
 ORBITAL_TYPES = {"Planet", "Moon", "Station"}
 OPTION_KINDS = {"Bar", "Tourist Destination", "Destination"}
 OBJECT_INTERACTIONS = {"Examine", "Take", "Use", "Power up"}
@@ -24,6 +32,7 @@ MAX_HOP_DISTANCE_AU = 350000.0
 MAP_WIDTH = 58
 MAP_HEIGHT = 17
 DEFAULT_HOP_DISTANCE_AU = 200000.0
+SAVE_FORMAT_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -61,6 +70,7 @@ class StoryObject:
     interactions: tuple[str, ...]
     collectable: bool = False
     equipment_slot: str | None = None
+    fuel_station: bool = False
     before: tuple[BeforeRule, ...] = ()
     use_rules: tuple[UseRule, ...] = ()
     visible_when: tuple[str, ...] = ()
@@ -156,6 +166,7 @@ class StoryWorld:
     systems: tuple[System, ...]
     start_orbital_id: str | None = None
     start_destination_ids: tuple[str, ...] = ()
+    rules_definition: Any | None = None
 
     def system_by_id(self, system_id: str) -> System:
         for system in self.systems:
@@ -168,7 +179,8 @@ class StoryWorld:
 class GameState:
     system_id: str
     editor_enabled: bool = False
-    view: str = "system"
+    view: str = "main_menu"
+    menu_return_view: str = "system"
     map_return_view: str = "system"
     inventory_return_view: str = "system"
     use_return_view: str = "inventory"
@@ -185,6 +197,7 @@ class GameState:
     equipment: dict[str, str] = field(default_factory=dict)
     object_locations: dict[str, str] = field(default_factory=dict)
     ship_locations: dict[str, str] = field(default_factory=dict)
+    ship_fuel: dict[str, int] = field(default_factory=dict)
     continue_message: str = ""
     continue_on_complete: tuple[str, ...] = ()
     sequence_messages: tuple[str, ...] = ()
@@ -195,6 +208,11 @@ class GameState:
     last_orbital_by_system: dict[str, str] = field(default_factory=dict)
     message: str = ""
     editor_box_top: int | None = None
+    rules_definition: Any | None = None
+    rules_state: Any | None = None
+    rules_engine: RulesEngine | None = None
+    local_id_map: dict[str, str] = field(default_factory=dict)
+    last_save_path: str | None = None
 
 
 def blank_world_raw() -> dict:
@@ -216,29 +234,620 @@ def blank_world_raw() -> dict:
 
 def resolve_data_file(path: Path) -> Path:
     if path.exists() and path.is_dir():
-        return path / "story_systems.json"
-    if not path.exists() and path.suffix.lower() != ".json":
-        return path / "story_systems.json"
+        return path / "story.qualms.yaml"
+    if not path.exists() and path.suffix.lower() not in {".yaml", ".yml"}:
+        return path / "story.qualms.yaml"
     return path
 
 
-def read_or_create_raw(path: Path) -> dict:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists() or not path.read_text(encoding="utf-8").strip():
-        raw = blank_world_raw()
-        write_raw_world(path, raw)
-        return raw
+def write_blank_yaml_world(path: Path) -> None:
+    world = load_world_from_raw(blank_world_raw())
+    write_story_world_yaml(world, path)
 
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    if raw == {}:
-        raw = blank_world_raw()
-        write_raw_world(path, raw)
+
+def yaml_definition_to_raw(definition: Any) -> dict:
+    specs = {spec.id: spec for spec in definition.initial_entities}
+    id_to_local = {
+        spec.id: spec.metadata.get("local_id", spec.id)
+        for spec in definition.initial_entities
+    }
+    local_map = definition.metadata.get("local_id_map", {})
+    for local_id, entity_id in local_map.items():
+        id_to_local.setdefault(entity_id, local_id)
+
+    at_locations: dict[str, str] = {}
+    docked_locations: dict[str, str] = {}
+    controlled_ships: set[str] = set()
+    for assertion in definition.initial_assertions:
+        relation = assertion.get("relation")
+        args = [expression_ref(arg) for arg in assertion.get("args", [])]
+        if relation == "At" and len(args) == 2 and args[0] and args[1]:
+            at_locations[args[0]] = args[1]
+        elif relation == "DockedAt" and len(args) == 2 and args[0] and args[1]:
+            docked_locations[args[0]] = args[1]
+        elif relation == "ControlledBy" and len(args) == 2 and args[0]:
+            controlled_ships.add(args[0])
+
+    raw_systems = []
+    for system_spec in entity_specs_by_kind(definition, {"System"}):
+        system_id = id_to_local_id(system_spec.id, id_to_local)
+        star_fields = spec_fields(system_spec, "StarSystem")
+        raw_systems.append(
+            {
+                "id": system_id,
+                "name": presentable_name(system_spec),
+                "star_type": str(star_fields.get("star_type", "Unspecified")),
+                "description": presentable_description(system_spec),
+                "position_au": [float(star_fields.get("x", 0.0)), float(star_fields.get("y", 0.0))],
+                "hops": [id_to_local_id(hop, id_to_local) for hop in star_fields.get("hops", [])],
+                "orbitals": [
+                    orbital_to_raw(
+                        orbital_spec,
+                        definition,
+                        id_to_local,
+                        at_locations,
+                        docked_locations,
+                        controlled_ships,
+                    )
+                    for orbital_spec in child_specs(definition, system_spec.id, at_locations, {"Planet", "Moon", "Station"})
+                ],
+            }
+        )
+
+    start = definition.metadata.get("start", {})
+    start_system = id_to_local_id(str(start.get("system", raw_systems[0]["id"] if raw_systems else "empty-system")), id_to_local)
+    raw = {
+        "start_system": start_system,
+        "systems": raw_systems,
+    }
+    start_location = start.get("location")
+    if isinstance(start_location, str):
+        destination_ids = destination_path_local_ids(start_location, at_locations, id_to_local, definition)
+        if destination_ids:
+            orbital_entity_id = destination_path_orbital(start_location, at_locations, definition)
+            raw["start_location"] = {
+                "system_id": start_system,
+                "orbital_id": id_to_local_id(orbital_entity_id, id_to_local) if orbital_entity_id else None,
+                "destination_ids": destination_ids,
+            }
     return raw
 
 
-def write_raw_world(path: Path, raw: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
+def orbital_to_raw(
+    spec: Any,
+    definition: Any,
+    id_to_local: dict[str, str],
+    at_locations: dict[str, str],
+    docked_locations: dict[str, str],
+    controlled_ships: set[str],
+) -> dict:
+    orbital_fields = spec_fields(spec, "OrbitalBody")
+    orbital_type = str(orbital_fields.get("orbital_type", spec.kind or "Planet"))
+    raw = {
+        "id": id_to_local_id(spec.id, id_to_local),
+        "name": presentable_name(spec),
+        "type": orbital_type,
+        "description": presentable_description(spec),
+        "landing_options": [
+            destination_to_raw(child, definition, id_to_local, at_locations, docked_locations, controlled_ships)
+            for child in child_specs(definition, spec.id, at_locations, {"Destination"})
+        ],
+    }
+    parent = orbital_fields.get("parent")
+    if parent:
+        raw["parent"] = id_to_local_id(str(parent), id_to_local)
+    default_landing_path = orbital_fields.get("default_landing_path", [])
+    if default_landing_path:
+        raw["default_landing_destination_ids"] = list(default_landing_path)
+    return raw
+
+
+def destination_to_raw(
+    spec: Any,
+    definition: Any,
+    id_to_local: dict[str, str],
+    at_locations: dict[str, str],
+    docked_locations: dict[str, str],
+    controlled_ships: set[str],
+) -> dict:
+    metadata = dict(spec.metadata)
+    before, sequences = destination_rules_to_local(spec, id_to_local, definition)
+    return {
+        "id": id_to_local_id(spec.id, id_to_local),
+        "kind": metadata.get("display_kind", "Destination"),
+        "name": presentable_name(spec),
+        "description": presentable_description(spec),
+        "objects": [
+            object_to_raw(child, id_to_local, definition)
+            for child in child_specs(definition, spec.id, at_locations, {"StoryObject"})
+        ],
+        "npcs": [
+            npc_to_raw(child, id_to_local, definition)
+            for child in child_specs(definition, spec.id, at_locations, {"NPC"})
+        ],
+        "ships": [
+            ship_to_raw(ship, definition, id_to_local, at_locations, docked_locations, controlled_ships)
+            for ship in docked_child_specs(definition, spec.id, docked_locations)
+        ],
+        "before": before_rules_to_raw(before),
+        "sequences": [
+            {
+                "id": sequence.id,
+                "when": list(sequence.when),
+                "unless": list(sequence.unless),
+                "messages": list(sequence.messages),
+                "on_complete": list(sequence.on_complete),
+            }
+            for sequence in sequences
+        ],
+        "destinations": [
+            destination_to_raw(child, definition, id_to_local, at_locations, docked_locations, controlled_ships)
+            for child in child_specs(definition, spec.id, at_locations, {"Destination"})
+        ],
+        **({"port": bool(metadata.get("port"))} if metadata.get("port") else {}),
+        **({"visible_when": list(metadata.get("visible_when", []))} if metadata.get("visible_when") else {}),
+        **({"visible_unless": list(metadata.get("visible_unless", []))} if metadata.get("visible_unless") else {}),
+    }
+
+
+def object_to_raw(spec: Any, id_to_local: dict[str, str], definition: Any) -> dict:
+    metadata = dict(spec.metadata)
+    before, use_rules = object_rules_to_local(spec, id_to_local, definition)
+    equipment_fields = trait_attachment_fields(spec, "Equipment")
+    fuel_station = bool(metadata.get("fuel_station", has_trait_attachment(spec, "FuelStation")))
+    return {
+        "id": id_to_local_id(spec.id, id_to_local),
+        "name": presentable_name(spec),
+        "description": presentable_description(spec),
+        "interactions": list(metadata.get("interactions", default_object_interactions(spec))),
+        "collectable": bool(metadata.get("collectable", has_trait_attachment(spec, "Portable"))),
+        **({"equipment_slot": equipment_fields.get("slot")} if equipment_fields.get("slot") else {}),
+        **({"fuel_station": True} if fuel_station else {}),
+        "before": before_rules_to_raw(before),
+        "use_rules": use_rules_to_raw(use_rules),
+        **({"visible_when": list(metadata.get("visible_when", []))} if metadata.get("visible_when") else {}),
+        **({"visible_unless": list(metadata.get("visible_unless", []))} if metadata.get("visible_unless") else {}),
+    }
+
+
+def npc_to_raw(spec: Any, id_to_local: dict[str, str], definition: Any) -> dict:
+    metadata = dict(spec.metadata)
+    before = before_rules_from_local_rules(spec, id_to_local, definition)
+    presentable = spec_fields(spec, "Presentable")
+    return {
+        "id": id_to_local_id(spec.id, id_to_local),
+        "name": presentable_name(spec),
+        "description": presentable_description(spec),
+        "examine_description": str(presentable.get("examine_description") or presentable_description(spec)),
+        "interactions": list(metadata.get("interactions", ("Examine", "Talk"))),
+        "before": before_rules_to_raw(before),
+        **({"visible_when": list(metadata.get("visible_when", []))} if metadata.get("visible_when") else {}),
+        **({"visible_unless": list(metadata.get("visible_unless", []))} if metadata.get("visible_unless") else {}),
+    }
+
+
+def ship_to_raw(
+    spec: Any,
+    definition: Any,
+    id_to_local: dict[str, str],
+    at_locations: dict[str, str],
+    docked_locations: dict[str, str],
+    controlled_ships: set[str],
+) -> dict:
+    metadata = dict(spec.metadata)
+    vehicle_fields = spec_fields(spec, "Vehicle")
+    return {
+        "id": id_to_local_id(spec.id, id_to_local),
+        "name": presentable_name(spec),
+        "description": presentable_description(spec),
+        "unlock": bool(metadata.get("unlock", False)),
+        "controlled": spec.id in controlled_ships or bool(metadata.get("controlled", False)),
+        "equipment_slots": list(metadata.get("equipment_slots", [])),
+        "abilities": list(vehicle_fields.get("abilities", metadata.get("abilities", []))),
+        "objects": [
+            object_to_raw(child, id_to_local, definition)
+            for child in child_specs(definition, spec.id, at_locations, {"StoryObject"})
+        ],
+        "before": before_rules_to_raw(before_rules_from_local_rules(spec, id_to_local, definition)),
+        "display_names": list(metadata.get("display_names", [])),
+        "interior_descriptions": list(metadata.get("interior_descriptions", [])),
+        "taglines": list(metadata.get("taglines", [])),
+        **({"visible_when": list(metadata.get("visible_when", []))} if metadata.get("visible_when") else {}),
+        **({"visible_unless": list(metadata.get("visible_unless", []))} if metadata.get("visible_unless") else {}),
+    }
+
+
+def load_world_from_raw(raw: dict, rules_definition: Any | None = None) -> StoryWorld:
+    if not isinstance(raw, dict):
+        raise ValueError("root must be an object")
+
+    start_system = require_string(raw, "start_system", "root")
+    systems: list[System] = []
+
+    for system_index, system_raw in enumerate(require_list(raw, "systems", "root")):
+        context = f"systems[{system_index}]"
+        if not isinstance(system_raw, dict):
+            raise ValueError(f"{context} must be an object")
+
+        orbitals: list[Orbital] = []
+        orbital_ids: set[str] = set()
+        orbital_raws = require_list(system_raw, "orbitals", context)
+        if len(orbital_raws) > 9:
+            raise ValueError(f"{context}.orbitals must contain no more than 9 destinations")
+
+        for orbital_index, orbital_raw in enumerate(orbital_raws):
+            orbital_context = f"{context}.orbitals[{orbital_index}]"
+            if not isinstance(orbital_raw, dict):
+                raise ValueError(f"{orbital_context} must be an object")
+
+            orbital_id = require_string(orbital_raw, "id", orbital_context)
+            if orbital_id in orbital_ids:
+                raise ValueError(f"{orbital_context}.id duplicates {orbital_id}")
+            orbital_ids.add(orbital_id)
+
+            orbital_type = require_string(orbital_raw, "type", orbital_context)
+            if orbital_type not in ORBITAL_TYPES:
+                raise ValueError(f"{orbital_context}.type must be one of {sorted(ORBITAL_TYPES)}")
+
+            options = load_landing_options(require_list(orbital_raw, "landing_options", orbital_context), f"{orbital_context}.landing_options")
+
+            parent = orbital_raw.get("parent")
+            if parent is not None and (not isinstance(parent, str) or not parent.strip()):
+                raise ValueError(f"{orbital_context}.parent must be a non-empty string when present")
+
+            orbitals.append(
+                Orbital(
+                    id=orbital_id,
+                    name=require_string(orbital_raw, "name", orbital_context),
+                    type=orbital_type,
+                    description=require_string(orbital_raw, "description", orbital_context),
+                    parent=parent,
+                    landing_options=options,
+                    default_landing_destination_ids=load_fact_conditions(
+                        orbital_raw.get("default_landing_destination_ids", []),
+                        f"{orbital_context}.default_landing_destination_ids",
+                    ),
+                )
+            )
+
+        systems.append(
+            System(
+                id=require_string(system_raw, "id", context),
+                name=require_string(system_raw, "name", context),
+                star_type=require_string(system_raw, "star_type", context),
+                description=str(system_raw.get("description", "")),
+                position_au=require_position(system_raw, context),
+                hops=tuple(require_string({"hop": hop}, "hop", f"{context}.hops[{index}]") for index, hop in enumerate(require_list(system_raw, "hops", context))),
+                orbitals=tuple(orbitals),
+            )
+        )
+
+    start_orbital_id, start_destination_ids = load_start_location(raw, start_system)
+    world = StoryWorld(
+        start_system=start_system,
+        systems=tuple(systems),
+        start_orbital_id=start_orbital_id,
+        start_destination_ids=start_destination_ids,
+        rules_definition=rules_definition,
+    )
+    validate_world(world)
+    return world
+
+
+def validate_world(world: StoryWorld) -> None:
+    world.system_by_id(world.start_system)
+    system_ids = {system.id for system in world.systems}
+    if len(system_ids) != len(world.systems):
+        raise ValueError("system IDs must be unique")
+
+    for system in world.systems:
+        if len(system.hops) > 9:
+            raise ValueError(f"{system.id}.hops must contain no more than 9 destinations")
+
+        ids = {orbital.id for orbital in system.orbitals}
+        for orbital in system.orbitals:
+            if orbital.parent is not None and orbital.parent not in ids:
+                raise ValueError(f"{system.id}.{orbital.id}.parent references unknown orbital {orbital.parent}")
+            if orbital.type == "Moon" and orbital.parent is None:
+                raise ValueError(f"{system.id}.{orbital.id} is a Moon and must define parent")
+            if orbital.default_landing_destination_ids:
+                try:
+                    destination_path_by_ids(orbital, orbital.default_landing_destination_ids)
+                except KeyError as error:
+                    raise ValueError(f"{system.id}.{orbital.id}.default_landing_destination_ids references unknown destination {error.args[0]}") from error
+
+        for hop_id in system.hops:
+            if hop_id not in system_ids:
+                raise ValueError(f"{system.id}.hops references unknown system {hop_id}")
+
+            hop_system = world.system_by_id(hop_id)
+            if system.id not in hop_system.hops:
+                raise ValueError(f"{system.id}.hops to {hop_id} must be reciprocal")
+
+            if system_distance_au(system, hop_system) > MAX_HOP_DISTANCE_AU:
+                raise ValueError(f"{system.id}.hops to {hop_id} exceeds {MAX_HOP_DISTANCE_AU:.0f} AU")
+    validate_start_location(world)
+
+
+def entity_specs_by_kind(definition: Any, kinds: set[str]) -> list[Any]:
+    return [spec for spec in definition.initial_entities if spec.kind in kinds]
+
+
+def child_specs(definition: Any, parent_id: str, locations: dict[str, str], kinds: set[str]) -> list[Any]:
+    return [
+        spec
+        for spec in definition.initial_entities
+        if spec.kind in kinds and locations.get(spec.id) == parent_id
+    ]
+
+
+def docked_child_specs(definition: Any, parent_id: str, locations: dict[str, str]) -> list[Any]:
+    return [
+        spec
+        for spec in definition.initial_entities
+        if spec.kind == "Ship" and locations.get(spec.id) == parent_id
+    ]
+
+
+def expression_ref(expression: Any) -> str | None:
+    if isinstance(expression, dict) and set(expression) == {"ref"}:
+        return str(expression["ref"])
+    if isinstance(expression, str):
+        return expression
+    return None
+
+
+def spec_fields(spec: Any, trait_id: str) -> dict[str, Any]:
+    return dict(spec.fields.get(trait_id, {}))
+
+
+def presentable_name(spec: Any) -> str:
+    return str(spec_fields(spec, "Presentable").get("name", spec.metadata.get("local_id", spec.id)))
+
+
+def presentable_description(spec: Any) -> str:
+    return str(spec_fields(spec, "Presentable").get("description", ""))
+
+
+def has_trait_attachment(spec: Any, trait_id: str) -> bool:
+    return any(attachment.id == trait_id for attachment in spec.traits)
+
+
+def trait_attachment_fields(spec: Any, trait_id: str) -> dict[str, Any]:
+    fields = dict(spec.fields.get(trait_id, {}))
+    for attachment in spec.traits:
+        if attachment.id == trait_id:
+            fields = {**attachment.fields, **fields}
+    return fields
+
+
+def default_object_interactions(spec: Any) -> list[str]:
+    interactions = ["Examine"]
+    if has_trait_attachment(spec, "Portable"):
+        interactions.append("Take")
+    if has_trait_attachment(spec, "Usable"):
+        interactions.append("Use")
+    return interactions
+
+
+def id_to_local_id(entity_id: str | None, id_to_local: dict[str, str]) -> str:
+    if entity_id is None:
+        return ""
+    return id_to_local.get(entity_id, entity_id)
+
+
+def destination_path_local_ids(location_id: str, locations: dict[str, str], id_to_local: dict[str, str], definition: Any) -> list[str]:
+    path: list[str] = []
+    spec_by_id = {spec.id: spec for spec in definition.initial_entities}
+    current: str | None = location_id
+    while current:
+        parent = locations.get(current)
+        if parent is None:
+            break
+        spec = spec_by_id.get(current)
+        if spec is not None and spec.kind == "Destination":
+            path.append(id_to_local_id(current, id_to_local))
+        if parent not in locations:
+            break
+        current = parent
+    path.reverse()
+    return path
+
+
+def destination_path_orbital(location_id: str, locations: dict[str, str], definition: Any) -> str | None:
+    current = location_id
+    spec_by_id = {spec.id: spec for spec in definition.initial_entities}
+    while current in locations:
+        parent = locations[current]
+        parent_spec = spec_by_id.get(parent)
+        if parent_spec is not None and parent_spec.kind in {"Planet", "Moon", "Station"}:
+            return parent
+        current = parent
+    return None
+
+
+def before_rules_from_local_rules(spec: Any, id_to_local: dict[str, str], definition: Any) -> tuple[BeforeRule, ...]:
+    rules: list[BeforeRule] = []
+    for rule in spec.rules:
+        if rule.phase != "before":
+            continue
+        message = first_emit_text(rule.effects)
+        if not message:
+            continue
+        interaction = interaction_for_action(rule.pattern.action)
+        if interaction is None:
+            continue
+        when, unless = predicate_to_fact_conditions(rule.guard, id_to_local, definition)
+        rules.append(
+            BeforeRule(
+                interaction=interaction,
+                message=message,
+                when=tuple(when),
+                unless=tuple(unless),
+                on_complete=tuple(outcomes_from_effects(rule.effects, id_to_local)),
+            )
+        )
+    return tuple(rules)
+
+
+def object_rules_to_local(spec: Any, id_to_local: dict[str, str], definition: Any) -> tuple[tuple[BeforeRule, ...], tuple[UseRule, ...]]:
+    before = before_rules_from_local_rules(spec, id_to_local, definition)
+    use_rules: list[UseRule] = []
+    for rule in spec.rules:
+        if rule.pattern.action != "Use" or rule.phase not in {"instead", "after"}:
+            continue
+        target_pattern = rule.pattern.args.get("target")
+        target_entity_id = expression_ref(target_pattern) if isinstance(target_pattern, dict) else None
+        if target_entity_id is None:
+            continue
+        messages = tuple(emit_texts(rule.effects))
+        if not messages:
+            continue
+        when, unless = predicate_to_fact_conditions(rule.guard, id_to_local, definition)
+        use_rules.append(
+            UseRule(
+                target=id_to_local_id(target_entity_id, id_to_local),
+                messages=messages,
+                on_complete=tuple(outcomes_from_effects(rule.effects, id_to_local)),
+                when=tuple(when),
+                unless=tuple(unless),
+            )
+        )
+    return before, tuple(use_rules)
+
+
+def destination_rules_to_local(spec: Any, id_to_local: dict[str, str], definition: Any) -> tuple[tuple[BeforeRule, ...], tuple[Sequence, ...]]:
+    before = before_rules_from_local_rules(spec, id_to_local, definition)
+    sequences: list[Sequence] = []
+    for rule in spec.rules:
+        if rule.phase != "after" or rule.pattern.action != "Enter" or not rule.id.startswith("sequence:"):
+            continue
+        messages = tuple(emit_texts(rule.effects))
+        if not messages:
+            continue
+        when, unless = predicate_to_fact_conditions(rule.guard, id_to_local, definition)
+        sequence_id = rule.id.removeprefix("sequence:")
+        sequences.append(
+            Sequence(
+                id=sequence_id,
+                when=tuple(when),
+                unless=tuple(unless),
+                messages=messages,
+                on_complete=tuple(outcomes_from_effects(rule.effects, id_to_local)),
+            )
+        )
+    return before, tuple(sequences)
+
+
+def interaction_for_action(action_id: str) -> str | None:
+    return {
+        "Enter": "Enter",
+        "Examine": "Examine",
+        "Take": "Take",
+        "Use": "Use",
+        "PowerUp": "Power up",
+        "Talk": "Talk",
+        "Board": "Board",
+    }.get(action_id)
+
+
+def first_emit_text(effects: tuple[dict[str, Any], ...]) -> str:
+    for text in emit_texts(effects):
+        return text
+    return ""
+
+
+def emit_texts(effects: tuple[dict[str, Any], ...]) -> list[str]:
+    texts: list[str] = []
+    for effect in effects:
+        emit = effect.get("emit") if isinstance(effect, dict) else None
+        if isinstance(emit, dict) and isinstance(emit.get("text"), str):
+            texts.append(emit["text"])
+    return texts
+
+
+def outcomes_from_effects(effects: tuple[dict[str, Any], ...], id_to_local: dict[str, str]) -> list[str]:
+    outcomes: list[str] = []
+    controlled_ship_ids: set[str] = set()
+    for effect in effects:
+        assertion = effect.get("assert") if isinstance(effect, dict) else None
+        if isinstance(assertion, dict) and assertion.get("relation") == "ControlledBy":
+            args = assertion.get("args", [])
+            ship_id = expression_ref(args[0]) if args else None
+            if ship_id:
+                controlled_ship_ids.add(id_to_local_id(ship_id, id_to_local))
+    for effect in effects:
+        fact = effect.get("set_fact") if isinstance(effect, dict) else None
+        if not isinstance(fact, dict):
+            continue
+        fact_id = fact.get("id")
+        if not isinstance(fact_id, str):
+            continue
+        if any(fact_id == f"ship:{ship_id}:owned" for ship_id in controlled_ship_ids):
+            continue
+        if fact_id not in outcomes:
+            outcomes.append(fact_id)
+    return outcomes
+
+
+def predicate_to_fact_conditions(predicate: Any, id_to_local: dict[str, str], definition: Any) -> tuple[list[str], list[str]]:
+    when: list[str] = []
+    unless: list[str] = []
+    collect_predicate_conditions(predicate, id_to_local, definition, when, unless, negated=False)
+    return when, unless
+
+
+def collect_predicate_conditions(
+    predicate: Any,
+    id_to_local: dict[str, str],
+    definition: Any,
+    when: list[str],
+    unless: list[str],
+    negated: bool,
+) -> None:
+    if predicate is True or predicate is None:
+        return
+    if isinstance(predicate, dict) and len(predicate) == 1:
+        op, operand = next(iter(predicate.items()))
+        if op == "all":
+            for item in operand:
+                collect_predicate_conditions(item, id_to_local, definition, when, unless, negated)
+            return
+        if op == "not":
+            collect_predicate_conditions(operand, id_to_local, definition, when, unless, not negated)
+            return
+    fact = fact_string_from_predicate(predicate, id_to_local, definition)
+    if fact:
+        target = unless if negated else when
+        if fact not in target:
+            target.append(fact)
+
+
+def fact_string_from_predicate(predicate: Any, id_to_local: dict[str, str], definition: Any) -> str | None:
+    if not isinstance(predicate, dict) or len(predicate) != 1:
+        return None
+    op, operand = next(iter(predicate.items()))
+    if op == "fact" and isinstance(operand, dict):
+        fact_id = operand.get("id")
+        args = operand.get("args", [])
+        if fact_id == "Aboard" and len(args) == 2:
+            ship_entity_id = expression_ref(args[1])
+            if ship_entity_id:
+                return f"ship:{id_to_local_id(ship_entity_id, id_to_local)}:boarded"
+        return fact_id if isinstance(fact_id, str) else None
+    if op == "relation" and isinstance(operand, dict):
+        relation_id = operand.get("id")
+        args = operand.get("args", [])
+        if relation_id == "At" and len(args) == 2:
+            subject_id = expression_ref(args[0])
+            location_id = expression_ref(args[1])
+            if subject_id and location_id:
+                return f"ship:{id_to_local_id(subject_id, id_to_local)}:at:{id_to_local_id(location_id, id_to_local)}"
+        if relation_id == "ControlledBy" and len(args) == 2:
+            ship_entity_id = expression_ref(args[0])
+            if ship_entity_id:
+                return f"ship:{id_to_local_id(ship_entity_id, id_to_local)}:owned"
+    return None
 
 
 def require_string(data: dict, field: str, context: str) -> str:
@@ -342,6 +951,7 @@ def load_objects(raw_objects: list, context: str) -> tuple[StoryObject, ...]:
                 interactions=interactions,
                 collectable=object_collectable(object_raw, interactions),
                 equipment_slot=optional_string(object_raw, "equipment_slot", object_context),
+                fuel_station=bool(object_raw.get("fuel_station", False)),
                 before=load_before_rules(object_raw.get("before", []), f"{object_context}.before", OBJECT_INTERACTIONS),
                 use_rules=load_use_rules(object_raw.get("use_rules", []), f"{object_context}.use_rules"),
                 visible_when=load_fact_conditions(object_raw.get("visible_when", []), f"{object_context}.visible_when"),
@@ -614,111 +1224,13 @@ def load_start_location(raw: dict, start_system: str) -> tuple[str | None, tuple
 
 
 def load_world(path: Path = DATA_PATH) -> StoryWorld:
-    raw = read_or_create_raw(path)
-    if not isinstance(raw, dict):
-        raise ValueError("root must be an object")
-
-    start_system = require_string(raw, "start_system", "root")
-    systems: list[System] = []
-
-    for system_index, system_raw in enumerate(require_list(raw, "systems", "root")):
-        context = f"systems[{system_index}]"
-        if not isinstance(system_raw, dict):
-            raise ValueError(f"{context} must be an object")
-
-        orbitals: list[Orbital] = []
-        orbital_ids: set[str] = set()
-        orbital_raws = require_list(system_raw, "orbitals", context)
-        if len(orbital_raws) > 9:
-            raise ValueError(f"{context}.orbitals must contain no more than 9 destinations")
-
-        for orbital_index, orbital_raw in enumerate(orbital_raws):
-            orbital_context = f"{context}.orbitals[{orbital_index}]"
-            if not isinstance(orbital_raw, dict):
-                raise ValueError(f"{orbital_context} must be an object")
-
-            orbital_id = require_string(orbital_raw, "id", orbital_context)
-            if orbital_id in orbital_ids:
-                raise ValueError(f"{orbital_context}.id duplicates {orbital_id}")
-            orbital_ids.add(orbital_id)
-
-            orbital_type = require_string(orbital_raw, "type", orbital_context)
-            if orbital_type not in ORBITAL_TYPES:
-                raise ValueError(f"{orbital_context}.type must be one of {sorted(ORBITAL_TYPES)}")
-
-            options = load_landing_options(require_list(orbital_raw, "landing_options", orbital_context), f"{orbital_context}.landing_options")
-
-            parent = orbital_raw.get("parent")
-            if parent is not None and (not isinstance(parent, str) or not parent.strip()):
-                raise ValueError(f"{orbital_context}.parent must be a non-empty string when present")
-
-            orbitals.append(
-                Orbital(
-                    id=orbital_id,
-                    name=require_string(orbital_raw, "name", orbital_context),
-                    type=orbital_type,
-                    description=require_string(orbital_raw, "description", orbital_context),
-                    parent=parent,
-                    landing_options=options,
-                    default_landing_destination_ids=load_fact_conditions(
-                        orbital_raw.get("default_landing_destination_ids", []),
-                        f"{orbital_context}.default_landing_destination_ids",
-                    ),
-                )
-            )
-
-        systems.append(
-            System(
-                id=require_string(system_raw, "id", context),
-                name=require_string(system_raw, "name", context),
-                star_type=require_string(system_raw, "star_type", context),
-                description=str(system_raw.get("description", "")),
-                position_au=require_position(system_raw, context),
-                hops=tuple(require_string({"hop": hop}, "hop", f"{context}.hops[{index}]") for index, hop in enumerate(require_list(system_raw, "hops", context))),
-                orbitals=tuple(orbitals),
-            )
-        )
-
-    start_orbital_id, start_destination_ids = load_start_location(raw, start_system)
-    world = StoryWorld(
-        start_system=start_system,
-        systems=tuple(systems),
-        start_orbital_id=start_orbital_id,
-        start_destination_ids=start_destination_ids,
-    )
-    world.system_by_id(start_system)
-    system_ids = {system.id for system in world.systems}
-    if len(system_ids) != len(world.systems):
-        raise ValueError("system IDs must be unique")
-
-    for system in world.systems:
-        if len(system.hops) > 9:
-            raise ValueError(f"{system.id}.hops must contain no more than 9 destinations")
-
-        ids = {orbital.id for orbital in system.orbitals}
-        for orbital in system.orbitals:
-            if orbital.parent is not None and orbital.parent not in ids:
-                raise ValueError(f"{system.id}.{orbital.id}.parent references unknown orbital {orbital.parent}")
-            if orbital.type == "Moon" and orbital.parent is None:
-                raise ValueError(f"{system.id}.{orbital.id} is a Moon and must define parent")
-            if orbital.default_landing_destination_ids:
-                try:
-                    destination_path_by_ids(orbital, orbital.default_landing_destination_ids)
-                except KeyError as error:
-                    raise ValueError(f"{system.id}.{orbital.id}.default_landing_destination_ids references unknown destination {error.args[0]}") from error
-
-        for hop_id in system.hops:
-            if hop_id not in system_ids:
-                raise ValueError(f"{system.id}.hops references unknown system {hop_id}")
-
-            hop_system = world.system_by_id(hop_id)
-            if system.id not in hop_system.hops:
-                raise ValueError(f"{system.id}.hops to {hop_id} must be reciprocal")
-
-            if system_distance_au(system, hop_system) > MAX_HOP_DISTANCE_AU:
-                raise ValueError(f"{system.id}.hops to {hop_id} exceeds {MAX_HOP_DISTANCE_AU:.0f} AU")
-    validate_start_location(world)
-    return world
+    path = resolve_data_file(path)
+    if path.suffix.lower() not in {".yaml", ".yml"}:
+        raise ValueError(f"story data must be a story.qualms.yaml file or directory, got {path}")
+    if not path.exists() or not path.read_text(encoding="utf-8").strip():
+        write_blank_yaml_world(path)
+    definition = load_game_definition(path)
+    return load_world_from_raw(yaml_definition_to_raw(definition), rules_definition=definition)
 
 
 def orbital_by_id(system: System, orbital_id: str) -> Orbital:
@@ -823,6 +1335,7 @@ def landing_option_to_raw(option: LandingOption) -> dict:
                 "interactions": list(story_object.interactions),
                 "collectable": story_object.collectable,
                 **({"equipment_slot": story_object.equipment_slot} if story_object.equipment_slot else {}),
+                **({"fuel_station": True} if story_object.fuel_station else {}),
                 "before": before_rules_to_raw(story_object.before),
                 "use_rules": use_rules_to_raw(story_object.use_rules),
                 **({"visible_when": list(story_object.visible_when)} if story_object.visible_when else {}),
@@ -860,6 +1373,7 @@ def landing_option_to_raw(option: LandingOption) -> dict:
                         "interactions": list(story_object.interactions),
                         "collectable": story_object.collectable,
                         **({"equipment_slot": story_object.equipment_slot} if story_object.equipment_slot else {}),
+                        **({"fuel_station": True} if story_object.fuel_station else {}),
                         "before": before_rules_to_raw(story_object.before),
                         "use_rules": use_rules_to_raw(story_object.use_rules),
                         **({"visible_when": list(story_object.visible_when)} if story_object.visible_when else {}),
@@ -937,7 +1451,10 @@ def conditional_texts_to_raw(texts: tuple[ConditionalText, ...]) -> list[dict]:
 
 
 def save_and_reload(path: Path, raw: dict) -> StoryWorld:
-    write_raw_world(path, raw)
+    if path.suffix.lower() not in {".yaml", ".yml"}:
+        raise ValueError(f"story data must be a story.qualms.yaml file or directory, got {path}")
+    world = load_world_from_raw(raw)
+    write_story_world_yaml(world, path)
     return load_world(path)
 
 
@@ -1620,6 +2137,187 @@ def prompt_menu(stdscr: curses.window, title: str, options: list[str]) -> int | 
             return index
 
 
+def default_save_path(data_path: Path) -> Path:
+    return data_path.resolve().with_suffix(".save.json")
+
+
+def resolve_save_path(value: str, data_path: Path) -> Path:
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return path
+    return data_path.resolve().parent / path
+
+
+def game_state_to_save_data(state: GameState) -> dict[str, Any]:
+    saved_view = state.menu_return_view if state.view == "main_menu" else state.view
+    return {
+        "qualms_save": SAVE_FORMAT_VERSION,
+        "state": {
+            "system_id": state.system_id,
+            "view": saved_view,
+            "menu_return_view": state.menu_return_view,
+            "map_return_view": state.map_return_view,
+            "inventory_return_view": state.inventory_return_view,
+            "use_return_view": state.use_return_view,
+            "orbital_id": state.orbital_id,
+            "docked_path": list(state.docked_path),
+            "destination_path": list(state.destination_path),
+            "player_ship_id": state.player_ship_id,
+            "boarded_ship_id": state.boarded_ship_id,
+            "inventory_index": state.inventory_index,
+            "inventory": list(state.inventory),
+            "equipment": dict(state.equipment),
+            "object_locations": dict(state.object_locations),
+            "ship_locations": dict(state.ship_locations),
+            "ship_fuel": dict(state.ship_fuel),
+            "facts": sorted(state.facts),
+            "last_system_id": state.last_system_id,
+            "last_orbital_by_system": dict(state.last_orbital_by_system),
+        },
+    }
+
+
+def write_save_game(path: Path, state: GameState) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(game_state_to_save_data(state), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def read_save_game(path: Path) -> dict[str, Any]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or data.get("qualms_save") != SAVE_FORMAT_VERSION:
+        raise ValueError("unsupported save file")
+    state_data = data.get("state")
+    if not isinstance(state_data, dict):
+        raise ValueError("save file is missing state")
+    return data
+
+
+def restore_game_state(world: StoryWorld, data: dict[str, Any], editor_enabled: bool) -> GameState:
+    raw_state = data.get("state")
+    if not isinstance(raw_state, dict):
+        raise ValueError("save file is missing state")
+
+    state = initial_game_state(world, editor_enabled)
+    state.system_id = require_saved_string(raw_state, "system_id", state.system_id)
+    world.system_by_id(state.system_id)
+    state.view = require_saved_string(raw_state, "view", "system")
+    state.menu_return_view = require_saved_string(raw_state, "menu_return_view", "system")
+    state.map_return_view = require_saved_string(raw_state, "map_return_view", "system")
+    state.inventory_return_view = require_saved_string(raw_state, "inventory_return_view", "system")
+    state.use_return_view = require_saved_string(raw_state, "use_return_view", "inventory")
+    state.orbital_id = optional_saved_string(raw_state.get("orbital_id"))
+    if state.orbital_id is not None:
+        orbital_by_id(world.system_by_id(state.system_id), state.orbital_id)
+    state.docked_path = saved_int_list(raw_state.get("docked_path", []), "docked_path")
+    state.destination_path = saved_int_list(raw_state.get("destination_path", []), "destination_path")
+    state.player_ship_id = known_saved_id(raw_state.get("player_ship_id"), state.ships)
+    state.boarded_ship_id = known_saved_id(raw_state.get("boarded_ship_id"), state.ships)
+    state.inventory_index = int(raw_state.get("inventory_index", 0) or 0)
+
+    objects = objects_by_id(world)
+    state.inventory = {
+        item_id: objects[item_id]
+        for item_id in saved_string_list(raw_state.get("inventory", []), "inventory")
+        if item_id in objects
+    }
+    state.equipment = {
+        str(slot): item_id
+        for slot, item_id in saved_string_mapping(raw_state.get("equipment", {}), "equipment").items()
+        if item_id in objects
+    }
+    state.object_locations = saved_string_mapping(raw_state.get("object_locations", {}), "object_locations")
+
+    saved_ship_locations = saved_string_mapping(raw_state.get("ship_locations", {}), "ship_locations")
+    state.ship_locations = {
+        ship_id: saved_ship_locations.get(ship_id, state.ship_locations.get(ship_id, "unknown"))
+        for ship_id in state.ships
+    }
+    saved_ship_fuel = raw_state.get("ship_fuel", {})
+    if not isinstance(saved_ship_fuel, dict):
+        raise ValueError("ship_fuel must be an object")
+    state.ship_fuel = {
+        ship_id: int(saved_ship_fuel.get(ship_id, state.ship_fuel.get(ship_id, 0)) or 0)
+        for ship_id in state.ships
+    }
+    state.facts = set(saved_string_list(raw_state.get("facts", []), "facts"))
+    state.last_system_id = optional_saved_string(raw_state.get("last_system_id"))
+    state.last_orbital_by_system = saved_string_mapping(raw_state.get("last_orbital_by_system", {}), "last_orbital_by_system")
+
+    if state.orbital_id is None:
+        state.docked_path.clear()
+        state.destination_path.clear()
+    else:
+        orbital = orbital_by_id(world.system_by_id(state.system_id), state.orbital_id)
+        if state.destination_path and destination_at_path(orbital, state.destination_path) is None:
+            raise ValueError("saved destination no longer exists")
+        if state.docked_path and destination_at_path(orbital, state.docked_path) is None:
+            raise ValueError("saved docked destination no longer exists")
+
+    clear_notice(state)
+    state.sequence_messages = ()
+    state.sequence_index = 0
+    state.sequence_on_complete = ()
+    state.use_source_item_id = None
+    state.message = ""
+    attach_rules_runtime(world, state)
+    return state
+
+
+def require_saved_string(raw_state: dict[str, Any], field: str, default: str) -> str:
+    value = raw_state.get(field, default)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} must be a non-empty string")
+    return value
+
+
+def optional_saved_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("saved id must be a non-empty string")
+    return value
+
+
+def known_saved_id(value: Any, known: dict[str, Any]) -> str | None:
+    item_id = optional_saved_string(value)
+    if item_id is None or item_id in known:
+        return item_id
+    return None
+
+
+def saved_int_list(value: Any, field: str) -> list[int]:
+    if not isinstance(value, list) or not all(isinstance(item, int) for item in value):
+        raise ValueError(f"{field} must be a list of integers")
+    return list(value)
+
+
+def saved_string_list(value: Any, field: str) -> list[str]:
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError(f"{field} must be a list of strings")
+    return list(value)
+
+
+def saved_string_mapping(value: Any, field: str) -> dict[str, str]:
+    if not isinstance(value, dict) or not all(isinstance(key, str) and isinstance(item, str) for key, item in value.items()):
+        raise ValueError(f"{field} must be an object of strings")
+    return dict(value)
+
+
+def draw_main_menu(stdscr: curses.window, state: GameState) -> None:
+    lines = [
+        "Dark Qualms",
+        "",
+        "1. Continue",
+        "2. New game",
+        "3. Save",
+        "4. Restore",
+        "5. Quit",
+    ]
+    if state.message:
+        lines.extend(["", state.message])
+    centered_window(stdscr, 72, lines)
+
+
 def draw_system(stdscr: curses.window, world: StoryWorld, state: GameState, system: System) -> None:
     lines = [
         "Dark Qualms",
@@ -1635,7 +2333,7 @@ def draw_system(stdscr: curses.window, world: StoryWorld, state: GameState, syst
     for index, orbital in enumerate(system.orbitals, start=1):
         marker = "*" if orbital.id == last_orbital_id else " "
         lines.append(f"{index}. {marker} {orbital.name} [{orbital_type_label(system, orbital)}]")
-    lines.extend(["", "Number: travel", "I: inventory", "L: leave system    M: map    Q: quit"])
+    lines.extend(["", "Number: travel", "I: inventory", "L: leave system    M: map    Q: menu"])
     game_window(stdscr, state, 72, lines)
 
 
@@ -1645,6 +2343,7 @@ def draw_jump_list(stdscr: curses.window, world: StoryWorld, state: GameState, s
         "",
         f"Current: {system.name}",
         f"Sol offset: {format_signed_au(system.position_au[0])}, {format_signed_au(system.position_au[1])}",
+        *ship_status_lines(state, state.ships.get(state.boarded_ship_id or state.player_ship_id or "")),
         "",
         "Jump points:",
     ]
@@ -1653,7 +2352,7 @@ def draw_jump_list(stdscr: curses.window, world: StoryWorld, state: GameState, s
         dy = hop.position_au[1]
         distance = system_distance_au(system, hop)
         lines.append(f"{index}. {hop.name} [{format_signed_au(dx)}, {format_signed_au(dy)}] {distance:.0f} AU")
-    lines.extend(["", "Number: jump", "G: go back    I: inventory    M: map    Q: quit"])
+    lines.extend(["", "Number: jump", "G: go back    I: inventory    M: map    Q: menu"])
     game_window(stdscr, state, 80, lines)
 
 
@@ -1666,7 +2365,7 @@ def draw_map(stdscr: curses.window, world: StoryWorld, state: GameState, system:
         "@ current    * system    lines: available jumps",
         "G: go back",
         "I: inventory",
-        "Q: quit",
+        "Q: menu",
     ]
     centered_window(stdscr, 76, lines)
 
@@ -1685,7 +2384,7 @@ def draw_orbit(stdscr: curses.window, state: GameState, orbital: Orbital) -> Non
         "L: land",
         "I: inventory",
         "T: travel in-system",
-        "Q: quit",
+        "Q: menu",
     ])
     game_window(stdscr, state, 72, lines)
 
@@ -1743,18 +2442,21 @@ def draw_option(stdscr: curses.window, state: GameState, orbital: Orbital, optio
         lines.append("G: go back")
     lines.extend([
         "I: inventory",
-        "Q: quit",
+        "Q: menu",
     ])
     game_window(stdscr, state, 72, lines)
 
 
-def draw_boarded_ship(stdscr: curses.window, state: GameState) -> None:
+def draw_boarded_ship(stdscr: curses.window, state: GameState, destination: LandingOption | None = None) -> None:
     ship = boarded_ship(state)
     name = ship.name if ship is not None else "Ship"
     lines = [
         f"On board the {name}",
         "",
     ]
+    status = ship_status_lines(state, ship)
+    if status:
+        lines.extend([*status, ""])
     description = ship_interior_description(state, ship)
     if description:
         lines.extend([description, ""])
@@ -1766,12 +2468,16 @@ def draw_boarded_ship(stdscr: curses.window, state: GameState) -> None:
         lines.append("")
     if ship is not None and ship_controlled_by_player(state, ship):
         lines.append("T: take off")
-    lines.extend(["G: go back", "I: inventory", "Q: quit"])
+    if ship is not None and destination is not None and can_refuel_boarded_ship(state, destination, ship):
+        lines.append("F: refuel")
+    lines.extend(["G: go back", "I: inventory", "Q: menu"])
     game_window(stdscr, state, 72, lines)
 
 
 def editor_commands_for_state(state: GameState) -> list[str]:
     if not state.editor_enabled:
+        return []
+    if state.view == "main_menu":
         return []
     if sequence_active(state) or state.continue_message or state.view in {"map", "inventory"}:
         return ["R: reload"]
@@ -1854,7 +2560,7 @@ def draw_inventory(stdscr: curses.window, state: GameState) -> None:
             lines.append("E: equip")
         if "Use" in selected.interactions:
             lines.append("U: use")
-    lines.extend(["G: go back", "Q: quit"])
+    lines.extend(["G: go back", "Q: menu"])
     centered_window(stdscr, 72, lines)
 
 
@@ -1868,7 +2574,7 @@ def draw_use_scope(stdscr: curses.window, state: GameState) -> None:
         "2. on something in the room",
         "",
         "G: go back",
-        "Q: quit",
+        "Q: menu",
     ]
     centered_window(stdscr, 72, lines)
 
@@ -1883,7 +2589,7 @@ def draw_use_targets(stdscr: curses.window, world: StoryWorld, state: GameState)
             lines.append(f"{index}. {target.name}")
     else:
         lines.append("Nothing.")
-    lines.extend(["", "G: go back", "Q: quit"])
+    lines.extend(["", "G: go back", "Q: menu"])
     centered_window(stdscr, 72, lines)
 
 
@@ -1903,6 +2609,8 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
             draw_continue_message(stdscr, state)
         elif sequence_active(state):
             draw_sequence(stdscr, state)
+        elif state.view == "main_menu":
+            draw_main_menu(stdscr, state)
         elif state.view == "use_scope":
             draw_use_scope(stdscr, state)
         elif state.view in {"use_room_target", "use_inventory_target"}:
@@ -1923,7 +2631,7 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
             if sequence_active(state):
                 draw_sequence(stdscr, state)
             elif selected_destination is not None and boarded_ship_at_destination(state, selected_destination):
-                draw_boarded_ship(stdscr, state)
+                draw_boarded_ship(stdscr, state, selected_destination)
             elif selected_destination is not None:
                 draw_option(stdscr, state, orbital, selected_destination)
             else:
@@ -1940,7 +2648,7 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
             try:
                 world = reload_world_preserving_state(world, data_path, state)
                 state.message = f"Reloaded: {data_path}"
-            except (OSError, json.JSONDecodeError, ValueError, KeyError) as error:
+            except (OSError, ValueError, KeyError) as error:
                 state.message = f"Reload failed: {error}"
             continue
 
@@ -1954,8 +2662,47 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
             advance_sequence(state)
             continue
 
+        if state.view == "main_menu":
+            if key == ord("1"):
+                state.view = state.menu_return_view or "system"
+                clear_notice(state)
+            elif key == ord("2"):
+                last_save_path = state.last_save_path
+                state = initial_game_state(world, editor_enabled)
+                state.last_save_path = last_save_path
+                state.view = "system"
+            elif key == ord("3"):
+                default_path = state.last_save_path or str(default_save_path(data_path))
+                requested = prompt_text(stdscr, "Save Game", "Filename:", default=default_path, max_length=160)
+                if requested:
+                    try:
+                        save_path = resolve_save_path(requested, data_path)
+                        write_save_game(save_path, state)
+                        state.last_save_path = str(save_path)
+                        state.message = f"Saved: {save_path}"
+                    except (OSError, ValueError) as error:
+                        state.message = f"Save failed: {error}"
+            elif key == ord("4"):
+                default_path = state.last_save_path or str(default_save_path(data_path))
+                requested = prompt_text(stdscr, "Restore Game", "Filename:", default=default_path, max_length=160)
+                if requested:
+                    try:
+                        save_path = resolve_save_path(requested, data_path)
+                        restored = restore_game_state(world, read_save_game(save_path), editor_enabled)
+                        restored.last_save_path = str(save_path)
+                        restored.message = f"Restored: {save_path}"
+                        state = restored
+                    except (OSError, ValueError, KeyError, json.JSONDecodeError) as error:
+                        state.message = f"Restore failed: {error}"
+            elif key == ord("5"):
+                return
+            continue
+
         if key in (ord("q"), ord("Q")):
-            return
+            state.menu_return_view = state.view
+            state.view = "main_menu"
+            clear_notice(state)
+            continue
 
         if state.view != "inventory" and key in (ord("i"), ord("I")):
             state.inventory_return_view = state.view
@@ -1985,14 +2732,13 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
             hops = sorted_hops(world, system)
             index = key - ord("1")
             if 0 <= index < len(hops):
-                state.last_system_id = state.system_id
-                state.system_id = hops[index].id
-                state.view = "system"
-                state.orbital_id = None
-                state.docked_path.clear()
-                state.destination_path.clear()
-                state.interaction_index = None
-                clear_notice(state)
+                result = jump_boarded_ship_to_system(state, hops[index])
+                if result is not None and result.status == "failed":
+                    state.message = f"Action failed: {result.error}"
+                    continue
+                if result is not None and result.status == "blocked":
+                    start_action_messages(state, result)
+                    continue
             elif key in (ord("g"), ord("G")):
                 state.view = "system"
             elif key in (ord("m"), ord("M")):
@@ -2020,6 +2766,8 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
                     handle_interaction_choice(state, ship_choices[index], index)
                 elif key in (ord("t"), ord("T")) and ship is not None and ship_controlled_by_player(state, ship):
                     take_off_from_destination(state)
+                elif key in (ord("f"), ord("F")) and ship is not None and can_refuel_boarded_ship(state, selected_destination, ship):
+                    refuel_boarded_ship(state, selected_destination)
                 elif key in (ord("g"), ord("G")):
                     state.boarded_ship_id = None
                 continue
@@ -2030,9 +2778,11 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
                 handle_interaction_choice(state, interaction_choices[index], index)
             elif 0 <= index - len(interaction_choices) < len(visible_destination_entries_list):
                 child_index, child_destination = visible_destination_entries_list[index - len(interaction_choices)]
-                blocked_message = destination_before_rule_message(state, child_destination)
-                if blocked_message is not None:
-                    start_continue_message(state, blocked_message)
+                result = attempt_enter_destination_action(state, child_destination)
+                if result is not None and result.status == "failed":
+                    state.message = f"Action failed: {result.error}"
+                elif result is not None and result.status == "blocked":
+                    start_action_messages(state, result)
                 else:
                     state.destination_path.append(child_index)
             elif key in (ord("b"), ord("B")):
@@ -2143,6 +2893,12 @@ def handle_inventory_input(state: GameState, key: int) -> None:
         if not selected.equipment_slot:
             state.message = "You cannot equip that."
             return
+        entity_id = entity_id_for_local_id(state, selected.id)
+        if entity_id:
+            result = attempt_rules_action(state, "Equip", {"actor": "player", "item": entity_id})
+            if result is not None and result.status == "failed":
+                state.message = f"Action failed: {result.error}"
+                return
         state.equipment[selected.equipment_slot] = selected.id
 
     if key in (ord("u"), ord("U")) and "Use" in selected.interactions:
@@ -2222,6 +2978,7 @@ def reload_world_preserving_state(world: StoryWorld, data_path: Path, state: Gam
     state.last_orbital_by_system = remapped_last_orbitals
     state.interaction_index = None
     clear_notice(state)
+    attach_rules_runtime(new_world, state)
     return new_world
 
 
@@ -2297,9 +3054,11 @@ def initial_game_state(world: StoryWorld, editor_enabled: bool) -> GameState:
     state = GameState(system_id=world.start_system, editor_enabled=editor_enabled)
     state.ships = ships_by_id(world)
     state.ship_locations = authored_ship_locations(world)
+    state.ship_fuel = {ship_id: 0 for ship_id in state.ships}
     controlled_ships = [ship.id for ship in state.ships.values() if ship.controlled]
     if controlled_ships:
         state.player_ship_id = controlled_ships[0]
+    attach_rules_runtime(world, state)
     if world.start_orbital_id is None:
         return state
 
@@ -2309,6 +3068,179 @@ def initial_game_state(world: StoryWorld, editor_enabled: bool) -> GameState:
     state.docked_path = list(destination_path)
     state.destination_path = list(destination_path)
     return state
+
+
+def attach_rules_runtime(world: StoryWorld, state: GameState) -> None:
+    if world.rules_definition is None:
+        raise ValueError("story world was not loaded from Qualms YAML")
+    state.rules_definition = world.rules_definition
+    state.rules_engine = RulesEngine(state.rules_definition)
+    state.local_id_map = dict(state.rules_definition.metadata.get("local_id_map", {}))
+    sync_rules_state_from_local(state)
+    apply_rules_result_to_local(state)
+
+
+def sync_rules_state_from_local(state: GameState) -> None:
+    if state.rules_definition is None:
+        return
+    rules_state = state.rules_definition.instantiate()
+    for fact in state.facts:
+        rules_state.memory.set(fact)
+        parts = fact.split(":")
+        if len(parts) == 3 and parts[0] == "fuel-station" and parts[2] == "active":
+            station_entity_id = entity_id_for_local_id(state, parts[1])
+            if station_entity_id:
+                try_assert(rules_state, "FuelStationActive", [station_entity_id])
+    for object_id in state.inventory:
+        entity_id = entity_id_for_local_id(state, object_id)
+        if entity_id:
+            try_assert(rules_state, "CarriedBy", ["player", entity_id])
+    for slot, object_id in state.equipment.items():
+        rules_state.memory.set(f"equipped:slot:{slot}")
+        entity_id = entity_id_for_local_id(state, object_id)
+        if entity_id:
+            try_assert(rules_state, "Equipped", ["player", entity_id])
+    for object_id, location in state.object_locations.items():
+        entity_id = entity_id_for_local_id(state, object_id)
+        if entity_id is None:
+            continue
+        if location == "inventory":
+            try_assert(rules_state, "CarriedBy", ["player", entity_id])
+        else:
+            location_id = entity_id_for_local_id(state, location)
+            if location_id:
+                try_assert(rules_state, "At", [entity_id, location_id])
+    for ship_id, location in state.ship_locations.items():
+        ship_entity_id = entity_id_for_local_id(state, ship_id)
+        if ship_entity_id is None:
+            continue
+        if location.startswith("orbit:"):
+            parts = location.split(":")
+            if len(parts) == 3:
+                orbital_id = entity_id_for_local_id(state, parts[2])
+                if orbital_id:
+                    try_assert(rules_state, "InOrbit", [ship_entity_id, orbital_id])
+        elif location.startswith("system:"):
+            parts = location.split(":")
+            if len(parts) == 2:
+                system_id = entity_id_for_local_id(state, parts[1])
+                if system_id:
+                    try_assert(rules_state, "At", [ship_entity_id, system_id])
+        else:
+            location_id = entity_id_for_local_id(state, location)
+            if location_id:
+                try_assert(rules_state, "DockedAt", [ship_entity_id, location_id])
+        try_set_field(rules_state, ship_entity_id, "Vehicle", "jump_fuel", int(state.ship_fuel.get(ship_id, 0)))
+    if state.player_ship_id:
+        ship_entity_id = entity_id_for_local_id(state, state.player_ship_id)
+        if ship_entity_id:
+            try_assert(rules_state, "ControlledBy", [ship_entity_id, "player"])
+            rules_state.memory.set(f"ship:{state.player_ship_id}:owned")
+    if state.boarded_ship_id:
+        ship_entity_id = entity_id_for_local_id(state, state.boarded_ship_id)
+        if ship_entity_id:
+            rules_state.memory.set("Aboard", ["player", ship_entity_id])
+            rules_state.memory.set(f"ship:{state.boarded_ship_id}:boarded")
+    state.rules_state = rules_state
+
+
+def try_assert(rules_state: Any, relation: str, args: list[str]) -> None:
+    try:
+        rules_state.assert_relation(relation, args)
+    except (KeyError, ValueError):
+        return
+
+
+def try_set_field(rules_state: Any, entity_id: str, trait: str, field: str, value: Any) -> None:
+    try:
+        rules_state.set_field(entity_id, trait, field, value)
+    except (KeyError, ValueError):
+        return
+
+
+def entity_id_for_local_id(state: GameState, local_id: str | None) -> str | None:
+    if local_id is None:
+        return None
+    return state.local_id_map.get(local_id)
+
+
+def attempt_rules_action(state: GameState, action_id: str, args: dict[str, Any]):
+    if state.rules_engine is None:
+        return None
+    sync_rules_state_from_local(state)
+    result = state.rules_engine.attempt(state.rules_state, ActionAttempt(action_id, args))
+    apply_rules_result_to_local(state)
+    return result
+
+
+def apply_rules_result_to_local(state: GameState) -> None:
+    if state.rules_state is None:
+        return
+    for fact_id, args in state.rules_state.memory.facts:
+        if args:
+            continue
+        apply_runtime_fact(state, fact_id)
+    for ship_id in state.ships:
+        ship_entity_id = entity_id_for_local_id(state, ship_id)
+        if ship_entity_id and relation_true(state, "ControlledBy", [ship_entity_id, "player"]):
+            state.player_ship_id = ship_id
+        if ship_entity_id:
+            try:
+                state.ship_fuel[ship_id] = int(state.rules_state.get_field(ship_entity_id, "Vehicle", "jump_fuel") or 0)
+            except (KeyError, TypeError, ValueError):
+                state.ship_fuel.setdefault(ship_id, 0)
+
+
+def apply_runtime_fact(state: GameState, fact_id: str) -> None:
+    parts = fact_id.split(":")
+    if len(parts) == 3 and parts[0] == "ship" and parts[2] == "control":
+        state.player_ship_id = parts[1]
+    else:
+        state.facts.add(fact_id)
+
+
+def relation_true(state: GameState, relation: str, args: list[str]) -> bool:
+    if state.rules_state is None:
+        return False
+    try:
+        return bool(state.rules_state.test(relation, args))
+    except (KeyError, ValueError):
+        return False
+
+
+def action_texts(result: Any) -> tuple[str, ...]:
+    if result is None:
+        return ()
+    return tuple(str(event["text"]) for event in result.events if event.get("text"))
+
+
+def start_action_messages(state: GameState, result: Any, fallback: str | None = None) -> None:
+    messages = action_texts(result)
+    if len(messages) == 1:
+        start_continue_message(state, messages[0])
+    elif messages:
+        start_message_sequence(state, messages)
+    elif fallback:
+        start_continue_message(state, fallback)
+
+
+def interaction_action_attempt(state: GameState, choice: InteractionChoice):
+    entity_id = entity_id_for_local_id(state, choice.target.id)
+    if entity_id is None:
+        return None
+    if choice.interaction == "Examine":
+        return attempt_rules_action(state, "Examine", {"actor": "player", "target": entity_id})
+    if choice.interaction == "Take":
+        return attempt_rules_action(state, "Take", {"actor": "player", "item": entity_id})
+    if choice.interaction == "Use":
+        return attempt_rules_action(state, "Use", {"actor": "player", "source": entity_id})
+    if choice.interaction == "Power up":
+        return attempt_rules_action(state, "PowerUp", {"actor": "player", "target": entity_id})
+    if choice.interaction == "Talk":
+        return attempt_rules_action(state, "Talk", {"actor": "player", "target": entity_id})
+    if choice.interaction == "Board":
+        return attempt_rules_action(state, "Board", {"actor": "player", "ship": entity_id})
+    return None
 
 
 def destination_at_path(orbital: Orbital, destination_path: list[int]) -> LandingOption | None:
@@ -2423,10 +3355,123 @@ def board_ship_at_destination(state: GameState, destination: LandingOption) -> N
     if not ships:
         return
     ship = ships[0]
+    ship_entity_id = entity_id_for_local_id(state, ship.id)
+    if ship_entity_id:
+        result = attempt_rules_action(state, "Board", {"actor": "player", "ship": ship_entity_id})
+        if result is not None and result.status == "failed":
+            state.message = f"Action failed: {result.error}"
+            return
+        if result is not None and result.status == "blocked":
+            start_action_messages(state, result)
+            return
     state.boarded_ship_id = ship.id
     state.facts.add(f"ship:{ship.id}:visited")
     state.facts.add(f"ship:{ship.id}:identified")
     clear_notice(state)
+
+
+def ship_status_lines(state: GameState, ship: Ship | None) -> list[str]:
+    if ship is None:
+        return []
+    return [
+        "Ship status:",
+        f"Jump fuel: {state.ship_fuel.get(ship.id, 0)}",
+    ]
+
+
+def blocked_result(message: str) -> ActionResult:
+    return ActionResult("blocked", ({"type": "emit", "text": message},))
+
+
+def jump_boarded_ship_to_system(state: GameState, destination: System) -> ActionResult | None:
+    ship_id = state.boarded_ship_id or state.player_ship_id
+    if ship_id is None:
+        return blocked_result("You need a ship to leave the system.")
+    ship_entity_id = entity_id_for_local_id(state, ship_id)
+    destination_system_id = entity_id_for_local_id(state, destination.id)
+    if ship_entity_id is None or destination_system_id is None:
+        return blocked_result("The ship cannot jump.")
+
+    result = attempt_rules_action(
+        state,
+        "Jump",
+        {
+            "actor": "player",
+            "ship": ship_entity_id,
+            "destination_system": destination_system_id,
+        },
+    )
+    if result is not None and result.status == "rejected":
+        return blocked_result("The ship cannot jump.")
+    if result is not None and result.status in {"failed", "blocked"}:
+        return result
+
+    state.last_system_id = state.system_id
+    state.system_id = destination.id
+    state.view = "system"
+    state.orbital_id = None
+    state.docked_path.clear()
+    state.destination_path.clear()
+    state.interaction_index = None
+    state.ship_locations[ship_id] = f"system:{destination.id}"
+    clear_notice(state)
+    return result
+
+
+def fuel_station_active_fact(station_id: str) -> str:
+    return f"fuel-station:{station_id}:active"
+
+
+def fuel_station_empty_fact(station_id: str) -> str:
+    return f"fuel-station:{station_id}:empty"
+
+
+def active_fuel_station_for_destination(state: GameState, destination: LandingOption) -> StoryObject | None:
+    for story_object in visible_objects_for_destination(state, destination):
+        if not story_object.fuel_station:
+            continue
+        if state_has_fact(state, fuel_station_empty_fact(story_object.id)):
+            continue
+        station_entity_id = entity_id_for_local_id(state, story_object.id)
+        if state_has_fact(state, fuel_station_active_fact(story_object.id)):
+            return story_object
+        if station_entity_id and relation_true(state, "FuelStationActive", [station_entity_id]):
+            return story_object
+    return None
+
+
+def can_refuel_boarded_ship(state: GameState, destination: LandingOption, ship: Ship) -> bool:
+    return state.boarded_ship_id == ship.id and active_fuel_station_for_destination(state, destination) is not None
+
+
+def refuel_boarded_ship(state: GameState, destination: LandingOption) -> None:
+    ship = boarded_ship(state)
+    station = active_fuel_station_for_destination(state, destination)
+    if ship is None or station is None:
+        start_continue_message(state, "The fueling station is powered down.")
+        return
+    ship_entity_id = entity_id_for_local_id(state, ship.id)
+    station_entity_id = entity_id_for_local_id(state, station.id)
+    if ship_entity_id is None or station_entity_id is None:
+        state.message = "Refuel failed: missing runtime entity."
+        return
+    result = attempt_rules_action(
+        state,
+        "Refuel",
+        {
+            "actor": "player",
+            "ship": ship_entity_id,
+            "station": station_entity_id,
+        },
+    )
+    if result is not None and result.status == "failed":
+        state.message = f"Action failed: {result.error}"
+        return
+    if result is not None and result.status == "blocked":
+        start_action_messages(state, result)
+        return
+    state.facts.add(fuel_station_empty_fact(station.id))
+    start_action_messages(state, result, "Refueled.")
 
 
 def take_off_from_destination(state: GameState) -> None:
@@ -2435,6 +3480,20 @@ def take_off_from_destination(state: GameState) -> None:
     ship = boarded_ship(state)
     if ship is None or not ship_controlled_by_player(state, ship):
         return
+    ship_entity_id = entity_id_for_local_id(state, ship.id)
+    orbital_entity_id = entity_id_for_local_id(state, state.orbital_id)
+    if ship_entity_id and orbital_entity_id:
+        result = attempt_rules_action(
+            state,
+            "TakeOff",
+            {"actor": "player", "ship": ship_entity_id, "orbital": orbital_entity_id},
+        )
+        if result is not None and result.status == "failed":
+            state.message = f"Action failed: {result.error}"
+            return
+        if result is not None and result.status == "blocked":
+            start_action_messages(state, result)
+            return
     state.ship_locations[state.boarded_ship_id] = f"orbit:{state.system_id}:{state.orbital_id}"
     state.last_orbital_by_system[state.system_id] = state.orbital_id
     state.docked_path.clear()
@@ -2456,6 +3515,20 @@ def land_boarded_ship(state: GameState, orbital: Orbital, landing_path: list[int
         return
     destination = destination_at_path(orbital, landing_path)
     if destination is not None:
+        ship_entity_id = entity_id_for_local_id(state, state.boarded_ship_id)
+        destination_entity_id = entity_id_for_local_id(state, destination.id)
+        if ship_entity_id and destination_entity_id:
+            result = attempt_rules_action(
+                state,
+                "Land",
+                {"actor": "player", "ship": ship_entity_id, "destination": destination_entity_id},
+            )
+            if result is not None and result.status == "failed":
+                state.message = f"Action failed: {result.error}"
+                return
+            if result is not None and result.status == "blocked":
+                start_action_messages(state, result)
+                return
         state.ship_locations[state.boarded_ship_id] = destination.id
         state.boarded_ship_id = None
 
@@ -2541,11 +3614,17 @@ def interaction_choice_label(state: GameState, choice: InteractionChoice) -> str
 
 
 def handle_interaction_choice(state: GameState, choice: InteractionChoice, choice_index: int) -> None:
-    rule = before_rule_for_choice(state, choice)
-    if rule is not None:
-        start_continue_message(state, rule.message, rule.on_complete)
+    result = interaction_action_attempt(state, choice)
+    if result is not None and result.status == "failed":
+        state.message = f"Action failed: {result.error}"
         state.interaction_index = None
         return
+    if result is not None and result.status == "blocked":
+        start_action_messages(state, result)
+        state.interaction_index = None
+        return
+    if choice.kind == "npc" and choice.interaction == "Examine":
+        result = None
     if choice.kind == "object" and choice.interaction == "Take":
         story_object = choice.target
         if isinstance(story_object, StoryObject):
@@ -2563,7 +3642,11 @@ def handle_interaction_choice(state: GameState, choice: InteractionChoice, choic
             state.interaction_index = None
             clear_notice(state)
             return
-    start_continue_message(state, interaction_description(choice))
+    if choice.kind == "ship" and choice.interaction == "Board":
+        start_action_messages(state, result, interaction_description(choice))
+        state.interaction_index = None
+        return
+    start_action_messages(state, result, interaction_description(choice))
     state.interaction_index = None
 
 
@@ -2593,15 +3676,29 @@ def use_item_on_target(state: GameState, target: StoryObject) -> None:
     if source is None:
         state.view = "inventory"
         return
-    for rule in source.use_rules:
-        if rule.target == target.id and fact_conditions_met(state, rule.when, rule.unless):
-            state.view = state.use_return_view
-            state.use_source_item_id = None
-            start_message_sequence(state, rule.messages, rule.on_complete)
-            return
+    source_entity_id = entity_id_for_local_id(state, source.id)
+    target_entity_id = entity_id_for_local_id(state, target.id)
+    result = None
+    if source_entity_id and target_entity_id:
+        result = attempt_rules_action(
+            state,
+            "Use",
+            {
+                "actor": "player",
+                "source": source_entity_id,
+                "target": target_entity_id,
+            },
+        )
     state.view = state.use_return_view
     state.use_source_item_id = None
-    start_continue_message(state, "Nothing happens.")
+    if result is not None and result.status == "failed":
+        state.message = f"Action failed: {result.error}"
+        return
+    messages = action_texts(result)
+    if messages:
+        start_message_sequence(state, messages)
+    else:
+        start_continue_message(state, "Nothing happens.")
 
 
 def before_rule_message(state: GameState, choice: InteractionChoice) -> str | None:
@@ -2621,6 +3718,13 @@ def destination_before_rule_message(state: GameState, destination: LandingOption
         if rule.interaction == "Enter" and fact_conditions_met(state, rule.when, rule.unless):
             return rule.message
     return None
+
+
+def attempt_enter_destination_action(state: GameState, destination: LandingOption):
+    destination_entity_id = entity_id_for_local_id(state, destination.id)
+    if destination_entity_id is None:
+        return None
+    return attempt_rules_action(state, "Enter", {"actor": "player", "destination": destination_entity_id})
 
 
 def enter_destination(state: GameState, destination: LandingOption) -> None:
@@ -3233,8 +4337,8 @@ def condition_suffix(when: tuple[str, ...], unless: tuple[str, ...]) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Dark Qualms story prototype")
-    parser.add_argument("data_path", nargs="?", type=Path, help="Data directory or story_systems.json file")
-    parser.add_argument("--data", type=Path, help="Data directory or story_systems.json file")
+    parser.add_argument("data_path", nargs="?", type=Path, help="Data directory or story.qualms.yaml file")
+    parser.add_argument("--data", type=Path, help="Data directory or story.qualms.yaml file")
     parser.add_argument("--editor", action="store_true", help="Expose in-game story editing commands")
     parser.add_argument("--validate", action="store_true")
     parser.add_argument("--dump", action="store_true")

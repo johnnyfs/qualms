@@ -9,4 +9,4 @@ From the project root:
 ./run-dev.sh
 ```
 
-By default, the interface loads `../stories/stellar/story_systems.json`.
+By default, the interface loads and edits `../stories/stellar/story.qualms.yaml`.

@@ -1,0 +1,35 @@
+qualms: '0.1'
+id: stellar
+imports:
+- ../../stories/prelude/nova-qualms.qualms.yaml
+metadata:
+  local_id_map:
+    empty-system: empty-system
+story:
+  start:
+    actor: player
+    system: empty-system
+  entities:
+  - id: player
+    kind: Player
+    fields:
+      Presentable:
+        name: Player
+        description: ''
+    metadata:
+      role: player
+  - id: empty-system
+    kind: System
+    fields:
+      Presentable:
+        name: Empty System
+        description: Nothing has been defined here yet.
+      StarSystem:
+        star_type: Unspecified
+        x: 0.0
+        y: 0.0
+        hops: []
+    metadata:
+      local_id: empty-system
+  assertions: []
+  facts: []
