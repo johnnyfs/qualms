@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import io
+import os
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 
@@ -420,6 +423,110 @@ class StoryCliTests(unittest.TestCase):
         self.assertIn("restore", commands)
         self.assertIn("restart", commands)
         self.assertIn("quit", commands)
+        self.assertNotIn("continue", commands)
+
+    def test_cli_status_bar_places_location_and_mode_flags(self) -> None:
+        bar = dq.format_status_bar("Blemish: Mining Colony 5", "Editing On", 56, styled=False)
+
+        self.assertEqual(len(bar), 56)
+        self.assertTrue(bar.startswith(" Blemish: Mining Colony 5"))
+        self.assertTrue(bar.endswith("Editing On "))
+
+    def test_editor_cli_render_uses_status_flag_without_editor_menu(self) -> None:
+        state = dq.initial_game_state(self.world, editor_enabled=True)
+        state.view = "system"
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            dq.render_cli_screen(self.world, state)
+
+        text = output.getvalue()
+        lines = text.splitlines()
+        self.assertTrue(lines[1].startswith(" Blemish: Mining Colony 5"))
+        self.assertTrue(lines[1].endswith("Editing On "))
+        self.assertNotIn("\nEditor\n", text)
+        self.assertNotIn("A: add", text)
+
+    def test_cli_prompter_keeps_plain_mode_without_tty(self) -> None:
+        prompter = dq.CliPrompter()
+
+        self.assertFalse(prompter.fullscreen_available)
+
+    def test_fullscreen_cli_transcript_appends_commands_and_results(self) -> None:
+        prompter = dq.CliPrompter()
+
+        prompter.append_screen_lines(["First room.", "", "A thing is here."])
+        prompter.append_screen_command("inventory")
+        prompter.append_screen_lines(["Inventory: empty."])
+
+        self.assertEqual(
+            prompter._screen_transcript,
+            [
+                "",
+                "",
+                "",
+                "",
+                "",
+                "First room.",
+                "",
+                "A thing is here.",
+                "",
+                "",
+                "> inventory",
+                "",
+                "Inventory: empty.",
+                "",
+            ],
+        )
+
+    def test_fullscreen_transcript_scroll_offset_tracks_tail(self) -> None:
+        original_terminal_size = dq.shutil.get_terminal_size
+        try:
+            dq.shutil.get_terminal_size = lambda fallback=(80, 24): os.terminal_size((40, 7))
+
+            text = dq.transcript_body_text(["one", "two", "three", "four", "five"])
+            visible_height = dq.transcript_visible_height(["one", "two", "three", "four", "five"])
+            bottom = dq.transcript_vertical_scroll(["one", "two", "three", "four", "five"], 0)
+            scrolled_up = dq.transcript_vertical_scroll(["one", "two", "three", "four", "five"], 2)
+            cursor = dq.transcript_cursor_line(["one", "two", "three", "four", "five"], 0)
+        finally:
+            dq.shutil.get_terminal_size = original_terminal_size
+
+        self.assertEqual(text.splitlines(), ["one", "two", "three", "four", "five"])
+        self.assertEqual(visible_height, 4)
+        self.assertEqual(bottom, 1)
+        self.assertEqual(scrolled_up, 0)
+        self.assertEqual(cursor, bottom)
+
+    def test_adventure_cli_only_reprints_location_on_change_or_look(self) -> None:
+        self.assertIn("Blemish: Mining Colony 5", dq.adventure_screen_lines(self.world, self.state)[0])
+        self.assertEqual(dq.adventure_screen_lines(self.world, self.state), [])
+
+        self.world, self.state, should_quit = dq.handle_cli_command(
+            None,
+            self.world,
+            STELLAR,
+            False,
+            self.state,
+            "inventory",
+        )
+        self.assertFalse(should_quit)
+        self.assertEqual(dq.adventure_screen_lines(self.world, self.state), ["Inventory: empty."])
+
+        self.world, self.state, should_quit = dq.handle_cli_command(
+            None,
+            self.world,
+            STELLAR,
+            False,
+            self.state,
+            "go Pointless Bar",
+        )
+        self.assertFalse(should_quit)
+        self.assertIn("Blemish: Pointless Bar", dq.adventure_screen_lines(self.world, self.state)[0])
+
+        self.world, self.state, should_quit = dq.handle_cli_command(None, self.world, STELLAR, False, self.state, "look")
+        self.assertFalse(should_quit)
+        self.assertIn("Blemish: Pointless Bar", dq.adventure_screen_lines(self.world, self.state)[0])
 
     def test_generic_cli_contract_and_view_for_stellar_story(self) -> None:
         definition = dq.load_game_definition(STELLAR)
@@ -476,6 +583,42 @@ story:
         self.assertIn("restore", commands)
         self.assertIn("restart", commands)
         self.assertIn("quit", commands)
+        self.assertNotIn("continue", commands)
+
+    def test_generic_cli_only_reprints_location_on_change_or_look(self) -> None:
+        definition = dq.load_game_definition(STELLAR)
+        state = dq.initial_generic_cli_state(definition)
+
+        self.assertIn("Mining Colony 5", dq.generic_cli_screen_lines(state)[0])
+        self.assertEqual(dq.generic_cli_screen_lines(state), [])
+
+        state, should_quit = dq.handle_generic_cli_command(state, "inventory", STELLAR)
+        self.assertFalse(should_quit)
+        self.assertEqual(dq.generic_cli_screen_lines(state), ["Inventory: empty."])
+
+        state, should_quit = dq.handle_generic_cli_command(state, "go Pointless Bar", STELLAR)
+        self.assertFalse(should_quit)
+        self.assertIn("Pointless Bar", dq.generic_cli_screen_lines(state)[0])
+
+        state, should_quit = dq.handle_generic_cli_command(state, "look", STELLAR)
+        self.assertFalse(should_quit)
+        self.assertIn("Pointless Bar", dq.generic_cli_screen_lines(state)[0])
+
+    def test_generic_cli_messages_are_not_modal(self) -> None:
+        definition = dq.load_game_definition(STELLAR)
+        state = dq.initial_generic_cli_state(definition)
+        dq.generic_cli_screen_lines(state)
+        state, should_quit = dq.handle_generic_cli_command(state, "go Pointless Bar", STELLAR)
+        self.assertFalse(should_quit)
+        dq.generic_cli_screen_lines(state)
+
+        state, should_quit = dq.handle_generic_cli_command(state, "examine Portrait of Enrick", STELLAR)
+        self.assertFalse(should_quit)
+        lines = dq.generic_cli_screen_lines(state)
+
+        self.assertFalse(state.pending_messages)
+        self.assertTrue(any("Everyone's favorite" in line for line in lines))
+        self.assertNotIn("continue", "\n".join(lines).lower())
 
     def test_generic_cli_commands_drive_story_and_builtin_save_restore(self) -> None:
         definition = dq.load_game_definition(STELLAR)

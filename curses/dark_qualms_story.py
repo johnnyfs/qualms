@@ -35,6 +35,8 @@ MAP_HEIGHT = 17
 DEFAULT_HOP_DISTANCE_AU = 200000.0
 SAVE_FORMAT_VERSION = 1
 GENERIC_SAVE_FORMAT_VERSION = 1
+PROMPT_BOX_HEIGHT = 3
+CLI_INITIAL_TOP_MARGIN = 5
 
 
 @dataclass(frozen=True)
@@ -168,6 +170,8 @@ class GenericCliState:
     pending_messages: tuple[str, ...] = ()
     pending_index: int = 0
     last_save_path: str | None = None
+    last_cli_location_id: str | None = None
+    force_cli_location: bool = True
 
 
 class GenericCliContractError(ValueError):
@@ -267,6 +271,8 @@ class GameState:
     rules_engine: RulesEngine | None = None
     local_id_map: dict[str, str] = field(default_factory=dict)
     last_save_path: str | None = None
+    last_cli_location_id: str | None = None
+    force_cli_location: bool = True
 
 
 def blank_world_raw() -> dict:
@@ -2019,6 +2025,82 @@ def continuation_indent(line: str) -> int:
     return len(line) - len(line.lstrip(" "))
 
 
+def truncate_text(value: str, width: int) -> str:
+    if width <= 0:
+        return ""
+    return value if len(value) <= width else value[:width]
+
+
+def format_status_bar(left: str, right: str = "", width: int = 80, styled: bool | None = None) -> str:
+    del styled
+    content_width = max(1, width)
+    left = " " + (" ".join(left.split()) or " ")
+    right = " ".join(right.split())
+    if right:
+        right = f"{right} "
+        left_width = max(1, content_width - len(right) - 1)
+        left = truncate_text(left, left_width)
+        gap = max(1, content_width - len(left) - len(right))
+        text = f"{left}{' ' * gap}{right}"
+    else:
+        text = truncate_text(left, content_width)
+    text = text[:content_width].ljust(content_width)
+    return text
+
+
+def cli_mode_flags(editor_enabled: bool) -> str:
+    return "Editing On" if editor_enabled else ""
+
+
+def command_prompt_text() -> str:
+    return "> "
+
+
+def terminal_dimensions() -> tuple[int, int]:
+    size = shutil.get_terminal_size(fallback=(80, 24))
+    return max(40, min(100, size.columns)), max(8, size.lines)
+
+
+def wrapped_transcript_lines(lines: list[str]) -> list[str]:
+    width, height = terminal_dimensions()
+    del height
+    return wrap_lines(lines, width)
+
+
+def transcript_body_text(lines: list[str]) -> str:
+    return "\n".join(wrapped_transcript_lines(lines))
+
+
+def transcript_body_height() -> int:
+    _width, height = terminal_dimensions()
+    return max(1, height - PROMPT_BOX_HEIGHT - 1)
+
+
+def transcript_visible_height(lines: list[str]) -> int:
+    return max(1, min(len(wrapped_transcript_lines(lines)), transcript_body_height()))
+
+
+def transcript_max_scroll_offset(lines: list[str]) -> int:
+    return max(0, len(wrapped_transcript_lines(lines)) - transcript_body_height())
+
+
+def transcript_vertical_scroll(lines: list[str], scroll_offset: int) -> int:
+    return max(0, transcript_max_scroll_offset(lines) - max(0, scroll_offset))
+
+
+def transcript_cursor_line(lines: list[str], scroll_offset: int) -> int:
+    return transcript_vertical_scroll(lines, scroll_offset)
+
+
+def append_text_block(lines: list[str], text: str) -> None:
+    for line in text.splitlines() or ([text] if text else []):
+        lines.append(line)
+
+
+def combine_message_texts(messages: Iterable[str]) -> str:
+    return "\n".join(message for message in messages if message)
+
+
 def game_window(stdscr: curses.window, state: GameState, width: int, lines: Iterable[str]) -> None:
     margin = editor_box_margin(stdscr, state)
     top, _left, _content_width, text = centered_window(stdscr, width, lines, bottom_margin=margin)
@@ -2033,6 +2115,10 @@ class CliPrompter:
         self._session: Any | None = None
         self._word_completer: Any | None = None
         self._path_completer: Any | None = None
+        self._fullscreen_available = False
+        self._screen_transcript: list[str] = []
+        self._screen_started = False
+        self._screen_scroll_offset = 0
         self._prompt_toolkit_available = False
         if not sys.stdin.isatty() or not sys.stdout.isatty():
             return
@@ -2044,15 +2130,41 @@ class CliPrompter:
             return
 
         self._prompt_toolkit_available = True
+        self._fullscreen_available = True
         self._session = PromptSession(history=InMemoryHistory())
         self._word_completer = lambda words: FuzzyCompleter(WordCompleter(words, ignore_case=True))
         self._path_completer = PathCompleter
+
+    @property
+    def fullscreen_available(self) -> bool:
+        return self._fullscreen_available
+
+    def append_screen_lines(self, lines: list[str]) -> None:
+        if not self._screen_started:
+            self._screen_transcript.extend([""] * CLI_INITIAL_TOP_MARGIN)
+            self._screen_started = True
+        if not lines:
+            return
+        if any(line for line in self._screen_transcript):
+            self._screen_transcript.append("")
+        self._screen_transcript.extend(lines)
+        self._screen_transcript.append("")
+        self._screen_scroll_offset = 0
+
+    def append_screen_command(self, command: str) -> None:
+        command = command.strip()
+        if not command:
+            return
+        if any(line for line in self._screen_transcript):
+            self._screen_transcript.append("")
+        self._screen_transcript.append(f"> {command}")
+        self._screen_scroll_offset = 0
 
     def read_command(self, completions: Iterable[str]) -> str | None:
         completion_words = sorted({word for word in completions if word})
         if not self._prompt_toolkit_available:
             try:
-                return input("> ")
+                return input(command_prompt_text())
             except EOFError:
                 return None
             except KeyboardInterrupt:
@@ -2067,6 +2179,179 @@ class CliPrompter:
         except KeyboardInterrupt:
             print()
             return ""
+
+    def read_screen_command(
+        self,
+        location: str,
+        flags: str,
+        lines: list[str],
+        completions: Iterable[str],
+    ) -> str | None:
+        if not self._fullscreen_available:
+            return self.read_command(completions)
+        self.append_screen_lines(lines)
+        try:
+            command = self._read_prompt_toolkit_screen(location, flags, completions)
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return ""
+        if command:
+            self.append_screen_command(command)
+        return command
+
+    def _read_prompt_toolkit_screen(
+        self,
+        location: str,
+        flags: str,
+        completions: Iterable[str],
+    ) -> str | None:
+        from prompt_toolkit.application import Application
+        from prompt_toolkit.buffer import Buffer
+        from prompt_toolkit.completion import FuzzyCompleter, WordCompleter
+        from prompt_toolkit.key_binding import KeyBindings
+        from prompt_toolkit.layout import Float, FloatContainer, HSplit, Layout, VSplit, Window
+        from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
+        from prompt_toolkit.layout.dimension import Dimension
+        from prompt_toolkit.layout.menus import CompletionsMenu
+        from prompt_toolkit.output.color_depth import ColorDepth
+        from prompt_toolkit.data_structures import Point
+        from prompt_toolkit.styles import Style
+
+        completion_words = sorted({word for word in completions if word})
+        completer = FuzzyCompleter(WordCompleter(completion_words, ignore_case=True)) if completion_words else None
+        command_buffer = Buffer(completer=completer, complete_while_typing=True)
+        command_control = BufferControl(buffer=command_buffer)
+
+        key_bindings = KeyBindings()
+
+        @key_bindings.add("enter")
+        def _submit(event: Any) -> None:
+            event.app.exit(result=command_buffer.text)
+
+        @key_bindings.add("c-c")
+        def _cancel(event: Any) -> None:
+            event.app.exit(result="")
+
+        @key_bindings.add("c-d")
+        def _eof(event: Any) -> None:
+            if command_buffer.text:
+                command_buffer.delete_before_cursor(1)
+            else:
+                event.app.exit(result=None)
+
+        @key_bindings.add("pageup")
+        def _page_up(event: Any) -> None:
+            page = max(1, transcript_body_height() - 1)
+            self._screen_scroll_offset = min(
+                transcript_max_scroll_offset(self._screen_transcript),
+                self._screen_scroll_offset + page,
+            )
+            event.app.invalidate()
+
+        @key_bindings.add("pagedown")
+        def _page_down(event: Any) -> None:
+            page = max(1, transcript_body_height() - 1)
+            self._screen_scroll_offset = max(0, self._screen_scroll_offset - page)
+            event.app.invalidate()
+
+        @key_bindings.add("home")
+        def _home(event: Any) -> None:
+            self._screen_scroll_offset = transcript_max_scroll_offset(self._screen_transcript)
+            event.app.invalidate()
+
+        @key_bindings.add("end")
+        def _end(event: Any) -> None:
+            self._screen_scroll_offset = 0
+            event.app.invalidate()
+
+        right_status = " ".join(flags.split())
+        right_status = f"{right_status} " if right_status else ""
+        status_children: list[Any] = [
+            Window(
+                content=FormattedTextControl(lambda: " " + (" ".join(location.split()) or " ")),
+                height=1,
+                style="class:status",
+                char=" ",
+            )
+        ]
+        if right_status:
+            status_children.append(
+                Window(
+                    content=FormattedTextControl(lambda: right_status),
+                    width=len(right_status),
+                    height=1,
+                    style="class:status",
+                    char=" ",
+                )
+            )
+
+        root = FloatContainer(
+            content=HSplit(
+                [
+                    VSplit(status_children, height=1, style="class:status"),
+                    Window(
+                        content=FormattedTextControl(
+                            lambda: transcript_body_text(self._screen_transcript),
+                            show_cursor=False,
+                            get_cursor_position=lambda: Point(
+                                x=0,
+                                y=transcript_cursor_line(self._screen_transcript, self._screen_scroll_offset),
+                            ),
+                        ),
+                        height=lambda: transcript_visible_height(self._screen_transcript),
+                        wrap_lines=False,
+                        get_vertical_scroll=lambda _window: transcript_vertical_scroll(
+                            self._screen_transcript,
+                            self._screen_scroll_offset,
+                        ),
+                        style="class:body",
+                    ),
+                    HSplit(
+                        [
+                            Window(height=1, char=" ", style="class:prompt"),
+                            VSplit(
+                                [
+                                    Window(content=FormattedTextControl(" > "), width=3, height=1, style="class:prompt"),
+                                    Window(content=command_control, height=1, style="class:prompt"),
+                                ],
+                                height=1,
+                                style="class:prompt",
+                            ),
+                            Window(height=1, char=" ", style="class:prompt"),
+                        ],
+                        height=Dimension.exact(PROMPT_BOX_HEIGHT),
+                        style="class:prompt",
+                    ),
+                    Window(char=" ", style="class:body"),
+                ]
+            ),
+            floats=[
+                Float(
+                    xcursor=True,
+                    ycursor=True,
+                    content=CompletionsMenu(max_height=8, scroll_offset=1),
+                )
+            ],
+        )
+        style = Style.from_dict(
+            {
+                "status": "reverse",
+                "prompt": "bg:#303030 #eeeeee",
+                "body": "",
+                "completion-menu": "bg:#303030 #eeeeee",
+                "completion-menu.completion": "bg:#303030 #eeeeee",
+                "completion-menu.completion.current": "bg:#505050 #ffffff",
+            }
+        )
+        application = Application(
+            layout=Layout(root, focused_element=command_control),
+            key_bindings=key_bindings,
+            style=style,
+            full_screen=True,
+            color_depth=ColorDepth.TRUE_COLOR,
+            erase_when_done=False,
+        )
+        return application.run()
 
     def prompt_text(
         self,
@@ -3393,8 +3678,14 @@ def run_cli(world: StoryWorld, data_path: Path, editor_enabled: bool = False) ->
     state.view = "system"
 
     while True:
-        render_cli_screen(world, state)
-        command = prompter.read_command(command_words_for_state(world, state))
+        location = adventure_status_location(world, state)
+        lines = adventure_screen_lines(world, state)
+        completions = command_words_for_state(world, state)
+        if prompter.fullscreen_available:
+            command = prompter.read_screen_command(location, cli_mode_flags(state.editor_enabled), lines, completions)
+        else:
+            render_cli_lines(location, cli_mode_flags(state.editor_enabled), lines)
+            command = prompter.read_command(completions)
         if command is None:
             return
         world, state, should_quit = handle_cli_command(prompter, world, data_path, editor_enabled, state, command)
@@ -3407,8 +3698,14 @@ def run_generic_cli(definition: Any, data_path: Path) -> None:
     state = initial_generic_cli_state(definition)
 
     while True:
-        render_generic_cli_screen(state)
-        command = prompter.read_command(generic_command_words_for_state(state))
+        location = generic_cli_status_location(state)
+        lines = generic_cli_screen_lines(state)
+        completions = generic_command_words_for_state(state)
+        if prompter.fullscreen_available:
+            command = prompter.read_screen_command(location, "", lines, completions)
+        else:
+            render_cli_lines(location, "", lines)
+            command = prompter.read_command(completions)
         if command is None:
             return
         state, should_quit = handle_generic_cli_command(state, command, data_path)
@@ -3416,63 +3713,72 @@ def run_generic_cli(definition: Any, data_path: Path) -> None:
             return
 
 
-def render_cli_screen(world: StoryWorld, state: GameState) -> None:
-    width = max(40, min(100, shutil.get_terminal_size(fallback=(80, 24)).columns))
-    lines = adventure_screen_lines(world, state)
-    if not state.continue_message and not sequence_active(state):
-        editor_lines = editor_box_lines(state)
-        if editor_lines:
-            lines.extend(["", "Editor", *editor_lines[1:]])
-
+def render_cli_lines(location: str, flags: str, lines: list[str]) -> None:
+    width, _height = terminal_dimensions()
     print()
-    print("=" * min(width, 80))
+    print(format_status_bar(location, flags, width))
     for line in wrap_lines(lines, width):
         print(line)
+
+
+def render_cli_screen(world: StoryWorld, state: GameState) -> None:
+    location = adventure_status_location(world, state)
+    lines = adventure_screen_lines(world, state)
+    render_cli_lines(location, cli_mode_flags(state.editor_enabled), lines)
 
 
 def render_generic_cli_screen(state: GenericCliState) -> None:
-    width = max(40, min(100, shutil.get_terminal_size(fallback=(80, 24)).columns))
+    location = generic_cli_status_location(state)
     lines = generic_cli_screen_lines(state)
+    render_cli_lines(location, "", lines)
 
-    print()
-    print("=" * min(width, 80))
-    for line in wrap_lines(lines, width):
-        print(line)
+
+def generic_cli_status_location(state: GenericCliState) -> str:
+    return generic_cli_view(state).location.name
 
 
 def generic_cli_screen_lines(state: GenericCliState) -> list[str]:
-    if state.pending_messages:
-        index = min(state.pending_index, len(state.pending_messages) - 1)
-        return [state.pending_messages[index], "", "continue"]
-
     view = generic_cli_view(state)
-    lines = [view.location.name]
-    if view.location.description:
+    if state.pending_messages:
+        state.message = combine_message_texts([state.message, *state.pending_messages])
+        state.pending_messages = ()
+        state.pending_index = 0
+
+    location_changed = state.last_cli_location_id != view.location.id
+    show_location = state.force_cli_location or location_changed
+    lines: list[str] = []
+    if show_location:
+        lines.append(view.location.name)
+    if show_location and view.location.description:
         lines.extend(["", view.location.description])
     if state.message:
-        lines.extend(["", state.message])
-    if view.go_targets:
+        if lines:
+            lines.append("")
+        append_text_block(lines, state.message)
+    if show_location and view.go_targets:
         lines.extend(["", f"You can go to {format_name_list([target.name for target in view.go_targets])}."])
-    if view.people:
+    if show_location and view.people:
         lines.extend(["", f"You can see {format_name_list([person.name for person in view.people])}."])
 
     unnamed_visible: list[str] = []
-    for thing in view.things:
-        if thing.description:
-            lines.extend(["", thing.description])
-        else:
-            unnamed_visible.append(thing.name)
-    if unnamed_visible:
+    if show_location:
+        for thing in view.things:
+            if thing.description:
+                lines.extend(["", thing.description])
+            else:
+                unnamed_visible.append(thing.name)
+    if show_location and unnamed_visible:
         lines.extend(["", f"You can see {format_name_list(unnamed_visible)}."])
-    if view.inventory:
+    if show_location and view.inventory:
         lines.extend(["", f"You are carrying {format_name_list([item.name for item in view.inventory])}."])
+    state.last_cli_location_id = view.location.id
+    state.force_cli_location = False
     return lines
 
 
 def generic_command_words_for_state(state: GenericCliState) -> list[str]:
     words = [
         "look",
-        "continue",
         "inventory",
         "inv",
         "save",
@@ -3518,11 +3824,9 @@ def handle_generic_cli_command(state: GenericCliState, command: str, data_path: 
         state.last_save_path = last_save_path
         state.message = "Restarted."
         return state, False
-    if state.pending_messages:
-        advance_generic_cli_messages(state)
-        return state, False
     if not normalized or normalized in {"look", "l", "continue"}:
         state.message = ""
+        state.force_cli_location = True
         return state, False
     if normalized in {"inventory", "inv", "i"}:
         items = generic_cli_view(state).inventory
@@ -3598,32 +3902,86 @@ def apply_generic_cli_action(state: GenericCliState, action: GenericCliActionVie
         return
 
     messages = action_texts(result)
+    state.pending_messages = ()
+    state.pending_index = 0
+    state.message = combine_message_texts(messages)
+
+
+def adventure_status_location(world: StoryWorld, state: GameState) -> str:
+    system = world.system_by_id(state.system_id)
+    orbital = current_orbital(world, state)
+    destination = current_destination(world, state)
+    if destination is not None:
+        if boarded_ship_at_destination(state, destination):
+            ship = boarded_ship(state)
+            return f"Aboard the {ship.name}" if ship is not None else "Aboard ship"
+        return f"{orbital.name}: {destination.name}" if orbital is not None else destination.name
+    if orbital is not None:
+        return destination_status(orbital)
+    return system.name
+
+
+def adventure_location_key(world: StoryWorld, state: GameState) -> str:
+    system = world.system_by_id(state.system_id)
+    orbital = current_orbital(world, state)
+    destination = current_destination(world, state)
+    if destination is not None:
+        if boarded_ship_at_destination(state, destination):
+            ship = boarded_ship(state)
+            ship_id = ship.id if ship is not None else state.boarded_ship_id or "unknown"
+            return f"ship:{ship_id}"
+        return f"destination:{destination.id}"
+    if orbital is not None:
+        return f"orbital:{orbital.id}"
+    return f"system:{system.id}"
+
+
+def consume_cli_modal_messages(state: GameState) -> tuple[str, ...]:
+    messages: list[str] = []
+    if state.continue_message:
+        messages.append(state.continue_message)
+        state.continue_message = ""
+        apply_outcomes(state, state.continue_on_complete)
+        state.continue_on_complete = ()
+    while sequence_active(state):
+        messages.append(state.sequence_messages[state.sequence_index])
+        advance_sequence(state)
+    return tuple(messages)
+
+
+def append_cli_modal_messages_to_notice(state: GameState) -> None:
+    messages = consume_cli_modal_messages(state)
     if messages:
-        state.pending_messages = messages
-        state.pending_index = 0
-        state.message = ""
-    else:
-        state.pending_messages = ()
-        state.pending_index = 0
-        state.message = ""
+        state.message = combine_message_texts([state.message, *messages])
+
+
+def adventure_notice_lines(state: GameState) -> list[str]:
+    lines: list[str] = []
+    if state.message:
+        append_text_block(lines, state.message)
+    return lines
 
 
 def adventure_screen_lines(world: StoryWorld, state: GameState) -> list[str]:
-    if state.continue_message:
-        return [state.continue_message, "", "continue"]
-    if sequence_active(state):
-        message = state.sequence_messages[state.sequence_index]
-        return [message, "", "continue"]
+    append_cli_modal_messages_to_notice(state)
 
     state.view = "system"
     system = world.system_by_id(state.system_id)
     orbital = current_orbital(world, state)
     destination = current_destination(world, state)
+    location_key = adventure_location_key(world, state)
+    location_changed = state.last_cli_location_id != location_key
+    show_location = state.force_cli_location or location_changed
+    state.last_cli_location_id = location_key
+    state.force_cli_location = False
+
+    if not show_location:
+        return adventure_notice_lines(state)
+
     if destination is not None:
         state.current_location_id = destination.id
         enter_destination(state, destination)
-        if sequence_active(state):
-            return adventure_screen_lines(world, state)
+        append_cli_modal_messages_to_notice(state)
         if boarded_ship_at_destination(state, destination):
             return adventure_boarded_ship_lines(state, destination)
         return adventure_destination_lines(state, orbital, destination)
@@ -3969,7 +4327,6 @@ def generic_relation_true(runtime_state: WorldState, relation: str, args: list[A
 def command_words_for_state(world: StoryWorld, state: GameState) -> list[str]:
     words = [
         "look",
-        "continue",
         "inventory",
         "save",
         "restore",
@@ -4041,6 +4398,7 @@ def handle_cli_command(
     state: GameState,
     command: str,
 ) -> tuple[StoryWorld, GameState, bool]:
+    append_cli_modal_messages_to_notice(state)
     normalized = normalize_command(command)
     if normalized in {"quit", "exit"}:
         return world, state, True
@@ -4057,16 +4415,9 @@ def handle_cli_command(
         state.view = "system"
         state.message = "Restarted."
         return world, state, False
-    if state.continue_message:
-        state.continue_message = ""
-        apply_outcomes(state, state.continue_on_complete)
-        state.continue_on_complete = ()
-        return world, state, False
-    if sequence_active(state):
-        advance_sequence(state)
-        return world, state, False
     if not normalized or normalized in {"look", "l", "continue"}:
         state.message = ""
+        state.force_cli_location = True
         return world, state, False
     if normalized in {"inventory", "inv", "i"}:
         items = inventory_items(state)
@@ -5628,6 +5979,7 @@ def state_has_fact(state: GameState, fact: str) -> bool:
 def clear_notice(state: GameState) -> None:
     state.continue_message = ""
     state.continue_on_complete = ()
+    state.message = ""
 
 
 def interaction_description(choice: InteractionChoice) -> str:
