@@ -211,6 +211,92 @@ class YamlLoaderTests(unittest.TestCase):
         self.assertEqual(result.status, "succeeded")
         self.assertTrue(state.test("Visited", ["player", "room"]))
 
+    def test_nested_entities_compile_scoped_ids_and_refs(self) -> None:
+        path = write_yaml(
+            f"""
+            qualms: "0.1"
+            id: nested-story
+            imports:
+              - "{CORE_PRELUDE}"
+            story:
+              start:
+                actor: player
+                location: ":room"
+              entities:
+                - id: player
+                  kind: Person
+                - id: station
+                  kind: Place
+                  children:
+                    - id: room
+                      kind: Place
+                      fields:
+                        Presentable:
+                          name: Room
+                      rules:
+                        - id: block-key-examine
+                          phase: before
+                          match:
+                            action: Examine
+                            args:
+                              target: {{ ref: ":object:key" }}
+                          effects:
+                            - emit:
+                                text: "The key is too bright."
+                          control: stop
+                      children:
+                        - id: object:key
+                          traits:
+                            - Presentable
+                            - Relocatable
+                            - Portable
+                          fields:
+                            Presentable:
+                              name: Key
+                            Relocatable:
+                              location: ":room"
+                - id: console
+                  parent: station:room
+                  traits:
+                    - Presentable
+                    - Relocatable
+                  fields:
+                    Relocatable:
+                      location: station:room
+                - id: plaque
+                  origin: station:room
+                  traits:
+                    - Presentable
+                    - Relocatable
+                  fields:
+                    Relocatable:
+                      location: station:room
+              assertions:
+                - relation: At
+                  args:
+                    - {{ ref: ":player" }}
+                    - {{ ref: ":room" }}
+            """
+        )
+        definition = load_game_definition(path)
+        state = definition.instantiate()
+        engine = RulesEngine(definition)
+
+        self.assertEqual(definition.metadata["start"]["location"], "station:room")
+        self.assertEqual(definition.metadata["local_id_map"]["room"], "station:room")
+        self.assertIn("station:room:console", state.entities)
+        self.assertIn("station:room:plaque", state.entities)
+        self.assertEqual(state.get_field("station:room:object:key", "Relocatable", "location"), "station:room")
+        self.assertTrue(state.test("At", ["player", "station:room"]))
+
+        result = engine.attempt(
+            state,
+            ActionAttempt("Examine", {"actor": "player", "target": "station:room:object:key"}),
+        )
+
+        self.assertEqual(result.status, "blocked")
+        self.assertEqual(result.events[0]["text"], "The key is too bright.")
+
     def test_unknown_trait_fails_validation(self) -> None:
         path = write_yaml(
             """

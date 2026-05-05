@@ -25,6 +25,7 @@ from .core import (
 
 SCHEMA_VERSION = "0.1"
 ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]*$")
+LOCAL_REF_PREFIX = ":"
 
 
 class SchemaError(ValueError):
@@ -120,14 +121,34 @@ def compile_documents(docs: list[dict[str, Any]]) -> GameDefinition:
     for doc in docs:
         context = doc["id"]
         story = require_mapping(doc, "story", context, default={})
+        raw_entities = require_list(story, "entities", f"{context}.story", default=[])
+        entity_values, local_id_map = expand_story_entities(raw_entities, f"{context}.story.entities")
+        if local_id_map:
+            metadata.setdefault("local_id_map", {})
+            for local_id, entity_id in local_id_map.items():
+                metadata["local_id_map"].setdefault(local_id, entity_id)
         if "start" in story:
-            metadata["start"] = copy.deepcopy(story["start"])
-        for raw_entity in require_list(story, "entities", f"{context}.story", default=[]):
+            metadata["start"] = resolve_global_local_refs(story["start"], local_id_map, f"{context}.story.start", plain_refs=True)
+        for raw_entity in entity_values:
             entity_spec = parse_entity(raw_entity, f"{context}.story.entities")
             ensure_unique({entity.id: entity for entity in entity_specs}, entity_spec.id, f"entity {entity_spec.id}")
             entity_specs.append(entity_spec)
-        initial_assertions.extend(copy.deepcopy(require_list(story, "assertions", f"{context}.story", default=[])))
-        initial_facts.extend(copy.deepcopy(require_list(story, "facts", f"{context}.story", default=[])))
+        initial_assertions.extend(
+            resolve_global_local_refs(
+                require_list(story, "assertions", f"{context}.story", default=[]),
+                local_id_map,
+                f"{context}.story.assertions",
+                plain_refs=False,
+            )
+        )
+        initial_facts.extend(
+            resolve_global_local_refs(
+                require_list(story, "facts", f"{context}.story", default=[]),
+                local_id_map,
+                f"{context}.story.facts",
+                plain_refs=False,
+            )
+        )
 
     validate_definitions(trait_defs, relation_defs, action_defs, kind_defs)
     definition = GameDefinition(
@@ -323,6 +344,158 @@ def parse_entity(raw: Any, context: str) -> EntitySpec:
         rules=tuple(parse_rule(raw_rule, f"{context}.{entity_id}.rules", index) for index, raw_rule in enumerate(require_list(mapping, "rules", context, default=[]))),
         metadata=copy.deepcopy(require_mapping(mapping, "metadata", context, default={})),
     )
+
+
+def expand_story_entities(raw_entities: list[Any], context: str) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    alias_targets: dict[str, set[str]] = {}
+    expanded = expand_entity_list(raw_entities, context, None, (), alias_targets)
+    local_id_map = {alias: next(iter(targets)) for alias, targets in alias_targets.items() if len(targets) == 1}
+    return expanded, local_id_map
+
+
+def expand_entity_list(
+    raw_entities: list[Any],
+    context: str,
+    parent_id: str | None,
+    inherited_scopes: tuple[dict[str, set[str]], ...],
+    alias_targets: dict[str, set[str]],
+) -> list[dict[str, Any]]:
+    entity_infos = [
+        entity_id_info(require_mapping_value(raw, f"{context}[{index}]"), f"{context}[{index}]", parent_id)
+        for index, raw in enumerate(raw_entities)
+    ]
+    sibling_scope = scope_from_entity_infos(entity_infos, alias_targets)
+    expanded: list[dict[str, Any]] = []
+    for index, (mapping, local_id, full_id) in enumerate(entity_infos):
+        entity_context = f"{context}[{index}]"
+        children = require_list(mapping, "children", entity_context, default=[])
+        child_infos = [
+            entity_id_info(require_mapping_value(raw_child, f"{entity_context}.children[{child_index}]"), f"{entity_context}.children[{child_index}]", full_id)
+            for child_index, raw_child in enumerate(children)
+        ]
+        child_scope = scope_from_entity_infos(child_infos, alias_targets)
+        body_scopes = (*inherited_scopes, sibling_scope, child_scope)
+        expanded.append(expand_entity_body(mapping, local_id, full_id, body_scopes, entity_context))
+        expanded.extend(expand_entity_list(children, f"{entity_context}.children", full_id, (*inherited_scopes, sibling_scope), alias_targets))
+    return expanded
+
+
+def entity_id_info(mapping: dict[str, Any], context: str, implicit_parent_id: str | None) -> tuple[dict[str, Any], str, str]:
+    local_id = require_id(mapping.get("id"), f"{context}.id")
+    explicit_parent = entity_parent_id(mapping, context)
+    if implicit_parent_id is not None and explicit_parent is not None:
+        raise SchemaError(f"{context} cannot set parent/origin inside children")
+    parent_id = implicit_parent_id or explicit_parent
+    full_id = f"{parent_id}:{local_id}" if parent_id else local_id
+    require_id(full_id, f"{context}.expanded_id")
+    return mapping, local_id, full_id
+
+
+def entity_parent_id(mapping: dict[str, Any], context: str) -> str | None:
+    has_parent = "parent" in mapping
+    has_origin = "origin" in mapping
+    if has_parent and has_origin:
+        raise SchemaError(f"{context} cannot set both parent and origin")
+    if not has_parent and not has_origin:
+        return None
+    field = "parent" if has_parent else "origin"
+    return require_id(mapping.get(field), f"{context}.{field}")
+
+
+def scope_from_entity_infos(
+    entity_infos: list[tuple[dict[str, Any], str, str]],
+    alias_targets: dict[str, set[str]],
+) -> dict[str, set[str]]:
+    scope: dict[str, set[str]] = {}
+    for mapping, local_id, full_id in entity_infos:
+        add_alias(scope, local_id, full_id)
+        add_alias(alias_targets, local_id, full_id)
+        metadata = mapping.get("metadata")
+        if isinstance(metadata, dict) and isinstance(metadata.get("local_id"), str):
+            metadata_local_id = require_id(metadata["local_id"], f"{full_id}.metadata.local_id")
+            add_alias(scope, metadata_local_id, full_id)
+            add_alias(alias_targets, metadata_local_id, full_id)
+    return scope
+
+
+def add_alias(scope: dict[str, set[str]], local_id: str, full_id: str) -> None:
+    scope.setdefault(local_id, set()).add(full_id)
+
+
+def expand_entity_body(
+    mapping: dict[str, Any],
+    local_id: str,
+    full_id: str,
+    scopes: tuple[dict[str, set[str]], ...],
+    context: str,
+) -> dict[str, Any]:
+    body = {
+        key: copy.deepcopy(value)
+        for key, value in mapping.items()
+        if key not in {"children", "parent", "origin"}
+    }
+    body["id"] = full_id
+    body.setdefault("metadata", {})
+    if isinstance(body["metadata"], dict):
+        body["metadata"].setdefault("local_id", local_id)
+    if "fields" in body:
+        body["fields"] = resolve_local_refs(body["fields"], scopes, f"{context}.fields", plain_refs=True)
+    if "traits" in body:
+        body["traits"] = resolve_trait_local_refs(body["traits"], scopes, f"{context}.traits")
+    if "rules" in body:
+        body["rules"] = resolve_local_refs(body["rules"], scopes, f"{context}.rules", plain_refs=False)
+    return body
+
+
+def resolve_trait_local_refs(raw_traits: Any, scopes: tuple[dict[str, set[str]], ...], context: str) -> Any:
+    if not isinstance(raw_traits, list):
+        return copy.deepcopy(raw_traits)
+    resolved: list[Any] = []
+    for index, raw_trait in enumerate(raw_traits):
+        if isinstance(raw_trait, str):
+            resolved.append(raw_trait)
+            continue
+        mapping = require_mapping_value(raw_trait, f"{context}[{index}]")
+        trait = copy.deepcopy(mapping)
+        if "fields" in trait:
+            trait["fields"] = resolve_local_refs(trait["fields"], scopes, f"{context}[{index}].fields", plain_refs=True)
+        if "params" in trait:
+            trait["params"] = resolve_local_refs(trait["params"], scopes, f"{context}[{index}].params", plain_refs=True)
+        if "parameters" in trait:
+            trait["parameters"] = resolve_local_refs(trait["parameters"], scopes, f"{context}[{index}].parameters", plain_refs=True)
+        resolved.append(trait)
+    return resolved
+
+
+def resolve_global_local_refs(value: Any, local_id_map: dict[str, str], context: str, plain_refs: bool) -> Any:
+    global_scope = {local_id: {entity_id} for local_id, entity_id in local_id_map.items()}
+    return resolve_local_refs(value, (global_scope,), context, plain_refs=plain_refs)
+
+
+def resolve_local_refs(value: Any, scopes: tuple[dict[str, set[str]], ...], context: str, plain_refs: bool) -> Any:
+    if isinstance(value, list):
+        return [resolve_local_refs(item, scopes, f"{context}[{index}]", plain_refs) for index, item in enumerate(value)]
+    if isinstance(value, dict):
+        if set(value) == {"ref"} and isinstance(value["ref"], str) and value["ref"].startswith(LOCAL_REF_PREFIX):
+            full_id = resolve_local_ref(value["ref"][len(LOCAL_REF_PREFIX) :], scopes, context)
+            return full_id if plain_refs else {"ref": full_id}
+        return {key: resolve_local_refs(item, scopes, f"{context}.{key}", plain_refs) for key, item in value.items()}
+    if plain_refs and isinstance(value, str) and value.startswith(LOCAL_REF_PREFIX):
+        return resolve_local_ref(value[len(LOCAL_REF_PREFIX) :], scopes, context)
+    return copy.deepcopy(value)
+
+
+def resolve_local_ref(local_id: str, scopes: tuple[dict[str, set[str]], ...], context: str) -> str:
+    if not local_id:
+        raise SchemaError(f"{context} local ref cannot be empty")
+    for scope in reversed(scopes):
+        targets = scope.get(local_id)
+        if targets is None:
+            continue
+        if len(targets) > 1:
+            raise SchemaError(f"{context} local ref :{local_id} is ambiguous")
+        return next(iter(targets))
+    raise SchemaError(f"{context} references unknown local id :{local_id}")
 
 
 def parse_trait_attachment(raw: Any, context: str) -> TraitAttachment:
