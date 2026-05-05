@@ -123,6 +123,14 @@ class InteractionChoice:
 
 
 @dataclass(frozen=True)
+class NamedTarget:
+    kind: str
+    name: str
+    value: Any
+    aliases: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class LandingOption:
     id: str
     kind: str
@@ -1986,14 +1994,14 @@ class CliPrompter:
             return
         try:
             from prompt_toolkit import PromptSession
-            from prompt_toolkit.completion import PathCompleter, WordCompleter
+            from prompt_toolkit.completion import FuzzyCompleter, PathCompleter, WordCompleter
             from prompt_toolkit.history import InMemoryHistory
         except ModuleNotFoundError:
             return
 
         self._prompt_toolkit_available = True
         self._session = PromptSession(history=InMemoryHistory())
-        self._word_completer = WordCompleter
+        self._word_completer = lambda words: FuzzyCompleter(WordCompleter(words, ignore_case=True))
         self._path_completer = PathCompleter
 
     def read_command(self, completions: Iterable[str]) -> str | None:
@@ -2007,9 +2015,9 @@ class CliPrompter:
                 print()
                 return ""
 
-        completer = self._word_completer(completion_words, ignore_case=True) if completion_words else None
+        completer = self._word_completer(completion_words) if completion_words else None
         try:
-            return self._session.prompt("> ", completer=completer)
+            return self._session.prompt("> ", completer=completer, complete_while_typing=True)
         except EOFError:
             return None
         except KeyboardInterrupt:
@@ -3163,24 +3171,21 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
 def run_cli(world: StoryWorld, data_path: Path, editor_enabled: bool = False) -> None:
     prompter = CliPrompter()
     state = initial_game_state(world, editor_enabled)
+    state.view = "system"
 
     while True:
         render_cli_screen(world, state)
         command = prompter.read_command(command_words_for_state(world, state))
         if command is None:
             return
-        key = command_to_key(command, state)
-        if key is None:
-            print(f"Unknown command: {command.strip()}")
-            continue
-        world, state, should_quit = handle_game_key(prompter, world, data_path, editor_enabled, state, key)
+        world, state, should_quit = handle_cli_command(prompter, world, data_path, editor_enabled, state, command)
         if should_quit:
             return
 
 
 def render_cli_screen(world: StoryWorld, state: GameState) -> None:
     width = max(40, min(100, shutil.get_terminal_size(fallback=(80, 24)).columns))
-    lines = current_screen_lines(world, state)
+    lines = adventure_screen_lines(world, state)
     if not state.continue_message and not sequence_active(state):
         editor_lines = editor_box_lines(state)
         if editor_lines:
@@ -3192,36 +3197,191 @@ def render_cli_screen(world: StoryWorld, state: GameState) -> None:
         print(line)
 
 
+def adventure_screen_lines(world: StoryWorld, state: GameState) -> list[str]:
+    if state.continue_message:
+        return [state.continue_message, "", "continue"]
+    if sequence_active(state):
+        message = state.sequence_messages[state.sequence_index]
+        return [message, "", "continue"]
+
+    state.view = "system"
+    system = world.system_by_id(state.system_id)
+    orbital = current_orbital(world, state)
+    destination = current_destination(world, state)
+    if destination is not None:
+        state.current_location_id = destination.id
+        enter_destination(state, destination)
+        if sequence_active(state):
+            return adventure_screen_lines(world, state)
+        if boarded_ship_at_destination(state, destination):
+            return adventure_boarded_ship_lines(state, destination)
+        return adventure_destination_lines(state, orbital, destination)
+    if orbital is not None:
+        return adventure_orbital_lines(state, orbital)
+    return adventure_system_lines(world, state, system)
+
+
+def adventure_system_lines(world: StoryWorld, state: GameState, system: System) -> list[str]:
+    lines = [
+        system.name,
+        "",
+        system.description,
+        f"Star: {system.star_type}. Sol offset: {format_signed_au(system.position_au[0])}, {format_signed_au(system.position_au[1])}.",
+    ]
+    append_notice(lines, state)
+    if system.orbitals:
+        append_visible_names(lines, "Destinations", [orbital.name for orbital in system.orbitals])
+    if system.hops:
+        append_visible_names(lines, "Jump points", [world.system_by_id(hop_id).name for hop_id in system.hops])
+    append_inventory_summary(lines, state)
+    return lines
+
+
+def adventure_orbital_lines(state: GameState, orbital: Orbital) -> list[str]:
+    lines = [
+        destination_status(orbital),
+        "",
+        orbital.description,
+    ]
+    append_notice(lines, state)
+    ship = boarded_ship(state)
+    if ship is not None:
+        lines.extend(["", f"Aboard: {ship.name}."])
+        status = ship_status_lines(state, ship)
+        if status:
+            lines.extend(status)
+    visible_landings = [destination.name for destination in orbital.landing_options if destination_visible(state, destination)]
+    append_visible_names(lines, "Locations", visible_landings)
+    append_inventory_summary(lines, state)
+    return lines
+
+
+def adventure_destination_lines(state: GameState, orbital: Orbital | None, destination: LandingOption) -> list[str]:
+    title = f"{orbital.name}: {destination.name}" if orbital is not None else destination.name
+    lines = [
+        title,
+        "",
+        destination.description,
+    ]
+    append_notice(lines, state)
+    objects = visible_objects_for_destination(state, destination)
+    if objects:
+        append_visible_names(lines, "You see", [story_object.name for story_object in objects])
+    npcs = visible_npcs_for_destination(state, destination)
+    if npcs:
+        lines.append("")
+        for npc in npcs:
+            lines.append(f"{npc.name}: {npc.description}")
+    ships = visible_ships_for_destination(state, destination)
+    if ships:
+        lines.append("")
+        for ship in ships:
+            lines.append(ship_tagline(state, destination, ship))
+    exits = [child.name for _index, child in visible_destination_entries(state, destination)]
+    if exits:
+        append_visible_names(lines, "Exits", exits)
+    append_inventory_summary(lines, state)
+    return lines
+
+
+def adventure_boarded_ship_lines(state: GameState, destination: LandingOption | None) -> list[str]:
+    ship = boarded_ship(state)
+    name = ship.name if ship is not None else "Ship"
+    lines = [
+        f"Aboard the {name}",
+        "",
+    ]
+    status = ship_status_lines(state, ship)
+    if status:
+        lines.extend(status)
+        lines.append("")
+    description = ship_interior_description(state, ship)
+    if description:
+        lines.append(description)
+    append_notice(lines, state)
+    objects = visible_objects_for_ship(state, ship)
+    if objects:
+        append_visible_names(lines, "You see", [story_object.name for story_object in objects])
+    if destination is not None:
+        lines.extend(["", f"Outside: {destination.name}."])
+    append_inventory_summary(lines, state)
+    return lines
+
+
+def append_notice(lines: list[str], state: GameState) -> None:
+    if state.message:
+        lines.extend(["", state.message])
+
+
+def append_visible_names(lines: list[str], title: str, names: list[str]) -> None:
+    if not names:
+        return
+    lines.extend(["", f"{title}: {format_name_list(names)}."])
+
+
+def append_inventory_summary(lines: list[str], state: GameState) -> None:
+    items = [item.name for item in inventory_items(state)]
+    if items:
+        append_visible_names(lines, "Inventory", items)
+
+
+def format_name_list(names: list[str]) -> str:
+    if len(names) <= 2:
+        return " and ".join(names)
+    return ", ".join(names[:-1]) + f", and {names[-1]}"
+
+
+def current_orbital(world: StoryWorld, state: GameState) -> Orbital | None:
+    if state.orbital_id is None:
+        return None
+    try:
+        return orbital_by_id(world.system_by_id(state.system_id), state.orbital_id)
+    except KeyError:
+        return None
+
+
+def current_destination(world: StoryWorld, state: GameState) -> LandingOption | None:
+    orbital = current_orbital(world, state)
+    if orbital is None:
+        return None
+    return destination_at_path(orbital, state.destination_path)
+
+
 def command_words_for_state(world: StoryWorld, state: GameState) -> list[str]:
-    words = ["look", "help", "menu", "q", "quit", "exit"]
-    words.extend(str(index) for index in range(1, 10))
-
-    if state.continue_message or sequence_active(state):
-        return ["continue", *words]
-
-    if state.view == "main_menu":
-        return ["continue", "new game", "save", "restore", "load", "quit", "exit", *words]
-
-    words.extend(["inventory", "inv", "i"])
-    if state.view in {"map", "jump", "inventory", "use_scope", "use_room_target", "use_inventory_target"} or state.destination_path:
-        words.extend(["back", "go back", "g"])
-    if state.view == "jump":
-        words.extend(["jump", "map", "m"])
-    elif state.view == "map":
-        words.extend(["map"])
-    elif state.view == "inventory":
-        words.extend(["examine", "equip", "use", "x", "e", "u"])
-    elif state.view == "use_scope":
-        words.extend(["inventory target", "room target"])
-    elif state.view in {"use_room_target", "use_inventory_target"}:
-        words.extend(["use"])
-    elif state.destination_path:
-        words.extend(["board", "b", "take off", "takeoff", "t", "refuel", "f"])
-    elif state.orbital_id is None:
-        words.extend(["leave", "leave system", "map", "l", "m"])
-    else:
-        words.extend(["land", "take off", "takeoff", "travel", "l", "t"])
-
+    words = [
+        "look",
+        "continue",
+        "inventory",
+        "save",
+        "restore",
+        "load",
+        "restart",
+        "quit",
+        "exit",
+        "go",
+        "back",
+        "go back",
+        "examine",
+        "look at",
+        "take",
+        "talk",
+        "talk to",
+        "use",
+        "use on",
+        "equip",
+        "board",
+        "disembark",
+        "leave ship",
+        "take off",
+        "jump",
+        "land",
+        "refuel",
+    ]
+    targets = adventure_named_targets(world, state)
+    words.extend(target.name for target in targets)
+    for target in targets:
+        words.extend(target.aliases)
+    words.extend(adventure_command_phrases(world, state))
     if state.editor_enabled:
         for command in editor_commands_for_state(state):
             key, _sep, label = command.partition(":")
@@ -3231,6 +3391,588 @@ def command_words_for_state(world: StoryWorld, state: GameState) -> list[str]:
         words.extend(["add", "delete", "edit", "reload"])
 
     return words
+
+
+def adventure_command_phrases(world: StoryWorld, state: GameState) -> list[str]:
+    phrases: list[str] = []
+    for target in navigation_targets(world, state):
+        phrases.append(f"go {target.name}")
+    for target in examine_targets(world, state):
+        phrases.append(f"examine {target.name}")
+        phrases.append(f"look at {target.name}")
+    for target in take_targets(world, state):
+        phrases.append(f"take {target.name}")
+    for target in talk_targets(world, state):
+        phrases.append(f"talk to {target.name}")
+    for target in board_targets(world, state):
+        phrases.append(f"board {target.name}")
+    for target in jump_targets(world, state):
+        phrases.append(f"jump {target.name}")
+    for source in inventory_object_targets(state):
+        for target in use_targets_for_prompt(world, state, source.value):
+            phrases.append(f"use {source.name} on {target.name}")
+    return phrases
+
+
+def handle_cli_command(
+    input_surface: Any,
+    world: StoryWorld,
+    data_path: Path,
+    editor_enabled: bool,
+    state: GameState,
+    command: str,
+) -> tuple[StoryWorld, GameState, bool]:
+    normalized = normalize_command(command)
+    if normalized in {"quit", "exit"}:
+        return world, state, True
+    if normalized_matches_verb(normalized, "save"):
+        save_cli_game(input_surface, data_path, state, command)
+        return world, state, False
+    if normalized_matches_verb(normalized, "restore") or normalized_matches_verb(normalized, "load"):
+        state = restore_cli_game(input_surface, world, data_path, editor_enabled, state, command)
+        return world, state, False
+    if normalized == "restart":
+        last_save_path = state.last_save_path
+        state = initial_game_state(world, editor_enabled)
+        state.last_save_path = last_save_path
+        state.view = "system"
+        state.message = "Restarted."
+        return world, state, False
+    if state.continue_message:
+        state.continue_message = ""
+        apply_outcomes(state, state.continue_on_complete)
+        state.continue_on_complete = ()
+        return world, state, False
+    if sequence_active(state):
+        advance_sequence(state)
+        return world, state, False
+    if not normalized or normalized in {"look", "l", "continue"}:
+        state.message = ""
+        return world, state, False
+    if normalized in {"inventory", "inv", "i"}:
+        items = inventory_items(state)
+        state.message = "Inventory: " + format_name_list([item.name for item in items]) + "." if items else "Inventory: empty."
+        return world, state, False
+    if editor_enabled and normalized == "reload":
+        try:
+            world = reload_world_preserving_state(world, data_path, state)
+            state.message = f"Reloaded: {data_path}"
+        except (OSError, ValueError, KeyError) as error:
+            state.message = f"Reload failed: {error}"
+        return world, state, False
+
+    handled = handle_adventure_command(world, state, normalized)
+    if not handled:
+        state.message = f"Unknown command: {command.strip()}"
+    return world, state, False
+
+
+def save_cli_game(input_surface: Any, data_path: Path, state: GameState, command: str) -> None:
+    requested = command_remainder(command, "save")
+    if not requested:
+        requested = state.last_save_path or str(default_save_path(data_path))
+    try:
+        save_path = resolve_save_path(requested, data_path)
+        write_save_game(save_path, state)
+        state.last_save_path = str(save_path)
+        state.message = f"Saved: {save_path}"
+    except (OSError, ValueError) as error:
+        state.message = f"Save failed: {error}"
+
+
+def restore_cli_game(
+    input_surface: Any,
+    world: StoryWorld,
+    data_path: Path,
+    editor_enabled: bool,
+    state: GameState,
+    command: str,
+) -> GameState:
+    requested = command_remainder(command, "restore") or command_remainder(command, "load")
+    if not requested:
+        requested = state.last_save_path or str(default_save_path(data_path))
+    try:
+        save_path = resolve_save_path(requested, data_path)
+        restored = restore_game_state(world, read_save_game(save_path), editor_enabled)
+        restored.last_save_path = str(save_path)
+        restored.view = "system"
+        restored.message = f"Restored: {save_path}"
+        return restored
+    except (OSError, ValueError, KeyError, json.JSONDecodeError) as error:
+        state.message = f"Restore failed: {error}"
+        return state
+
+
+def command_remainder(command: str, verb: str) -> str:
+    match = re.match(rf"^\s*{re.escape(verb)}(?:\s+(.+))?\s*$", command, re.IGNORECASE)
+    if not match:
+        return ""
+    return (match.group(1) or "").strip()
+
+
+def normalized_matches_verb(normalized: str, verb: str) -> bool:
+    return normalized == verb or normalized.startswith(verb + " ")
+
+
+def handle_adventure_command(world: StoryWorld, state: GameState, normalized: str) -> bool:
+    if normalized in {"back", "go back", "out"}:
+        go_back(world, state)
+        return True
+    if normalized in {"take off", "takeoff"}:
+        take_off_from_destination(state)
+        return True
+    if normalized in {"disembark", "leave ship", "exit ship"}:
+        state.boarded_ship_id = None
+        clear_notice(state)
+        return True
+    if normalized == "refuel":
+        destination = current_destination(world, state)
+        if destination is not None:
+            refuel_boarded_ship(state, destination)
+        else:
+            state.message = "There is nothing to refuel here."
+        return True
+    if normalized == "land":
+        land_from_orbit(world, state, "")
+        return True
+    for verb in ("go to", "go", "enter"):
+        remainder = normalized_removeprefix(normalized, verb)
+        if remainder is not None:
+            go_to_target(world, state, remainder)
+            return True
+    for verb in ("jump to", "jump"):
+        remainder = normalized_removeprefix(normalized, verb)
+        if remainder is not None:
+            jump_to_target(world, state, remainder)
+            return True
+    for verb in ("land at", "land on"):
+        remainder = normalized_removeprefix(normalized, verb)
+        if remainder is not None:
+            land_from_orbit(world, state, remainder)
+            return True
+    for verb in ("look at", "examine", "x"):
+        remainder = normalized_removeprefix(normalized, verb)
+        if remainder is not None:
+            examine_target(world, state, remainder)
+            return True
+    for verb in ("take", "get"):
+        remainder = normalized_removeprefix(normalized, verb)
+        if remainder is not None:
+            take_target(world, state, remainder)
+            return True
+    for verb in ("talk to", "talk"):
+        remainder = normalized_removeprefix(normalized, verb)
+        if remainder is not None:
+            talk_to_target(world, state, remainder)
+            return True
+    for verb in ("board",):
+        remainder = normalized_removeprefix(normalized, verb)
+        if remainder is not None:
+            board_target(world, state, remainder)
+            return True
+    for verb in ("equip", "wear"):
+        remainder = normalized_removeprefix(normalized, verb)
+        if remainder is not None:
+            equip_target(state, remainder)
+            return True
+    remainder = normalized_removeprefix(normalized, "use")
+    if remainder is not None:
+        use_command(world, state, remainder)
+        return True
+    return False
+
+
+def normalized_removeprefix(value: str, prefix: str) -> str | None:
+    if value == prefix:
+        return ""
+    prefix_with_space = prefix + " "
+    if value.startswith(prefix_with_space):
+        return value[len(prefix_with_space) :].strip()
+    return None
+
+
+def go_back(world: StoryWorld, state: GameState) -> None:
+    if state.boarded_ship_id is not None:
+        state.boarded_ship_id = None
+        clear_notice(state)
+        return
+    if state.destination_path and state.destination_path != state.docked_path:
+        state.destination_path.pop()
+        clear_notice(state)
+        return
+    if state.orbital_id is not None:
+        state.orbital_id = None
+        state.docked_path.clear()
+        state.destination_path.clear()
+        clear_notice(state)
+
+
+def go_to_target(world: StoryWorld, state: GameState, target_name: str) -> None:
+    if not target_name:
+        state.message = "Go where?"
+        return
+    target, error = find_named_target(target_name, navigation_targets(world, state))
+    if error:
+        state.message = error
+        return
+    if target is None:
+        state.message = f"You cannot go to {target_name}."
+        return
+    if target.kind == "orbital":
+        orbital = target.value
+        state.orbital_id = orbital.id
+        state.docked_path.clear()
+        state.destination_path.clear()
+        clear_notice(state)
+        return
+    if target.kind == "landing":
+        index, destination = target.value
+        state.docked_path = [index]
+        state.destination_path = [index]
+        state.current_location_id = destination.id
+        orbital = current_orbital(world, state)
+        if orbital is not None:
+            land_boarded_ship(state, orbital, [index])
+        clear_notice(state)
+        return
+    if target.kind == "destination":
+        index, destination = target.value
+        result = attempt_enter_destination_action(state, destination)
+        if result is not None and result.status == "failed":
+            state.message = f"Action failed: {result.error}"
+        elif result is not None and result.status == "blocked":
+            start_action_messages(state, result)
+        else:
+            state.destination_path.append(index)
+            state.current_location_id = destination.id
+            clear_notice(state)
+
+
+def land_from_orbit(world: StoryWorld, state: GameState, target_name: str) -> None:
+    orbital = current_orbital(world, state)
+    if orbital is None:
+        state.message = "There is nowhere to land from here."
+        return
+    if target_name:
+        target, error = find_named_target(target_name, landing_targets(state, orbital))
+        if error:
+            state.message = error
+            return
+        if target is None:
+            state.message = f"You cannot land at {target_name}."
+            return
+        landing_path = [target.value[0]]
+    else:
+        landing_path = landing_path_for_orbital(state, orbital)
+    if not landing_path:
+        state.message = "There is nowhere to land."
+        return
+    state.docked_path = list(landing_path)
+    state.destination_path = list(landing_path)
+    destination = destination_at_path(orbital, landing_path)
+    if destination is not None:
+        state.current_location_id = destination.id
+    land_boarded_ship(state, orbital, list(landing_path))
+    clear_notice(state)
+
+
+def jump_to_target(world: StoryWorld, state: GameState, target_name: str) -> None:
+    if not target_name:
+        state.message = "Jump where?"
+        return
+    target, error = find_named_target(target_name, jump_targets(world, state))
+    if error:
+        state.message = error
+        return
+    if target is None:
+        state.message = f"You cannot jump to {target_name}."
+        return
+    result = jump_boarded_ship_to_system(state, target.value)
+    if result is not None and result.status == "failed":
+        state.message = f"Action failed: {result.error}"
+    elif result is not None and result.status == "blocked":
+        start_action_messages(state, result)
+
+
+def examine_target(world: StoryWorld, state: GameState, target_name: str) -> None:
+    if not target_name:
+        state.message = ""
+        return
+    target, error = find_named_target(target_name, examine_targets(world, state))
+    if error:
+        state.message = error
+        return
+    if target is None:
+        state.message = f"You do not see {target_name}."
+        return
+    if target.kind == "destination":
+        start_continue_message(state, target.value.description)
+        return
+    if target.kind == "inventory":
+        handle_interaction_choice(state, InteractionChoice("object", target.value, "Examine"), 0)
+        return
+    if target.kind in {"object", "npc", "ship"}:
+        interaction_kind = {"object": "object", "npc": "npc", "ship": "ship"}[target.kind]
+        handle_interaction_choice(state, InteractionChoice(interaction_kind, target.value, "Examine"), 0)
+
+
+def take_target(world: StoryWorld, state: GameState, target_name: str) -> None:
+    target, error = find_named_target(target_name, take_targets(world, state))
+    if error:
+        state.message = error
+        return
+    if target is None:
+        state.message = f"You cannot take {target_name}."
+        return
+    handle_interaction_choice(state, InteractionChoice("object", target.value, "Take"), 0)
+
+
+def talk_to_target(world: StoryWorld, state: GameState, target_name: str) -> None:
+    target, error = find_named_target(target_name, talk_targets(world, state))
+    if error:
+        state.message = error
+        return
+    if target is None:
+        state.message = f"You cannot talk to {target_name}."
+        return
+    handle_interaction_choice(state, InteractionChoice("npc", target.value, "Talk"), 0)
+
+
+def board_target(world: StoryWorld, state: GameState, target_name: str) -> None:
+    targets = board_targets(world, state)
+    if not target_name and len(targets) == 1:
+        board_specific_ship(state, targets[0].value)
+        return
+    target, error = find_named_target(target_name, targets)
+    if error:
+        state.message = error
+        return
+    if target is None:
+        state.message = f"You cannot board {target_name}."
+        return
+    board_specific_ship(state, target.value)
+
+
+def board_specific_ship(state: GameState, ship: Ship) -> None:
+    ship_entity_id = entity_id_for_local_id(state, ship.id)
+    if ship_entity_id:
+        result = attempt_rules_action(state, "Board", {"actor": "player", "ship": ship_entity_id})
+        if result is not None and result.status == "failed":
+            state.message = f"Action failed: {result.error}"
+            return
+        if result is not None and result.status == "blocked":
+            start_action_messages(state, result)
+            return
+    state.boarded_ship_id = ship.id
+    state.facts.add(f"ship:{ship.id}:visited")
+    state.facts.add(f"ship:{ship.id}:identified")
+    clear_notice(state)
+
+
+def equip_target(state: GameState, target_name: str) -> None:
+    target, error = find_named_target(target_name, inventory_object_targets(state))
+    if error:
+        state.message = error
+        return
+    if target is None:
+        state.message = f"You do not have {target_name}."
+        return
+    item = target.value
+    if not item.equipment_slot:
+        state.message = "You cannot equip that."
+        return
+    entity_id = entity_id_for_local_id(state, item.id)
+    if entity_id:
+        result = attempt_rules_action(state, "Equip", {"actor": "player", "item": entity_id})
+        if result is not None and result.status == "failed":
+            state.message = f"Action failed: {result.error}"
+            return
+    state.equipment[item.equipment_slot] = item.id
+    clear_notice(state)
+
+
+def use_command(world: StoryWorld, state: GameState, remainder: str) -> None:
+    if not remainder:
+        state.message = "Use what?"
+        return
+    source_text, separator, target_text = remainder.partition(" on ")
+    source, error = find_named_target(source_text, inventory_object_targets(state))
+    if error:
+        state.message = error
+        return
+    if source is None:
+        source, error = find_named_target(source_text, usable_visible_object_targets(world, state))
+        if error:
+            state.message = error
+            return
+    if source is None:
+        state.message = f"You cannot use {source_text}."
+        return
+    if not separator:
+        handle_interaction_choice(state, InteractionChoice("object", source.value, "Use"), 0)
+        return
+    target, error = find_named_target(target_text, use_targets_for_prompt(world, state, source.value))
+    if error:
+        state.message = error
+        return
+    if target is None:
+        state.message = f"You cannot use {source.name} on {target_text}."
+        return
+    state.use_source_item_id = source.value.id
+    state.use_return_view = "system"
+    use_item_on_target(state, target.value)
+
+
+def adventure_named_targets(world: StoryWorld, state: GameState) -> list[NamedTarget]:
+    return [
+        *navigation_targets(world, state),
+        *jump_targets(world, state),
+        *examine_targets(world, state),
+        *take_targets(world, state),
+        *talk_targets(world, state),
+        *board_targets(world, state),
+        *inventory_object_targets(state),
+    ]
+
+
+def navigation_targets(world: StoryWorld, state: GameState) -> list[NamedTarget]:
+    system = world.system_by_id(state.system_id)
+    destination = current_destination(world, state)
+    if destination is not None:
+        return [
+            named_target("destination", child.name, (index, child), child.id, child.kind)
+            for index, child in visible_destination_entries(state, destination)
+        ]
+    orbital = current_orbital(world, state)
+    if orbital is not None:
+        return landing_targets(state, orbital)
+    return [named_target("orbital", orbital.name, orbital, orbital.id, orbital.type) for orbital in system.orbitals]
+
+
+def landing_targets(state: GameState, orbital: Orbital) -> list[NamedTarget]:
+    return [
+        named_target("landing", destination.name, (index, destination), destination.id, destination.kind)
+        for index, destination in enumerate(orbital.landing_options)
+        if destination_visible(state, destination)
+    ]
+
+
+def jump_targets(world: StoryWorld, state: GameState) -> list[NamedTarget]:
+    system = world.system_by_id(state.system_id)
+    return [named_target("system", hop.name, hop, hop.id) for hop in sorted_hops(world, system)]
+
+
+def examine_targets(world: StoryWorld, state: GameState) -> list[NamedTarget]:
+    targets: list[NamedTarget] = []
+    destination = current_destination(world, state)
+    if destination is not None and not boarded_ship_at_destination(state, destination):
+        targets.extend(named_target("object", story_object.name, story_object, story_object.id) for story_object in visible_objects_for_destination(state, destination))
+        targets.extend(named_target("npc", npc.name, npc, npc.id) for npc in visible_npcs_for_destination(state, destination))
+        targets.extend(named_target("ship", ship_display_name(state, ship), ship, ship.id, ship.name) for ship in visible_ships_for_destination(state, destination))
+        targets.extend(named_target("destination", child.name, child, child.id, child.kind) for _index, child in visible_destination_entries(state, destination))
+    else:
+        ship = boarded_ship(state)
+        targets.extend(named_target("object", story_object.name, story_object, story_object.id) for story_object in visible_objects_for_ship(state, ship))
+    targets.extend(inventory_object_targets(state))
+    return targets
+
+
+def take_targets(world: StoryWorld, state: GameState) -> list[NamedTarget]:
+    destination = current_destination(world, state)
+    if destination is not None and boarded_ship_at_destination(state, destination):
+        objects = visible_objects_for_ship(state, boarded_ship(state))
+    elif destination is not None:
+        objects = visible_objects_for_destination(state, destination)
+    else:
+        objects = []
+    return [
+        named_target("object", story_object.name, story_object, story_object.id)
+        for story_object in objects
+        if "Take" in story_object.interactions
+    ]
+
+
+def talk_targets(world: StoryWorld, state: GameState) -> list[NamedTarget]:
+    destination = current_destination(world, state)
+    if destination is None or boarded_ship_at_destination(state, destination):
+        return []
+    return [named_target("npc", npc.name, npc, npc.id) for npc in visible_npcs_for_destination(state, destination) if "Talk" in npc.interactions]
+
+
+def board_targets(world: StoryWorld, state: GameState) -> list[NamedTarget]:
+    destination = current_destination(world, state)
+    if destination is None:
+        return []
+    return [named_target("ship", ship_display_name(state, ship), ship, ship.id, ship.name) for ship in boardable_ships_for_destination(state, destination)]
+
+
+def inventory_object_targets(state: GameState) -> list[NamedTarget]:
+    return [named_target("inventory", item.name, item, item.id) for item in inventory_items(state)]
+
+
+def usable_visible_object_targets(world: StoryWorld, state: GameState) -> list[NamedTarget]:
+    destination = current_destination(world, state)
+    if destination is not None and boarded_ship_at_destination(state, destination):
+        objects = visible_objects_for_ship(state, boarded_ship(state))
+    elif destination is not None:
+        objects = visible_objects_for_destination(state, destination)
+    else:
+        objects = []
+    return [
+        named_target("object", story_object.name, story_object, story_object.id)
+        for story_object in objects
+        if "Use" in story_object.interactions
+    ]
+
+
+def use_targets_for_prompt(world: StoryWorld, state: GameState, source: Any) -> list[NamedTarget]:
+    targets = [target for target in inventory_object_targets(state) if target.value.id != source.id]
+    destination = current_destination(world, state)
+    if destination is not None and boarded_ship_at_destination(state, destination):
+        targets.extend(named_target("object", item.name, item, item.id) for item in visible_objects_for_ship(state, boarded_ship(state)) if item.id != source.id)
+    elif destination is not None:
+        targets.extend(named_target("object", item.name, item, item.id) for item in visible_objects_for_destination(state, destination) if item.id != source.id)
+    return targets
+
+
+def named_target(kind: str, name: str, value: Any, *extra_aliases: str) -> NamedTarget:
+    aliases = normalized_aliases(name, *extra_aliases)
+    return NamedTarget(kind, name, value, tuple(sorted(aliases)))
+
+
+def normalized_aliases(name: str, *extra_aliases: str) -> set[str]:
+    aliases = {normalize_command(name)}
+    for alias in extra_aliases:
+        if not alias:
+            continue
+        aliases.add(normalize_command(alias))
+        aliases.add(normalize_command(alias.replace("-", " ")))
+        aliases.add(normalize_command(alias.replace(":", " ")))
+        aliases.add(normalize_command(alias.replace(":", " ").replace("-", " ")))
+        aliases.add(normalize_command(alias.split(":")[-1].replace("-", " ")))
+    return {alias for alias in aliases if alias}
+
+
+def find_named_target(target_name: str, targets: list[NamedTarget]) -> tuple[NamedTarget | None, str | None]:
+    normalized = normalize_command(target_name)
+    if not normalized:
+        return None, None
+    exact = [target for target in targets if normalized in target.aliases]
+    if len(exact) == 1:
+        return exact[0], None
+    if len(exact) > 1:
+        return None, ambiguous_target_message(exact)
+    prefix = [target for target in targets if any(alias.startswith(normalized) for alias in target.aliases)]
+    if len(prefix) == 1:
+        return prefix[0], None
+    if len(prefix) > 1:
+        return None, ambiguous_target_message(prefix)
+    return None, None
+
+
+def ambiguous_target_message(targets: list[NamedTarget]) -> str:
+    names = sorted({target.name for target in targets})
+    return "Ambiguous: " + format_name_list(names) + "."
 
 
 def command_to_key(command: str, state: GameState) -> int | None:

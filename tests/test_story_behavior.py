@@ -408,6 +408,74 @@ class StoryCliTests(unittest.TestCase):
         self.assertIn("Blemish: Mining Colony 5", lines[0])
         self.assertTrue(any("Pointless Bar" in line for line in lines))
 
+    def test_adventure_screen_prints_visible_names_without_menu_numbers(self) -> None:
+        lines = dq.adventure_screen_lines(self.world, self.state)
+        commands = dq.command_words_for_state(self.world, self.state)
+
+        self.assertIn("Blemish: Mining Colony 5", lines[0])
+        self.assertTrue(any("Exits:" in line and "Pointless Bar" in line for line in lines))
+        self.assertFalse(any(line.startswith("1.") for line in lines))
+        self.assertIn("go Pointless Bar", commands)
+        self.assertIn("save", commands)
+        self.assertIn("restore", commands)
+        self.assertIn("restart", commands)
+        self.assertIn("quit", commands)
+
+    def test_cli_text_commands_drive_story_and_builtin_save_restore(self) -> None:
+        self.world, self.state, should_quit = dq.handle_cli_command(
+            None,
+            self.world,
+            STELLAR,
+            False,
+            self.state,
+            "go Pointless Bar",
+        )
+        self.assertFalse(should_quit)
+        self.assertEqual(dq.current_destination(self.world, self.state).id, "pointless-bar")
+
+        self.world, self.state, should_quit = dq.handle_cli_command(
+            None,
+            self.world,
+            STELLAR,
+            False,
+            self.state,
+            "take Portrait of Enrick",
+        )
+        self.assertFalse(should_quit)
+        self.assertIn("portrait-of-enrick", self.state.inventory)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_path = Path(tmpdir) / "game.save.json"
+            self.world, self.state, should_quit = dq.handle_cli_command(
+                None,
+                self.world,
+                STELLAR,
+                False,
+                self.state,
+                f"save {save_path}",
+            )
+            self.assertFalse(should_quit)
+            self.assertTrue(save_path.exists())
+
+            self.state.inventory.clear()
+            self.world, self.state, should_quit = dq.handle_cli_command(
+                None,
+                self.world,
+                STELLAR,
+                False,
+                self.state,
+                f"restore {save_path}",
+            )
+            self.assertFalse(should_quit)
+            self.assertIn("portrait-of-enrick", self.state.inventory)
+
+        self.world, self.state, should_quit = dq.handle_cli_command(None, self.world, STELLAR, False, self.state, "restart")
+        self.assertFalse(should_quit)
+        self.assertNotIn("portrait-of-enrick", self.state.inventory)
+
+        self.world, self.state, should_quit = dq.handle_cli_command(None, self.world, STELLAR, False, self.state, "quit")
+        self.assertTrue(should_quit)
+
 
 if __name__ == "__main__":
     unittest.main()
