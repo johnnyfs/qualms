@@ -62,6 +62,64 @@ definitions:
                   - { var: subject }
                   - { var: destination }
 
+    - id: Scope
+      relations:
+        - id: Aboard
+          persistence: current
+          params:
+            - id: actor
+              type: ref<Actor>
+            - id: location
+              type: ref<Location>
+
+        - id: CanTouch
+          params:
+            - id: actor
+              type: ref<Actor>
+            - id: target
+              type: ref<Relocatable>
+          get:
+            any:
+              - all:
+                  - has_trait:
+                      entity: { var: actor }
+                      trait: Relocatable
+                  - eq:
+                      - field:
+                          entity: { var: target }
+                          trait: Relocatable
+                          field: location
+                      - field:
+                          entity: { var: actor }
+                          trait: Relocatable
+                          field: location
+              - relation:
+                  id: CarriedBy
+                  args:
+                    - { var: actor }
+                    - { var: target }
+              - relation:
+                  id: Aboard
+                  args:
+                    - { var: actor }
+                    - field:
+                        entity: { var: target }
+                        trait: Relocatable
+                        field: location
+
+        - id: CanSee
+          params:
+            - id: actor
+              type: ref<Actor>
+            - id: target
+              type: ref<Relocatable>
+          get:
+            relation:
+              id: CanTouch
+              args:
+                - { var: actor }
+                - { var: target }
+
     - id: Container
       relations:
         - id: Contains
@@ -91,7 +149,12 @@ definitions:
               type: ref<Actor>
             - id: item
               type: ref<Portable>
-          requires: true
+          requires:
+            relation:
+              id: CanTouch
+              args:
+                - { var: actor }
+                - { var: item }
           default:
             - assert:
                 relation: CarriedBy
@@ -126,7 +189,12 @@ definitions:
             - id: target
               type: ref?
               default: null
-          requires: true
+          requires:
+            relation:
+              id: CarriedBy
+              args:
+                - { var: actor }
+                - { var: source }
           default:
             - emit:
                 text: "Nothing happens."
@@ -292,7 +360,16 @@ definitions:
           default: null
         - id: target
           type: ref<Presentable>
-      requires: true
+      requires:
+        any:
+          - eq:
+              - { var: actor }
+              - null
+          - relation:
+              id: CanSee
+              args:
+                - { var: actor }
+                - { var: target }
       default:
         - emit:
             text:

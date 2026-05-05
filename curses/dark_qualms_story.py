@@ -188,6 +188,7 @@ class GameState:
     orbital_id: str | None = None
     docked_path: list[int] = field(default_factory=list)
     destination_path: list[int] = field(default_factory=list)
+    current_location_id: str | None = None
     interaction_index: int | None = None
     player_ship_id: str | None = None
     boarded_ship_id: str | None = None
@@ -2353,6 +2354,7 @@ def game_state_to_save_data(state: GameState) -> dict[str, Any]:
             "orbital_id": state.orbital_id,
             "docked_path": list(state.docked_path),
             "destination_path": list(state.destination_path),
+            "current_location_id": state.current_location_id,
             "player_ship_id": state.player_ship_id,
             "boarded_ship_id": state.boarded_ship_id,
             "inventory_index": state.inventory_index,
@@ -2401,6 +2403,7 @@ def restore_game_state(world: StoryWorld, data: dict[str, Any], editor_enabled: 
         orbital_by_id(world.system_by_id(state.system_id), state.orbital_id)
     state.docked_path = saved_int_list(raw_state.get("docked_path", []), "docked_path")
     state.destination_path = saved_int_list(raw_state.get("destination_path", []), "destination_path")
+    state.current_location_id = optional_saved_string(raw_state.get("current_location_id")) or state.current_location_id
     state.player_ship_id = known_saved_id(raw_state.get("player_ship_id"), state.ships)
     state.boarded_ship_id = known_saved_id(raw_state.get("boarded_ship_id"), state.ships)
     state.inventory_index = int(raw_state.get("inventory_index", 0) or 0)
@@ -2757,6 +2760,7 @@ def current_screen_lines(world: StoryWorld, state: GameState) -> list[str]:
     orbital = orbital_by_id(system, state.orbital_id)
     selected_destination = destination_at_path(orbital, state.destination_path)
     if selected_destination is not None:
+        state.current_location_id = selected_destination.id
         enter_destination(state, selected_destination)
     if sequence_active(state):
         return sequence_lines(state)
@@ -3136,6 +3140,7 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
             orbital = orbital_by_id(system, state.orbital_id)
             selected_destination = destination_at_path(orbital, state.destination_path)
             if selected_destination is not None:
+                state.current_location_id = selected_destination.id
                 enter_destination(state, selected_destination)
             if sequence_active(state):
                 draw_sequence(stdscr, state)
@@ -3489,6 +3494,7 @@ def initial_game_state(world: StoryWorld, editor_enabled: bool) -> GameState:
     destination_path = destination_path_by_ids(orbital, world.start_destination_ids)
     state.docked_path = list(destination_path)
     state.destination_path = list(destination_path)
+    state.current_location_id = world.start_destination_ids[-1] if world.start_destination_ids else None
     return state
 
 
@@ -3506,6 +3512,9 @@ def sync_rules_state_from_local(state: GameState) -> None:
     if state.rules_definition is None:
         return
     rules_state = state.rules_definition.instantiate()
+    player_location_id = entity_id_for_local_id(state, state.current_location_id)
+    if player_location_id:
+        try_assert(rules_state, "At", ["player", player_location_id])
     for fact in state.facts:
         rules_state.memory.set(fact)
         parts = fact.split(":")
@@ -3561,6 +3570,7 @@ def sync_rules_state_from_local(state: GameState) -> None:
     if state.boarded_ship_id:
         ship_entity_id = entity_id_for_local_id(state, state.boarded_ship_id)
         if ship_entity_id:
+            try_assert(rules_state, "Aboard", ["player", ship_entity_id])
             rules_state.memory.set("Aboard", ["player", ship_entity_id])
             rules_state.memory.set(f"ship:{state.boarded_ship_id}:boarded")
     state.rules_state = rules_state

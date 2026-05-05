@@ -188,6 +188,7 @@ class StoryBehaviorTests(unittest.TestCase):
 
     def test_take_moves_object_to_inventory(self) -> None:
         bar = destination_by_ids(self.world, "mining-colony-5", "pointless-bar")
+        self.state.current_location_id = bar.id
         choices = dq.object_choices_for_destination(self.state, bar)
         take = next(choice for choice in choices if choice.target.id == "portrait-of-enrick" and choice.interaction == "Take")
 
@@ -199,6 +200,7 @@ class StoryBehaviorTests(unittest.TestCase):
 
     def test_before_rule_blocks_matching_interaction(self) -> None:
         bar = destination_by_ids(self.world, "mining-colony-5", "pointless-bar")
+        self.state.current_location_id = bar.id
         talk = next(choice for choice in dq.npc_choices_for_destination(self.state, bar) if choice.target.id == "stu" and choice.interaction == "Talk")
 
         dq.handle_interaction_choice(self.state, talk, choice_index=0)
@@ -207,6 +209,7 @@ class StoryBehaviorTests(unittest.TestCase):
 
     def test_npc_examine_preserves_examine_description(self) -> None:
         bar = destination_by_ids(self.world, "mining-colony-5", "pointless-bar")
+        self.state.current_location_id = bar.id
         examine = next(choice for choice in dq.npc_choices_for_destination(self.state, bar) if choice.target.id == "stu" and choice.interaction == "Examine")
 
         dq.handle_interaction_choice(self.state, examine, choice_index=0)
@@ -268,6 +271,7 @@ class StoryBehaviorTests(unittest.TestCase):
             "active-mine",
             "impact-crater",
         )
+        self.state.current_location_id = impact_crater.id
 
         self.assertEqual(self.state.ship_locations["canary"], "impact-crater")
         dq.board_ship_at_destination(self.state, impact_crater)
@@ -293,6 +297,7 @@ class StoryBehaviorTests(unittest.TestCase):
             "command-tower",
             "command-center",
         )
+        self.state.current_location_id = command_center.id
         power_up = next(
             choice
             for choice in dq.object_choices_for_destination(self.state, command_center)
@@ -308,6 +313,7 @@ class StoryBehaviorTests(unittest.TestCase):
             for choice in dq.object_choices_for_destination(self.state, platform)
             if choice.target.id == "fueling-station" and choice.interaction == "Examine"
         )
+        self.state.current_location_id = platform.id
         dq.handle_interaction_choice(self.state, examine_station, choice_index=0)
         self.assertEqual(
             self.state.continue_message,
@@ -349,6 +355,7 @@ class StoryBehaviorTests(unittest.TestCase):
         self.assertEqual(self.state.ship_fuel["canary"], 0)
 
         self.state.system_id = "empty-system"
+        self.state.ship_locations["canary"] = "system:empty-system"
         blocked = dq.jump_boarded_ship_to_system(self.state, abegna)
 
         self.assertEqual(blocked.status, "blocked")

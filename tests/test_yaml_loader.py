@@ -48,8 +48,14 @@ class YamlLoaderTests(unittest.TestCase):
                   kind: Player
                 - id: a
                   kind: System
+                  fields:
+                    StarSystem:
+                      hops: [b]
                 - id: b
                   kind: System
+                  fields:
+                    StarSystem:
+                      hops: [a]
                 - id: ship
                   kind: Ship
                 - id: station
@@ -61,6 +67,18 @@ class YamlLoaderTests(unittest.TestCase):
                   args:
                     - {{ ref: ship }}
                     - {{ ref: a }}
+                - relation: At
+                  args:
+                    - {{ ref: player }}
+                    - {{ ref: a }}
+                - relation: At
+                  args:
+                    - {{ ref: station }}
+                    - {{ ref: a }}
+                - relation: ControlledBy
+                  args:
+                    - {{ ref: ship }}
+                    - {{ ref: player }}
             """
         )
         definition = load_game_definition(path)

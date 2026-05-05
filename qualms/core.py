@@ -542,6 +542,10 @@ def evaluate_predicate(spec: PredicateSpec, state: WorldState, bindings: Binding
         if compare_op == ">=":
             return left >= right
         raise ValueError(f"unknown comparison op {compare_op}")
+    if op == "contains":
+        collection = evaluate_expression(operand["collection"], state, bindings)
+        item = evaluate_expression(operand["item"], state, bindings)
+        return item in collection
     raise ValueError(f"unknown predicate op {op}")
 
 

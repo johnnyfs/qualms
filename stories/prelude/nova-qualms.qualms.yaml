@@ -102,7 +102,12 @@ definitions:
               type: ref<Actor>
             - id: target
               type: ref<Social>
-          requires: true
+          requires:
+            relation:
+              id: CanSee
+              args:
+                - { var: actor }
+                - { var: target }
           default:
             - emit:
                 text: "They have nothing to say."
@@ -157,6 +162,43 @@ definitions:
               - { var: ship }
               - { var: actor }
 
+    - id: CanJump
+      params:
+        - id: actor
+          type: ref<Actor>
+        - id: ship
+          type: ref<Vehicle>
+        - id: destination_system
+          type: ref<Location>
+      get:
+        all:
+          - has_trait:
+              entity: { var: ship }
+              trait: Jumpable
+          - relation:
+              id: ControlledBy
+              args:
+                - { var: ship }
+                - { var: actor }
+          - has_trait:
+              entity:
+                field:
+                  entity: { var: ship }
+                  trait: Relocatable
+                  field: location
+              trait: StarSystem
+          - contains:
+              collection:
+                field:
+                  entity:
+                    field:
+                      entity: { var: ship }
+                      trait: Relocatable
+                      field: location
+                  trait: StarSystem
+                  field: hops
+              item: { var: destination_system }
+
   actions:
     - id: Board
       params:
@@ -164,10 +206,15 @@ definitions:
           type: ref<Actor>
         - id: ship
           type: ref<Boardable>
-      requires: true
+      requires:
+        relation:
+          id: CanTouch
+          args:
+            - { var: actor }
+            - { var: ship }
       default:
-        - set_fact:
-            id: Aboard
+        - assert:
+            relation: Aboard
             args:
               - { var: actor }
               - { var: ship }
@@ -180,8 +227,8 @@ definitions:
           type: ref<Boardable>
       requires: true
       default:
-        - clear_fact:
-            id: Aboard
+        - retract:
+            relation: Aboard
             args:
               - { var: actor }
               - { var: ship }
@@ -194,7 +241,18 @@ definitions:
           type: ref<Vehicle>
         - id: orbital
           type: ref<Location>
-      requires: true
+      requires:
+        all:
+          - relation:
+              id: ControlledBy
+              args:
+                - { var: ship }
+                - { var: actor }
+          - relation:
+              id: Aboard
+              args:
+                - { var: actor }
+                - { var: ship }
       default:
         - assert:
             relation: InOrbit
@@ -210,7 +268,12 @@ definitions:
           type: ref<Vehicle>
         - id: destination
           type: ref<Location>
-      requires: true
+      requires:
+        relation:
+          id: ControlledBy
+          args:
+            - { var: ship }
+            - { var: actor }
       default:
         - assert:
             relation: DockedAt
@@ -226,7 +289,13 @@ definitions:
           type: ref<Vehicle>
         - id: destination_system
           type: ref<Location>
-      requires: true
+      requires:
+        relation:
+          id: CanJump
+          args:
+            - { var: actor }
+            - { var: ship }
+            - { var: destination_system }
       default:
         - assert:
             relation: At
@@ -251,7 +320,12 @@ definitions:
           type: ref<Actor>
         - id: target
           type: ref
-      requires: true
+      requires:
+        relation:
+          id: CanTouch
+          args:
+            - { var: actor }
+            - { var: target }
       default:
         - emit:
             text: "Nothing happens."
@@ -264,7 +338,12 @@ definitions:
           type: ref<Vehicle>
         - id: station
           type: ref<FuelStation>
-      requires: true
+      requires:
+        relation:
+          id: CanTouch
+          args:
+            - { var: actor }
+            - { var: station }
       default:
         - set_field:
             entity: { var: ship }
@@ -381,6 +460,7 @@ definitions:
         - id: Relocatable
         - id: Vehicle
         - id: Boardable
+        - id: Jumpable
         - id: Ownable
         - id: Identifiable
 

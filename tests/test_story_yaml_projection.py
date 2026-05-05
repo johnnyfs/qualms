@@ -96,6 +96,7 @@ class StoryYamlProjectionTests(unittest.TestCase):
         state = definition.instantiate()
         engine = RulesEngine(definition)
         id_map = definition.metadata["local_id_map"]
+        state.assert_relation("CarriedBy", ["player", id_map["portrait-of-enrick"]])
 
         result = engine.attempt(
             state,
@@ -122,6 +123,7 @@ class StoryYamlProjectionTests(unittest.TestCase):
         state = definition.instantiate()
         engine = RulesEngine(definition)
         id_map = definition.metadata["local_id_map"]
+        state.assert_relation("At", ["player", id_map["command-center"]])
 
         result = engine.attempt(
             state,

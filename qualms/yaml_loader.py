@@ -444,7 +444,7 @@ def validate_predicate_refs(predicate: Any, definition: GameDefinition, context:
         trait_id = operand.get("trait")
         if trait_id not in definition.traits:
             raise SchemaError(f"{context} references unknown trait {trait_id}")
-    elif op in {"eq", "compare"}:
+    elif op in {"eq", "compare", "contains"}:
         return
     else:
         raise SchemaError(f"{context} uses unknown predicate op {op}")
