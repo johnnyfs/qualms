@@ -772,6 +772,18 @@ def outcomes_from_effects(effects: tuple[dict[str, Any], ...], id_to_local: dict
     controlled_ship_ids: set[str] = set()
     for effect in effects:
         assertion = effect.get("assert") if isinstance(effect, dict) else None
+        if isinstance(assertion, dict) and assertion.get("relation") == "SequenceComplete":
+            args = assertion.get("args", [])
+            sequence_id = expression_literal(args[0]) if args else None
+            if sequence_id is not None:
+                outcomes.append(f"sequence:{sequence_id}:complete")
+                continue
+        if isinstance(assertion, dict) and assertion.get("relation") == "Visited":
+            args = assertion.get("args", [])
+            location_id = expression_ref(args[1]) if len(args) > 1 else None
+            if location_id:
+                outcomes.append(f"visited:destination:{id_to_local_id(location_id, id_to_local)}")
+                continue
         if isinstance(assertion, dict) and assertion.get("relation") == "ControlledBy":
             args = assertion.get("args", [])
             ship_id = expression_ref(args[0]) if args else None
@@ -848,6 +860,22 @@ def fact_string_from_predicate(predicate: Any, id_to_local: dict[str, str], defi
             ship_entity_id = expression_ref(args[0])
             if ship_entity_id:
                 return f"ship:{id_to_local_id(ship_entity_id, id_to_local)}:owned"
+        if relation_id == "Visited" and len(args) == 2:
+            location_id = expression_ref(args[1])
+            if location_id:
+                return f"visited:destination:{id_to_local_id(location_id, id_to_local)}"
+        if relation_id == "SequenceComplete" and len(args) == 1:
+            sequence_id = expression_literal(args[0])
+            if sequence_id is not None:
+                return f"sequence:{sequence_id}:complete"
+    return None
+
+
+def expression_literal(expression: Any) -> Any:
+    if isinstance(expression, dict) and set(expression) == {"literal"}:
+        return expression["literal"]
+    if isinstance(expression, (str, int, float, bool)) or expression is None:
+        return expression
     return None
 
 

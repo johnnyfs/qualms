@@ -216,7 +216,6 @@ class StoryYamlConverter:
             entity = self.entity_by_id[entity_id]
             rules = entity.setdefault("rules", [])
             if kind == "destination":
-                rules.append(visited_rule(source.id))
                 rules.extend(before_rules(entity_id, "Enter", source.before, self.local_id_map))
                 rules.extend(sequence_rules(entity_id, source.sequences, self.local_id_map))
             elif kind == "object":
@@ -351,6 +350,11 @@ def fact_conditions(when: tuple[str, ...], unless: tuple[str, ...], id_map: dict
 
 def fact_predicate(fact: str, id_map: dict[str, str]) -> dict[str, Any]:
     parts = fact.split(":")
+    if len(parts) == 3 and parts[0] == "visited" and parts[1] == "destination":
+        location_id = id_map.get(parts[2], safe_id(parts[2]))
+        return {"relation": {"id": "Visited", "args": [{"ref": "player"}, {"ref": location_id}]}}
+    if len(parts) == 3 and parts[0] == "sequence" and parts[2] == "complete":
+        return {"relation": {"id": "SequenceComplete", "args": [{"literal": parts[1]}]}}
     if len(parts) == 4 and parts[0] == "ship" and parts[2] == "at":
         ship_id = id_map.get(parts[1], safe_id(parts[1]))
         location_id = id_map.get(parts[3], safe_id(parts[3]))
@@ -368,6 +372,9 @@ def outcome_effects(outcomes: tuple[str, ...], id_map: dict[str, str]) -> list[d
     effects: list[dict[str, Any]] = []
     for outcome in outcomes:
         parts = outcome.split(":")
+        if len(parts) == 3 and parts[0] == "sequence" and parts[2] == "complete":
+            effects.append({"assert": {"relation": "SequenceComplete", "args": [{"literal": parts[1]}]}})
+            continue
         if len(parts) == 3 and parts[0] == "ship" and parts[2] == "control":
             ship_id = id_map.get(parts[1], safe_id(parts[1]))
             effects.append({"assert": {"relation": "ControlledBy", "args": [{"ref": ship_id}, {"ref": "player"}]}})

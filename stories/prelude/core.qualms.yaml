@@ -254,6 +254,20 @@ definitions:
           type: ref
       get: true
 
+    - id: Visited
+      persistence: remembered
+      params:
+        - id: actor
+          type: ref<Actor>
+        - id: location
+          type: ref<Location>
+
+    - id: SequenceComplete
+      persistence: remembered
+      params:
+        - id: sequence
+          type: id
+
   actions:
     - id: Name
       params:
@@ -300,6 +314,23 @@ definitions:
             args:
               - { var: actor }
               - { var: destination }
+
+  rulebooks:
+    - id: core-memory
+      rules:
+        - id: remember-visited-location
+          phase: after
+          match:
+            action: Enter
+            args:
+              actor: { bind: actor }
+              destination: { bind: destination }
+          effects:
+            - assert:
+                relation: Visited
+                args:
+                  - { var: actor }
+                  - { var: destination }
 
   kinds:
     - id: Thing

@@ -142,7 +142,7 @@ class YamlLoaderTests(unittest.TestCase):
               - "{CORE_PRELUDE}"
             definitions:
               relations:
-                - id: Visited
+                - id: RememberedThing
                   persistence: remembered
                   params:
                     - id: actor
@@ -156,7 +156,7 @@ class YamlLoaderTests(unittest.TestCase):
                 - id: room
                   kind: Place
               assertions:
-                - relation: Visited
+                - relation: RememberedThing
                   args:
                     - {{ ref: player }}
                     - {{ ref: room }}
@@ -166,8 +166,32 @@ class YamlLoaderTests(unittest.TestCase):
         definition = load_game_definition(path)
         state = definition.instantiate()
 
+        self.assertTrue(state.test("RememberedThing", ["player", "room"]))
+        self.assertIn(("RememberedThing", ("player", "room")), state.remembered_relations)
+
+    def test_core_prelude_remembers_entered_locations(self) -> None:
+        path = write_yaml(
+            f"""
+            qualms: "0.1"
+            id: visited-story
+            imports:
+              - "{CORE_PRELUDE}"
+            story:
+              entities:
+                - id: player
+                  kind: Person
+                - id: room
+                  kind: Place
+            """
+        )
+        definition = load_game_definition(path)
+        state = definition.instantiate()
+        engine = RulesEngine(definition)
+
+        result = engine.attempt(state, ActionAttempt("Enter", {"actor": "player", "destination": "room"}))
+
+        self.assertEqual(result.status, "succeeded")
         self.assertTrue(state.test("Visited", ["player", "room"]))
-        self.assertIn(("Visited", ("player", "room")), state.remembered_relations)
 
     def test_unknown_trait_fails_validation(self) -> None:
         path = write_yaml(

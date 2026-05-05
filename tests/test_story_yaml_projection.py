@@ -169,6 +169,60 @@ class StoryYamlProjectionTests(unittest.TestCase):
         self.assertTrue(data["story"]["entities"])
         self.assertTrue(data["story"]["assertions"])
 
+    def test_story_writer_uses_remembered_relations_for_sequences(self) -> None:
+        data = story_world_to_yaml_data(self.world)
+        mining_colony = next(
+            entity
+            for entity in data["story"]["entities"]
+            if entity["metadata"].get("local_id") == "mining-colony-5"
+        )
+        rule_ids = [rule["id"] for rule in mining_colony["rules"]]
+        sequence_rule = next(rule for rule in mining_colony["rules"] if rule["id"] == "sequence:blemish-crash")
+
+        self.assertNotIn("visited:mining-colony-5", rule_ids)
+        self.assertEqual(
+            sequence_rule["when"],
+            {
+                "all": [
+                    {
+                        "relation": {
+                            "id": "Visited",
+                            "args": [
+                                {"ref": "player"},
+                                {"ref": "empty-system:rainbow:mining-colony-5:pointless-bar"},
+                            ],
+                        }
+                    },
+                    {
+                        "relation": {
+                            "id": "Visited",
+                            "args": [
+                                {"ref": "player"},
+                                {"ref": "empty-system:rainbow:mining-colony-5:pointless-settlement"},
+                            ],
+                        }
+                    },
+                    {
+                        "not": {
+                            "relation": {
+                                "id": "SequenceComplete",
+                                "args": [{"literal": "blemish-crash"}],
+                            }
+                        }
+                    },
+                ]
+            },
+        )
+        self.assertEqual(
+            sequence_rule["effects"][-1],
+            {
+                "assert": {
+                    "relation": "SequenceComplete",
+                    "args": [{"literal": "blemish-crash"}],
+                }
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

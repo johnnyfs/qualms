@@ -92,17 +92,7 @@ story:
       port: false
       visible_when: []
       visible_unless: []
-    rules:
-    - id: visited:abandoned-mining-platform
-      phase: after
-      match:
-        action: Enter
-        args:
-          destination:
-            var: this
-      effects:
-      - set_fact:
-          id: visited:destination:abandoned-mining-platform
+    rules: []
   - id: empty-system:bolorus:abandoned-mining-platform:object:fueling-station
     kind: StoryObject
     traits:
@@ -120,7 +110,7 @@ story:
       visible_when: []
       visible_unless: []
     rules:
-    - id: before:Examine:empty
+    - id: before:Examine:0
       phase: before
       match:
         action: Examine
@@ -134,7 +124,7 @@ story:
       - emit:
           text: The old fueling station is powered up, but empty.
       control: stop
-    - id: before:Examine:active
+    - id: before:Examine:1
       phase: before
       match:
         action: Examine
@@ -161,17 +151,7 @@ story:
       port: false
       visible_when: []
       visible_unless: []
-    rules:
-    - id: visited:command-tower
-      phase: after
-      match:
-        action: Enter
-        args:
-          destination:
-            var: this
-      effects:
-      - set_fact:
-          id: visited:destination:command-tower
+    rules: []
   - id: empty-system:bolorus:abandoned-mining-platform:command-tower:command-center
     kind: Destination
     fields:
@@ -185,17 +165,7 @@ story:
       port: false
       visible_when: []
       visible_unless: []
-    rules:
-    - id: visited:command-center
-      phase: after
-      match:
-        action: Enter
-        args:
-          destination:
-            var: this
-      effects:
-      - set_fact:
-          id: visited:destination:command-center
+    rules: []
   - id: empty-system:bolorus:abandoned-mining-platform:command-tower:command-center:object:fuel-station-controls
     kind: StoryObject
     fields:
@@ -211,7 +181,7 @@ story:
       visible_when: []
       visible_unless: []
     rules:
-    - id: power-up-fueling-station
+    - id: before:Power-up:0
       phase: before
       match:
         action: PowerUp
@@ -243,17 +213,7 @@ story:
       port: false
       visible_when: []
       visible_unless: []
-    rules:
-    - id: visited:rig-managers-office
-      phase: after
-      match:
-        action: Enter
-        args:
-          destination:
-            var: this
-      effects:
-      - set_fact:
-          id: visited:destination:rig-managers-office
+    rules: []
   - id: empty-system:bolorus:abandoned-mining-platform:rig-managers-office:object:art-on-the-wall
     kind: StoryObject
     traits:
@@ -318,16 +278,6 @@ story:
       visible_when: []
       visible_unless: []
     rules:
-    - id: visited:mining-colony-5
-      phase: after
-      match:
-        action: Enter
-        args:
-          destination:
-            var: this
-      effects:
-      - set_fact:
-          id: visited:destination:mining-colony-5
     - id: sequence:blemish-crash
       phase: after
       match:
@@ -337,19 +287,29 @@ story:
             ref: empty-system:rainbow:mining-colony-5
       when:
         all:
-        - fact:
-            id: visited:destination:pointless-bar
-        - fact:
-            id: visited:destination:pointless-settlement
+        - relation:
+            id: Visited
+            args:
+            - ref: player
+            - ref: empty-system:rainbow:mining-colony-5:pointless-bar
+        - relation:
+            id: Visited
+            args:
+            - ref: player
+            - ref: empty-system:rainbow:mining-colony-5:pointless-settlement
         - not:
-            fact:
-              id: sequence:blemish-crash:complete
+            relation:
+              id: SequenceComplete
+              args:
+              - literal: blemish-crash
       effects:
       - emit:
           text: A flash of light streaks overhead. You hear an explosion from the
             direction of the mines, the dome shakes, and the lights dim for a moment.
-      - set_fact:
-          id: sequence:blemish-crash:complete
+      - assert:
+          relation: SequenceComplete
+          args:
+          - literal: blemish-crash
   - id: empty-system:rainbow:mining-colony-5:pointless-bar
     kind: Destination
     fields:
@@ -362,17 +322,7 @@ story:
       port: false
       visible_when: []
       visible_unless: []
-    rules:
-    - id: visited:pointless-bar
-      phase: after
-      match:
-        action: Enter
-        args:
-          destination:
-            var: this
-      effects:
-      - set_fact:
-          id: visited:destination:pointless-bar
+    rules: []
   - id: empty-system:rainbow:mining-colony-5:pointless-bar:object:portrait-of-enrick
     kind: StoryObject
     traits:
@@ -469,17 +419,7 @@ story:
       port: false
       visible_when: []
       visible_unless: []
-    rules:
-    - id: visited:pointless-settlement
-      phase: after
-      match:
-        action: Enter
-        args:
-          destination:
-            var: this
-      effects:
-      - set_fact:
-          id: visited:destination:pointless-settlement
+    rules: []
   - id: empty-system:rainbow:mining-colony-5:pointless-settlement:your-place
     kind: Destination
     fields:
@@ -493,17 +433,7 @@ story:
       port: false
       visible_when: []
       visible_unless: []
-    rules:
-    - id: visited:your-place
-      phase: after
-      match:
-        action: Enter
-        args:
-          destination:
-            var: this
-      effects:
-      - set_fact:
-          id: visited:destination:your-place
+    rules: []
   - id: empty-system:rainbow:mining-colony-5:pointless-settlement:your-place:object:your-journal
     kind: StoryObject
     fields:
@@ -530,17 +460,7 @@ story:
       port: false
       visible_when: []
       visible_unless: []
-    rules:
-    - id: visited:airlock
-      phase: after
-      match:
-        action: Enter
-        args:
-          destination:
-            var: this
-      effects:
-      - set_fact:
-          id: visited:destination:airlock
+    rules: []
   - id: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:object:spare-expedition-suit
     kind: StoryObject
     traits:
@@ -571,8 +491,10 @@ story:
             ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:object:spare-expedition-suit
       when:
         not:
-          fact:
-            id: sequence:blemish-crash:complete
+          relation:
+            id: SequenceComplete
+            args:
+            - literal: blemish-crash
       effects:
       - emit:
           text: The last thing you want is for your fellow crewmen to see you galavanting
@@ -591,16 +513,6 @@ story:
       visible_when: []
       visible_unless: []
     rules:
-    - id: visited:lunar-surface
-      phase: after
-      match:
-        action: Enter
-        args:
-          destination:
-            var: this
-      effects:
-      - set_fact:
-          id: visited:destination:lunar-surface
     - id: before:Enter:0
       phase: before
       match:
@@ -629,17 +541,7 @@ story:
       port: false
       visible_when: []
       visible_unless: []
-    rules:
-    - id: visited:abandoned-quarry
-      phase: after
-      match:
-        action: Enter
-        args:
-          destination:
-            var: this
-      effects:
-      - set_fact:
-          id: visited:destination:abandoned-quarry
+    rules: []
   - id: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine
     kind: Destination
     fields:
@@ -653,16 +555,6 @@ story:
       visible_when: []
       visible_unless: []
     rules:
-    - id: visited:active-mine
-      phase: after
-      match:
-        action: Enter
-        args:
-          destination:
-            var: this
-      effects:
-      - set_fact:
-          id: visited:destination:active-mine
     - id: sequence:active-mine-impact-site
       phase: after
       match:
@@ -672,8 +564,10 @@ story:
             ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine
       when:
         not:
-          fact:
-            id: sequence:active-mine-impact-site:complete
+          relation:
+            id: SequenceComplete
+            args:
+            - literal: active-mine-impact-site
       effects:
       - emit:
           text: What used to be the mine entrance is now a crater half the size of
@@ -685,8 +579,10 @@ story:
           text: You've read about such things -- ships overshoot their ftl coordinates
             and their warp fields flatten and irradiate everything in the vicinity,
             including the passengers, while leaving the ship itself intact.
-      - set_fact:
-          id: sequence:active-mine-impact-site:complete
+      - assert:
+          relation: SequenceComplete
+          args:
+          - literal: active-mine-impact-site
   - id: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine:impact-crater
     kind: Destination
     fields:
@@ -700,17 +596,7 @@ story:
       visible_when:
       - ship:canary:at:impact-crater
       visible_unless: []
-    rules:
-    - id: visited:impact-crater
-      phase: after
-      match:
-        action: Enter
-        args:
-          destination:
-            var: this
-      effects:
-      - set_fact:
-          id: visited:destination:impact-crater
+    rules: []
   - id: canary
     kind: Ship
     fields:
@@ -810,17 +696,7 @@ story:
       visible_when:
       - ship:canary:at:impact-crater
       visible_unless: []
-    rules:
-    - id: visited:collapsed-entrance
-      phase: after
-      match:
-        action: Enter
-        args:
-          destination:
-            var: this
-      effects:
-      - set_fact:
-          id: visited:destination:collapsed-entrance
+    rules: []
   - id: abegna
     kind: System
     fields:
