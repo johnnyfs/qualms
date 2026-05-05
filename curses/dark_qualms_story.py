@@ -5,6 +5,7 @@ import argparse
 import curses
 import json
 import re
+import shutil
 import sys
 import textwrap
 from curses import ascii
@@ -1946,14 +1947,170 @@ def game_window(stdscr: curses.window, state: GameState, width: int, lines: Iter
         state.editor_box_top = None
 
 
+class CliPrompter:
+    def __init__(self) -> None:
+        self._session: Any | None = None
+        self._word_completer: Any | None = None
+        self._path_completer: Any | None = None
+        self._prompt_toolkit_available = False
+        if not sys.stdin.isatty() or not sys.stdout.isatty():
+            return
+        try:
+            from prompt_toolkit import PromptSession
+            from prompt_toolkit.completion import PathCompleter, WordCompleter
+            from prompt_toolkit.history import InMemoryHistory
+        except ModuleNotFoundError:
+            return
+
+        self._prompt_toolkit_available = True
+        self._session = PromptSession(history=InMemoryHistory())
+        self._word_completer = WordCompleter
+        self._path_completer = PathCompleter
+
+    def read_command(self, completions: Iterable[str]) -> str | None:
+        completion_words = sorted({word for word in completions if word})
+        if not self._prompt_toolkit_available:
+            try:
+                return input("> ")
+            except EOFError:
+                return None
+            except KeyboardInterrupt:
+                print()
+                return ""
+
+        completer = self._word_completer(completion_words, ignore_case=True) if completion_words else None
+        try:
+            return self._session.prompt("> ", completer=completer)
+        except EOFError:
+            return None
+        except KeyboardInterrupt:
+            print()
+            return ""
+
+    def prompt_text(
+        self,
+        title: str,
+        prompt: str,
+        context_lines: Iterable[str] = (),
+        max_length: int = 64,
+        default: str | None = None,
+    ) -> str | None:
+        self.print_prompt_context(title, context_lines)
+        prompt_line = prompt_label(prompt, default)
+        if not self._prompt_toolkit_available:
+            try:
+                value = input(f"{prompt_line} ")
+            except EOFError:
+                return None
+            except KeyboardInterrupt:
+                print()
+                return None
+            return value[:max_length].strip() or default
+
+        completer = self._path_completer(expanduser=True) if "filename" in prompt.lower() else None
+        try:
+            value = self._session.prompt(
+                f"{prompt_line} ",
+                default=default or "",
+                completer=completer,
+            )
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+        return value[:max_length].strip() or default
+
+    def prompt_multiline_text(
+        self,
+        title: str,
+        prompt: str,
+        context_lines: Iterable[str] = (),
+        default: str | None = None,
+    ) -> str | None:
+        help_line = "Alt-Enter saves. Ctrl-C cancels."
+        self.print_prompt_context(title, [*context_lines, help_line])
+        prompt_line = prompt_label(prompt, default)
+        if not self._prompt_toolkit_available:
+            print(prompt_line)
+            print("End with a single '.' line. Leave blank to keep the default.")
+            lines: list[str] = []
+            while True:
+                try:
+                    line = input("| ")
+                except EOFError:
+                    break
+                except KeyboardInterrupt:
+                    print()
+                    return None
+                if line == ".":
+                    break
+                lines.append(line)
+            value = "\n".join(lines).strip()
+            return value or default
+
+        try:
+            value = self._session.prompt(
+                f"{prompt_line} ",
+                default=default or "",
+                multiline=True,
+                prompt_continuation="... ",
+            )
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+        return value.strip() or default
+
+    def prompt_menu(self, title: str, options: list[str]) -> int | None:
+        words = [str(index) for index in range(1, len(options) + 1)]
+        words.extend(option.lower() for option in options)
+        words.extend(["g", "go back", "back"])
+        while True:
+            context = [f"{index}. {option}" for index, option in enumerate(options, start=1)]
+            self.print_prompt_context(title, [*context, "", "G: go back"])
+            value = self.read_command(words)
+            if value is None:
+                return None
+            normalized = normalize_command(value)
+            if normalized in {"g", "go back", "back"}:
+                return None
+            if normalized.isdigit():
+                index = int(normalized) - 1
+                if 0 <= index < len(options):
+                    return index
+            for index, option in enumerate(options):
+                if normalized == option.lower():
+                    return index
+            print("Choose a listed number, or G to go back.")
+
+    def print_prompt_context(self, title: str, context_lines: Iterable[str]) -> None:
+        lines = list(context_lines)
+        print()
+        print(title)
+        print()
+        for line in lines:
+            print(line)
+        if lines:
+            print()
+
+
+def normalize_command(value: str) -> str:
+    return re.sub(r"\s+", " ", value.strip().lower())
+
+
+def is_cli_prompter(value: Any) -> bool:
+    return isinstance(value, CliPrompter)
+
+
 def prompt_text(
-    stdscr: curses.window,
+    stdscr: Any,
     title: str,
     prompt: str,
     context_lines: Iterable[str] = (),
     max_length: int = 64,
     default: str | None = None,
 ) -> str | None:
+    if is_cli_prompter(stdscr):
+        return stdscr.prompt_text(title, prompt, context_lines, max_length, default)
+
     curses.echo()
     try:
         curses.curs_set(1)
@@ -1985,12 +2142,15 @@ def prompt_text(
 
 
 def prompt_multiline_text(
-    stdscr: curses.window,
+    stdscr: Any,
     title: str,
     prompt: str,
     context_lines: Iterable[str] = (),
     default: str | None = None,
 ) -> str | None:
+    if is_cli_prompter(stdscr):
+        return stdscr.prompt_multiline_text(title, prompt, context_lines, default)
+
     text = ""
     save_help = "Type freely. Enter keeps the default when blank. Ctrl-D saves. Ctrl-C cancels."
     if default is None:
@@ -2104,7 +2264,7 @@ def text_cursor_position(top: int, left: int, rendered_lines: list[str], value: 
 
 
 def prompt_name_description(
-    stdscr: curses.window,
+    stdscr: Any,
     title: str,
     current_name: str | None = None,
     current_description: str | None = None,
@@ -2120,7 +2280,10 @@ def prompt_name_description(
     return name, description
 
 
-def prompt_menu(stdscr: curses.window, title: str, options: list[str]) -> int | None:
+def prompt_menu(stdscr: Any, title: str, options: list[str]) -> int | None:
+    if is_cli_prompter(stdscr):
+        return stdscr.prompt_menu(title, options)
+
     while True:
         lines = [title, ""]
         for index, option in enumerate(options, start=1):
@@ -2303,7 +2466,7 @@ def saved_string_mapping(value: Any, field: str) -> dict[str, str]:
     return dict(value)
 
 
-def draw_main_menu(stdscr: curses.window, state: GameState) -> None:
+def main_menu_lines(state: GameState) -> list[str]:
     lines = [
         "Dark Qualms",
         "",
@@ -2315,10 +2478,10 @@ def draw_main_menu(stdscr: curses.window, state: GameState) -> None:
     ]
     if state.message:
         lines.extend(["", state.message])
-    centered_window(stdscr, 72, lines)
+    return lines
 
 
-def draw_system(stdscr: curses.window, world: StoryWorld, state: GameState, system: System) -> None:
+def system_lines(world: StoryWorld, state: GameState, system: System) -> list[str]:
     lines = [
         "Dark Qualms",
         "",
@@ -2334,10 +2497,10 @@ def draw_system(stdscr: curses.window, world: StoryWorld, state: GameState, syst
         marker = "*" if orbital.id == last_orbital_id else " "
         lines.append(f"{index}. {marker} {orbital.name} [{orbital_type_label(system, orbital)}]")
     lines.extend(["", "Number: travel", "I: inventory", "L: leave system    M: map    Q: menu"])
-    game_window(stdscr, state, 72, lines)
+    return lines
 
 
-def draw_jump_list(stdscr: curses.window, world: StoryWorld, state: GameState, system: System) -> None:
+def jump_list_lines(world: StoryWorld, state: GameState, system: System) -> list[str]:
     lines = [
         "Leave System",
         "",
@@ -2353,11 +2516,11 @@ def draw_jump_list(stdscr: curses.window, world: StoryWorld, state: GameState, s
         distance = system_distance_au(system, hop)
         lines.append(f"{index}. {hop.name} [{format_signed_au(dx)}, {format_signed_au(dy)}] {distance:.0f} AU")
     lines.extend(["", "Number: jump", "G: go back    I: inventory    M: map    Q: menu"])
-    game_window(stdscr, state, 80, lines)
+    return lines
 
 
-def draw_map(stdscr: curses.window, world: StoryWorld, state: GameState, system: System) -> None:
-    lines = [
+def map_lines(world: StoryWorld, system: System) -> list[str]:
+    return [
         "Local Map",
         "",
         *build_map_lines(world, system),
@@ -2367,10 +2530,9 @@ def draw_map(stdscr: curses.window, world: StoryWorld, state: GameState, system:
         "I: inventory",
         "Q: menu",
     ]
-    centered_window(stdscr, 76, lines)
 
 
-def draw_orbit(stdscr: curses.window, state: GameState, orbital: Orbital) -> None:
+def orbit_lines(state: GameState, orbital: Orbital) -> list[str]:
     lines = [
         destination_status(orbital),
         "",
@@ -2386,10 +2548,10 @@ def draw_orbit(stdscr: curses.window, state: GameState, orbital: Orbital) -> Non
         "T: travel in-system",
         "Q: menu",
     ])
-    game_window(stdscr, state, 72, lines)
+    return lines
 
 
-def draw_option(stdscr: curses.window, state: GameState, orbital: Orbital, option: LandingOption) -> None:
+def option_lines(state: GameState, orbital: Orbital, option: LandingOption) -> list[str]:
     lines = [
         f"{orbital.name}: {option.name}",
         "",
@@ -2444,10 +2606,10 @@ def draw_option(stdscr: curses.window, state: GameState, orbital: Orbital, optio
         "I: inventory",
         "Q: menu",
     ])
-    game_window(stdscr, state, 72, lines)
+    return lines
 
 
-def draw_boarded_ship(stdscr: curses.window, state: GameState, destination: LandingOption | None = None) -> None:
+def boarded_ship_lines(state: GameState, destination: LandingOption | None = None) -> list[str]:
     ship = boarded_ship(state)
     name = ship.name if ship is not None else "Ship"
     lines = [
@@ -2471,7 +2633,138 @@ def draw_boarded_ship(stdscr: curses.window, state: GameState, destination: Land
     if ship is not None and destination is not None and can_refuel_boarded_ship(state, destination, ship):
         lines.append("F: refuel")
     lines.extend(["G: go back", "I: inventory", "Q: menu"])
-    game_window(stdscr, state, 72, lines)
+    return lines
+
+
+def sequence_lines(state: GameState) -> list[str]:
+    message = state.sequence_messages[state.sequence_index] if sequence_active(state) else ""
+    return [message, "", "Press Enter to continue"]
+
+
+def continue_message_lines(state: GameState) -> list[str]:
+    return [state.continue_message, "", "Press Enter to continue"]
+
+
+def inventory_lines(state: GameState) -> list[str]:
+    items = inventory_items(state)
+    if state.inventory_index >= len(items):
+        state.inventory_index = max(0, len(items) - 1)
+
+    lines = ["Inventory", ""]
+    if not items:
+        lines.append("Nothing.")
+    else:
+        equipped_ids = set(state.equipment.values())
+        for index, item in enumerate(items, start=1):
+            marker = ">" if index - 1 == state.inventory_index else " "
+            equipped = "*" if item.id in equipped_ids else " "
+            item_type = f" [{item.equipment_slot.lower()}]" if item.equipment_slot else ""
+            lines.append(f"{index}. {marker}{equipped} {item.name}{item_type}")
+
+    if state.message:
+        lines.extend(["", state.message])
+
+    lines.append("")
+    if items:
+        lines.extend(["Number: select", "X: examine"])
+        selected = items[state.inventory_index]
+        if selected.equipment_slot:
+            lines.append("E: equip")
+        if "Use" in selected.interactions:
+            lines.append("U: use")
+    lines.extend(["G: go back", "Q: menu"])
+    return lines
+
+
+def use_scope_lines(state: GameState) -> list[str]:
+    source = selected_use_source(state)
+    title = f"Use: {source.name}" if source is not None else "Use"
+    return [
+        title,
+        "",
+        "1. on an object in your inventory",
+        "2. on something in the room",
+        "",
+        "G: go back",
+        "Q: menu",
+    ]
+
+
+def use_targets_lines(world: StoryWorld, state: GameState) -> list[str]:
+    source = selected_use_source(state)
+    title = f"Use: {source.name}" if source is not None else "Use"
+    targets = use_targets(world, state)
+    lines = [title, ""]
+    if targets:
+        for index, target in enumerate(targets, start=1):
+            lines.append(f"{index}. {target.name}")
+    else:
+        lines.append("Nothing.")
+    lines.extend(["", "G: go back", "Q: menu"])
+    return lines
+
+
+def current_screen_lines(world: StoryWorld, state: GameState) -> list[str]:
+    system = world.system_by_id(state.system_id)
+
+    if state.continue_message:
+        return continue_message_lines(state)
+    if sequence_active(state):
+        return sequence_lines(state)
+    if state.view == "main_menu":
+        return main_menu_lines(state)
+    if state.view == "use_scope":
+        return use_scope_lines(state)
+    if state.view in {"use_room_target", "use_inventory_target"}:
+        return use_targets_lines(world, state)
+    if state.view == "inventory":
+        return inventory_lines(state)
+    if state.view == "jump":
+        return jump_list_lines(world, state, system)
+    if state.view == "map":
+        return map_lines(world, system)
+    if state.orbital_id is None:
+        return system_lines(world, state, system)
+
+    orbital = orbital_by_id(system, state.orbital_id)
+    selected_destination = destination_at_path(orbital, state.destination_path)
+    if selected_destination is not None:
+        enter_destination(state, selected_destination)
+    if sequence_active(state):
+        return sequence_lines(state)
+    if selected_destination is not None and boarded_ship_at_destination(state, selected_destination):
+        return boarded_ship_lines(state, selected_destination)
+    if selected_destination is not None:
+        return option_lines(state, orbital, selected_destination)
+    return orbit_lines(state, orbital)
+
+
+def draw_main_menu(stdscr: curses.window, state: GameState) -> None:
+    centered_window(stdscr, 72, main_menu_lines(state))
+
+
+def draw_system(stdscr: curses.window, world: StoryWorld, state: GameState, system: System) -> None:
+    game_window(stdscr, state, 72, system_lines(world, state, system))
+
+
+def draw_jump_list(stdscr: curses.window, world: StoryWorld, state: GameState, system: System) -> None:
+    game_window(stdscr, state, 80, jump_list_lines(world, state, system))
+
+
+def draw_map(stdscr: curses.window, world: StoryWorld, state: GameState, system: System) -> None:
+    centered_window(stdscr, 76, map_lines(world, system))
+
+
+def draw_orbit(stdscr: curses.window, state: GameState, orbital: Orbital) -> None:
+    game_window(stdscr, state, 72, orbit_lines(state, orbital))
+
+
+def draw_option(stdscr: curses.window, state: GameState, orbital: Orbital, option: LandingOption) -> None:
+    game_window(stdscr, state, 72, option_lines(state, orbital, option))
+
+
+def draw_boarded_ship(stdscr: curses.window, state: GameState, destination: LandingOption | None = None) -> None:
+    game_window(stdscr, state, 72, boarded_ship_lines(state, destination))
 
 
 def editor_commands_for_state(state: GameState) -> list[str]:
@@ -2525,72 +2818,260 @@ def draw_editor_box(stdscr: curses.window, state: GameState) -> None:
 
 
 def draw_sequence(stdscr: curses.window, state: GameState) -> None:
-    message = state.sequence_messages[state.sequence_index] if sequence_active(state) else ""
-    centered_window(stdscr, 72, [message], footer="Press any key to continue")
+    centered_window(stdscr, 72, sequence_lines(state)[:1], footer="Press any key to continue")
 
 
 def draw_continue_message(stdscr: curses.window, state: GameState) -> None:
-    centered_window(stdscr, 72, [state.continue_message], footer="Press any key to continue")
+    centered_window(stdscr, 72, continue_message_lines(state)[:1], footer="Press any key to continue")
 
 
 def draw_inventory(stdscr: curses.window, state: GameState) -> None:
-    items = inventory_items(state)
-    if state.inventory_index >= len(items):
-        state.inventory_index = max(0, len(items) - 1)
-
-    lines = ["Inventory", ""]
-    if not items:
-        lines.append("Nothing.")
-    else:
-        equipped_ids = set(state.equipment.values())
-        for index, item in enumerate(items, start=1):
-            marker = ">" if index - 1 == state.inventory_index else " "
-            equipped = "*" if item.id in equipped_ids else " "
-            item_type = f" [{item.equipment_slot.lower()}]" if item.equipment_slot else ""
-            lines.append(f"{index}. {marker}{equipped} {item.name}{item_type}")
-
-    if state.message:
-        lines.extend(["", state.message])
-
-    lines.append("")
-    if items:
-        lines.extend(["Number: select", "X: examine"])
-        selected = items[state.inventory_index]
-        if selected.equipment_slot:
-            lines.append("E: equip")
-        if "Use" in selected.interactions:
-            lines.append("U: use")
-    lines.extend(["G: go back", "Q: menu"])
-    centered_window(stdscr, 72, lines)
+    centered_window(stdscr, 72, inventory_lines(state))
 
 
 def draw_use_scope(stdscr: curses.window, state: GameState) -> None:
-    source = selected_use_source(state)
-    title = f"Use: {source.name}" if source is not None else "Use"
-    lines = [
-        title,
-        "",
-        "1. on an object in your inventory",
-        "2. on something in the room",
-        "",
-        "G: go back",
-        "Q: menu",
-    ]
-    centered_window(stdscr, 72, lines)
+    centered_window(stdscr, 72, use_scope_lines(state))
 
 
 def draw_use_targets(stdscr: curses.window, world: StoryWorld, state: GameState) -> None:
-    source = selected_use_source(state)
-    title = f"Use: {source.name}" if source is not None else "Use"
-    targets = use_targets(world, state)
-    lines = [title, ""]
-    if targets:
-        for index, target in enumerate(targets, start=1):
-            lines.append(f"{index}. {target.name}")
-    else:
-        lines.append("Nothing.")
-    lines.extend(["", "G: go back", "Q: menu"])
-    centered_window(stdscr, 72, lines)
+    centered_window(stdscr, 72, use_targets_lines(world, state))
+
+
+def handle_game_key(
+    input_surface: Any,
+    world: StoryWorld,
+    data_path: Path,
+    editor_enabled: bool,
+    state: GameState,
+    key: int,
+) -> tuple[StoryWorld, GameState, bool]:
+    system = world.system_by_id(state.system_id)
+
+    if not state.editor_enabled or key not in (ord("a"), ord("A")):
+        state.message = ""
+
+    if state.editor_enabled and key in (ord("r"), ord("R")):
+        try:
+            world = reload_world_preserving_state(world, data_path, state)
+            state.message = f"Reloaded: {data_path}"
+        except (OSError, ValueError, KeyError) as error:
+            state.message = f"Reload failed: {error}"
+        return world, state, False
+
+    if state.continue_message:
+        state.continue_message = ""
+        apply_outcomes(state, state.continue_on_complete)
+        state.continue_on_complete = ()
+        return world, state, False
+
+    if sequence_active(state):
+        advance_sequence(state)
+        return world, state, False
+
+    if state.view == "main_menu":
+        if key == ord("1"):
+            state.view = state.menu_return_view or "system"
+            clear_notice(state)
+        elif key == ord("2"):
+            last_save_path = state.last_save_path
+            state = initial_game_state(world, editor_enabled)
+            state.last_save_path = last_save_path
+            state.view = "system"
+        elif key == ord("3"):
+            default_path = state.last_save_path or str(default_save_path(data_path))
+            requested = prompt_text(input_surface, "Save Game", "Filename:", default=default_path, max_length=160)
+            if requested:
+                try:
+                    save_path = resolve_save_path(requested, data_path)
+                    write_save_game(save_path, state)
+                    state.last_save_path = str(save_path)
+                    state.message = f"Saved: {save_path}"
+                except (OSError, ValueError) as error:
+                    state.message = f"Save failed: {error}"
+        elif key == ord("4"):
+            default_path = state.last_save_path or str(default_save_path(data_path))
+            requested = prompt_text(input_surface, "Restore Game", "Filename:", default=default_path, max_length=160)
+            if requested:
+                try:
+                    save_path = resolve_save_path(requested, data_path)
+                    restored = restore_game_state(world, read_save_game(save_path), editor_enabled)
+                    restored.last_save_path = str(save_path)
+                    restored.message = f"Restored: {save_path}"
+                    state = restored
+                except (OSError, ValueError, KeyError, json.JSONDecodeError) as error:
+                    state.message = f"Restore failed: {error}"
+        elif key == ord("5"):
+            return world, state, True
+        return world, state, False
+
+    if key in (ord("q"), ord("Q")):
+        state.menu_return_view = state.view
+        state.view = "main_menu"
+        clear_notice(state)
+        return world, state, False
+
+    if state.view != "inventory" and key in (ord("i"), ord("I")):
+        state.inventory_return_view = state.view
+        state.view = "inventory"
+        state.interaction_index = None
+        clear_notice(state)
+        return world, state, False
+
+    if state.view == "use_scope":
+        handle_use_scope_input(state, key)
+        return world, state, False
+
+    if state.view in {"use_room_target", "use_inventory_target"}:
+        handle_use_target_input(world, state, key)
+        return world, state, False
+
+    if state.view == "inventory":
+        handle_inventory_input(state, key)
+        return world, state, False
+
+    if state.view == "map":
+        if key in (ord("g"), ord("G")):
+            state.view = state.map_return_view
+        return world, state, False
+
+    if state.view == "jump":
+        hops = sorted_hops(world, system)
+        index = key - ord("1")
+        if 0 <= index < len(hops):
+            result = jump_boarded_ship_to_system(state, hops[index])
+            if result is not None and result.status == "failed":
+                state.message = f"Action failed: {result.error}"
+                return world, state, False
+            if result is not None and result.status == "blocked":
+                start_action_messages(state, result)
+                return world, state, False
+        elif key in (ord("g"), ord("G")):
+            state.view = "system"
+        elif key in (ord("m"), ord("M")):
+            state.map_return_view = "jump"
+            state.view = "map"
+        elif state.editor_enabled and key in (ord("a"), ord("A")):
+            added = prompt_add_system(input_surface, world, data_path, state.system_id)
+            if added is not None:
+                world, state.message = added
+        return world, state, False
+
+    if state.destination_path:
+        orbital = orbital_by_id(system, state.orbital_id)
+        selected_destination = destination_at_path(orbital, state.destination_path)
+        if selected_destination is None:
+            state.destination_path.clear()
+            state.interaction_index = None
+            clear_notice(state)
+            return world, state, False
+        if boarded_ship_at_destination(state, selected_destination):
+            ship = boarded_ship(state)
+            ship_choices = ship_object_choices(state, ship)
+            index = key - ord("1")
+            if 0 <= index < len(ship_choices):
+                handle_interaction_choice(state, ship_choices[index], index)
+            elif key in (ord("t"), ord("T")) and ship is not None and ship_controlled_by_player(state, ship):
+                take_off_from_destination(state)
+            elif key in (ord("f"), ord("F")) and ship is not None and can_refuel_boarded_ship(state, selected_destination, ship):
+                refuel_boarded_ship(state, selected_destination)
+            elif key in (ord("g"), ord("G")):
+                state.boarded_ship_id = None
+            return world, state, False
+        index = key - ord("1")
+        interaction_choices = destination_interaction_choices(state, selected_destination)
+        visible_destination_entries_list = visible_destination_entries(state, selected_destination)
+        if 0 <= index < len(interaction_choices):
+            handle_interaction_choice(state, interaction_choices[index], index)
+        elif 0 <= index - len(interaction_choices) < len(visible_destination_entries_list):
+            child_index, child_destination = visible_destination_entries_list[index - len(interaction_choices)]
+            result = attempt_enter_destination_action(state, child_destination)
+            if result is not None and result.status == "failed":
+                state.message = f"Action failed: {result.error}"
+            elif result is not None and result.status == "blocked":
+                start_action_messages(state, result)
+            else:
+                state.destination_path.append(child_index)
+        elif key in (ord("b"), ord("B")):
+            board_ship_at_destination(state, selected_destination)
+        elif key in (ord("g"), ord("G")):
+            if state.destination_path != state.docked_path:
+                state.destination_path.pop()
+        elif state.editor_enabled and key in (ord("a"), ord("A")):
+            added = prompt_add_inside_destination(input_surface, world, data_path, state.system_id, state.orbital_id, state.destination_path)
+            if added is not None:
+                world, state.message = added
+        elif state.editor_enabled and key in (ord("d"), ord("D")):
+            deleted = prompt_delete_detail(input_surface, world, data_path, state.system_id, state.orbital_id, state.destination_path, selected_destination)
+            if deleted is not None:
+                world, state.message = deleted
+        elif state.editor_enabled and key in (ord("e"), ord("E")):
+            edited = prompt_edit_landing_destination(
+                input_surface,
+                world,
+                data_path,
+                state.system_id,
+                state.orbital_id,
+                state.destination_path,
+                selected_destination,
+            )
+            if edited is not None:
+                world, state.message = edited
+        return world, state, False
+
+    if state.orbital_id is None:
+        index = key - ord("1")
+        if 0 <= index < len(system.orbitals):
+            state.orbital_id = system.orbitals[index].id
+            state.docked_path.clear()
+            state.destination_path.clear()
+            state.interaction_index = None
+            clear_notice(state)
+        elif state.editor_enabled and key in (ord("a"), ord("A")):
+            added = prompt_add_orbital(input_surface, world, data_path, state.system_id)
+            if added is not None:
+                world, state.message = added
+        elif state.editor_enabled and key in (ord("d"), ord("D")):
+            deleted = prompt_delete_orbital(input_surface, world, data_path, state.system_id)
+            if deleted is not None:
+                world, state.message = deleted
+                state.last_orbital_by_system.pop(state.system_id, None)
+        elif state.editor_enabled and key in (ord("e"), ord("E")):
+            edited = prompt_edit_system(input_surface, world, data_path, state.system_id)
+            if edited is not None:
+                world, state.message = edited
+        elif key in (ord("l"), ord("L")):
+            state.view = "jump"
+        elif key in (ord("m"), ord("M")):
+            state.map_return_view = "system"
+            state.view = "map"
+        return world, state, False
+
+    if key in (ord("l"), ord("L")):
+        orbital = orbital_by_id(system, state.orbital_id)
+        if state.editor_enabled and not orbital.landing_options:
+            added = prompt_add_landing_destination(input_surface, world, data_path, state.system_id, state.orbital_id, [])
+            if added is not None:
+                world, state.message = added
+                orbital = orbital_by_id(world.system_by_id(state.system_id), state.orbital_id)
+        landing_path = landing_path_for_orbital(state, orbital)
+        if landing_path:
+            state.docked_path = landing_path
+            state.destination_path = list(landing_path)
+            land_boarded_ship(state, orbital, landing_path)
+            state.interaction_index = None
+            clear_notice(state)
+    elif state.editor_enabled and key in (ord("e"), ord("E")):
+        edited = prompt_edit_orbital(input_surface, world, data_path, state.system_id, state.orbital_id)
+        if edited is not None:
+            world, state.message = edited
+    elif key in (ord("t"), ord("T"), 27):
+        state.orbital_id = None
+        state.docked_path.clear()
+        state.destination_path.clear()
+        state.interaction_index = None
+        clear_notice(state)
+
+    return world, state, False
 
 
 def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor_enabled: bool = False) -> None:
@@ -2641,229 +3122,142 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
             draw_editor_box(stdscr, state)
         stdscr.refresh()
         key = stdscr.getch()
-        if not state.editor_enabled or key not in (ord("a"), ord("A")):
-            state.message = ""
+        world, state, should_quit = handle_game_key(stdscr, world, data_path, editor_enabled, state, key)
+        if should_quit:
+            return
 
-        if state.editor_enabled and key in (ord("r"), ord("R")):
-            try:
-                world = reload_world_preserving_state(world, data_path, state)
-                state.message = f"Reloaded: {data_path}"
-            except (OSError, ValueError, KeyError) as error:
-                state.message = f"Reload failed: {error}"
+
+def run_cli(world: StoryWorld, data_path: Path, editor_enabled: bool = False) -> None:
+    prompter = CliPrompter()
+    state = initial_game_state(world, editor_enabled)
+
+    while True:
+        render_cli_screen(world, state)
+        command = prompter.read_command(command_words_for_state(world, state))
+        if command is None:
+            return
+        key = command_to_key(command, state)
+        if key is None:
+            print(f"Unknown command: {command.strip()}")
             continue
+        world, state, should_quit = handle_game_key(prompter, world, data_path, editor_enabled, state, key)
+        if should_quit:
+            return
 
-        if state.continue_message:
-            state.continue_message = ""
-            apply_outcomes(state, state.continue_on_complete)
-            state.continue_on_complete = ()
-            continue
 
-        if sequence_active(state):
-            advance_sequence(state)
-            continue
+def render_cli_screen(world: StoryWorld, state: GameState) -> None:
+    width = max(40, min(100, shutil.get_terminal_size(fallback=(80, 24)).columns))
+    lines = current_screen_lines(world, state)
+    if not state.continue_message and not sequence_active(state):
+        editor_lines = editor_box_lines(state)
+        if editor_lines:
+            lines.extend(["", "Editor", *editor_lines[1:]])
 
-        if state.view == "main_menu":
-            if key == ord("1"):
-                state.view = state.menu_return_view or "system"
-                clear_notice(state)
-            elif key == ord("2"):
-                last_save_path = state.last_save_path
-                state = initial_game_state(world, editor_enabled)
-                state.last_save_path = last_save_path
-                state.view = "system"
-            elif key == ord("3"):
-                default_path = state.last_save_path or str(default_save_path(data_path))
-                requested = prompt_text(stdscr, "Save Game", "Filename:", default=default_path, max_length=160)
-                if requested:
-                    try:
-                        save_path = resolve_save_path(requested, data_path)
-                        write_save_game(save_path, state)
-                        state.last_save_path = str(save_path)
-                        state.message = f"Saved: {save_path}"
-                    except (OSError, ValueError) as error:
-                        state.message = f"Save failed: {error}"
-            elif key == ord("4"):
-                default_path = state.last_save_path or str(default_save_path(data_path))
-                requested = prompt_text(stdscr, "Restore Game", "Filename:", default=default_path, max_length=160)
-                if requested:
-                    try:
-                        save_path = resolve_save_path(requested, data_path)
-                        restored = restore_game_state(world, read_save_game(save_path), editor_enabled)
-                        restored.last_save_path = str(save_path)
-                        restored.message = f"Restored: {save_path}"
-                        state = restored
-                    except (OSError, ValueError, KeyError, json.JSONDecodeError) as error:
-                        state.message = f"Restore failed: {error}"
-            elif key == ord("5"):
-                return
-            continue
+    print()
+    print("=" * min(width, 80))
+    for line in wrap_lines(lines, width):
+        print(line)
 
-        if key in (ord("q"), ord("Q")):
-            state.menu_return_view = state.view
-            state.view = "main_menu"
-            clear_notice(state)
-            continue
 
-        if state.view != "inventory" and key in (ord("i"), ord("I")):
-            state.inventory_return_view = state.view
-            state.view = "inventory"
-            state.interaction_index = None
-            clear_notice(state)
-            continue
+def command_words_for_state(world: StoryWorld, state: GameState) -> list[str]:
+    words = ["look", "help", "menu", "q", "quit", "exit"]
+    words.extend(str(index) for index in range(1, 10))
 
-        if state.view == "use_scope":
-            handle_use_scope_input(state, key)
-            continue
+    if state.continue_message or sequence_active(state):
+        return ["continue", *words]
 
-        if state.view in {"use_room_target", "use_inventory_target"}:
-            handle_use_target_input(world, state, key)
-            continue
+    if state.view == "main_menu":
+        return ["continue", "new game", "save", "restore", "load", "quit", "exit", *words]
 
-        if state.view == "inventory":
-            handle_inventory_input(state, key)
-            continue
+    words.extend(["inventory", "inv", "i"])
+    if state.view in {"map", "jump", "inventory", "use_scope", "use_room_target", "use_inventory_target"} or state.destination_path:
+        words.extend(["back", "go back", "g"])
+    if state.view == "jump":
+        words.extend(["jump", "map", "m"])
+    elif state.view == "map":
+        words.extend(["map"])
+    elif state.view == "inventory":
+        words.extend(["examine", "equip", "use", "x", "e", "u"])
+    elif state.view == "use_scope":
+        words.extend(["inventory target", "room target"])
+    elif state.view in {"use_room_target", "use_inventory_target"}:
+        words.extend(["use"])
+    elif state.destination_path:
+        words.extend(["board", "b", "take off", "takeoff", "t", "refuel", "f"])
+    elif state.orbital_id is None:
+        words.extend(["leave", "leave system", "map", "l", "m"])
+    else:
+        words.extend(["land", "take off", "takeoff", "travel", "l", "t"])
 
-        if state.view == "map":
-            if key in (ord("g"), ord("G")):
-                state.view = state.map_return_view
-            continue
+    if state.editor_enabled:
+        for command in editor_commands_for_state(state):
+            key, _sep, label = command.partition(":")
+            words.append(key.lower())
+            if label.strip():
+                words.append(label.strip().lower())
+        words.extend(["add", "delete", "edit", "reload"])
 
-        if state.view == "jump":
-            hops = sorted_hops(world, system)
-            index = key - ord("1")
-            if 0 <= index < len(hops):
-                result = jump_boarded_ship_to_system(state, hops[index])
-                if result is not None and result.status == "failed":
-                    state.message = f"Action failed: {result.error}"
-                    continue
-                if result is not None and result.status == "blocked":
-                    start_action_messages(state, result)
-                    continue
-            elif key in (ord("g"), ord("G")):
-                state.view = "system"
-            elif key in (ord("m"), ord("M")):
-                state.map_return_view = "jump"
-                state.view = "map"
-            elif state.editor_enabled and key in (ord("a"), ord("A")):
-                added = prompt_add_system(stdscr, world, data_path, state.system_id)
-                if added is not None:
-                    world, state.message = added
-            continue
+    return words
 
-        if state.destination_path:
-            orbital = orbital_by_id(system, state.orbital_id)
-            selected_destination = destination_at_path(orbital, state.destination_path)
-            if selected_destination is None:
-                state.destination_path.clear()
-                state.interaction_index = None
-                clear_notice(state)
-                continue
-            if boarded_ship_at_destination(state, selected_destination):
-                ship = boarded_ship(state)
-                ship_choices = ship_object_choices(state, ship)
-                index = key - ord("1")
-                if 0 <= index < len(ship_choices):
-                    handle_interaction_choice(state, ship_choices[index], index)
-                elif key in (ord("t"), ord("T")) and ship is not None and ship_controlled_by_player(state, ship):
-                    take_off_from_destination(state)
-                elif key in (ord("f"), ord("F")) and ship is not None and can_refuel_boarded_ship(state, selected_destination, ship):
-                    refuel_boarded_ship(state, selected_destination)
-                elif key in (ord("g"), ord("G")):
-                    state.boarded_ship_id = None
-                continue
-            index = key - ord("1")
-            interaction_choices = destination_interaction_choices(state, selected_destination)
-            visible_destination_entries_list = visible_destination_entries(state, selected_destination)
-            if 0 <= index < len(interaction_choices):
-                handle_interaction_choice(state, interaction_choices[index], index)
-            elif 0 <= index - len(interaction_choices) < len(visible_destination_entries_list):
-                child_index, child_destination = visible_destination_entries_list[index - len(interaction_choices)]
-                result = attempt_enter_destination_action(state, child_destination)
-                if result is not None and result.status == "failed":
-                    state.message = f"Action failed: {result.error}"
-                elif result is not None and result.status == "blocked":
-                    start_action_messages(state, result)
-                else:
-                    state.destination_path.append(child_index)
-            elif key in (ord("b"), ord("B")):
-                board_ship_at_destination(state, selected_destination)
-            elif key in (ord("g"), ord("G")):
-                if state.destination_path != state.docked_path:
-                    state.destination_path.pop()
-            elif state.editor_enabled and key in (ord("a"), ord("A")):
-                added = prompt_add_inside_destination(stdscr, world, data_path, state.system_id, state.orbital_id, state.destination_path)
-                if added is not None:
-                    world, state.message = added
-            elif state.editor_enabled and key in (ord("d"), ord("D")):
-                deleted = prompt_delete_detail(stdscr, world, data_path, state.system_id, state.orbital_id, state.destination_path, selected_destination)
-                if deleted is not None:
-                    world, state.message = deleted
-            elif state.editor_enabled and key in (ord("e"), ord("E")):
-                edited = prompt_edit_landing_destination(
-                    stdscr,
-                    world,
-                    data_path,
-                    state.system_id,
-                    state.orbital_id,
-                    state.destination_path,
-                    selected_destination,
-                )
-                if edited is not None:
-                    world, state.message = edited
-            continue
 
-        if state.orbital_id is None:
-            index = key - ord("1")
-            if 0 <= index < len(system.orbitals):
-                state.orbital_id = system.orbitals[index].id
-                state.docked_path.clear()
-                state.destination_path.clear()
-                state.interaction_index = None
-                clear_notice(state)
-            elif state.editor_enabled and key in (ord("a"), ord("A")):
-                added = prompt_add_orbital(stdscr, world, data_path, state.system_id)
-                if added is not None:
-                    world, state.message = added
-            elif state.editor_enabled and key in (ord("d"), ord("D")):
-                deleted = prompt_delete_orbital(stdscr, world, data_path, state.system_id)
-                if deleted is not None:
-                    world, state.message = deleted
-                    state.last_orbital_by_system.pop(state.system_id, None)
-            elif state.editor_enabled and key in (ord("e"), ord("E")):
-                edited = prompt_edit_system(stdscr, world, data_path, state.system_id)
-                if edited is not None:
-                    world, state.message = edited
-            elif key in (ord("l"), ord("L")):
-                state.view = "jump"
-            elif key in (ord("m"), ord("M")):
-                state.map_return_view = "system"
-                state.view = "map"
-            continue
+def command_to_key(command: str, state: GameState) -> int | None:
+    normalized = normalize_command(command)
+    if state.continue_message or sequence_active(state):
+        return 10
+    if not normalized:
+        return -1
+    if re.fullmatch(r"[1-9]", normalized):
+        return ord(normalized)
+    match = re.fullmatch(r"(?:go|jump|enter|select|choose|use|examine|talk|take|board)\s+([1-9])", normalized)
+    if match:
+        return ord(match.group(1))
+    if len(normalized) == 1:
+        return ord(normalized)
 
-        if key in (ord("l"), ord("L")):
-            orbital = orbital_by_id(system, state.orbital_id)
-            if state.editor_enabled and not orbital.landing_options:
-                added = prompt_add_landing_destination(stdscr, world, data_path, state.system_id, state.orbital_id, [])
-                if added is not None:
-                    world, state.message = added
-                    orbital = orbital_by_id(world.system_by_id(state.system_id), state.orbital_id)
-            landing_path = landing_path_for_orbital(state, orbital)
-            if landing_path:
-                state.docked_path = landing_path
-                state.destination_path = list(landing_path)
-                land_boarded_ship(state, orbital, landing_path)
-                state.interaction_index = None
-                clear_notice(state)
-        elif state.editor_enabled and key in (ord("e"), ord("E")):
-            edited = prompt_edit_orbital(stdscr, world, data_path, state.system_id, state.orbital_id)
-            if edited is not None:
-                world, state.message = edited
-        elif key in (ord("t"), ord("T"), 27):
-            state.orbital_id = None
-            state.docked_path.clear()
-            state.destination_path.clear()
-            state.interaction_index = None
-            clear_notice(state)
+    if state.view == "main_menu":
+        menu_commands = {
+            "continue": "1",
+            "new": "2",
+            "new game": "2",
+            "save": "3",
+            "restore": "4",
+            "load": "4",
+            "quit": "5",
+            "exit": "5",
+        }
+        if normalized in menu_commands:
+            return ord(menu_commands[normalized])
+
+    command_map = {
+        "look": -1,
+        "help": -1,
+        "inventory": ord("i"),
+        "inv": ord("i"),
+        "menu": ord("q"),
+        "quit": ord("q"),
+        "exit": ord("q"),
+        "back": ord("g"),
+        "go back": ord("g"),
+        "leave": ord("l"),
+        "leave system": ord("l"),
+        "land": ord("l"),
+        "map": ord("m"),
+        "travel": ord("t"),
+        "take off": ord("t"),
+        "takeoff": ord("t"),
+        "board": ord("b"),
+        "refuel": ord("f"),
+        "examine": ord("x"),
+        "equip": ord("e"),
+        "use": ord("u"),
+        "add": ord("a"),
+        "delete": ord("d"),
+        "edit": ord("e"),
+        "reload": ord("r"),
+        "escape": 27,
+        "esc": 27,
+    }
+    return command_map.get(normalized)
 
 
 def handle_inventory_input(state: GameState, key: int) -> None:
@@ -4340,6 +4734,7 @@ def main() -> int:
     parser.add_argument("data_path", nargs="?", type=Path, help="Data directory or story.qualms.yaml file")
     parser.add_argument("--data", type=Path, help="Data directory or story.qualms.yaml file")
     parser.add_argument("--editor", action="store_true", help="Expose in-game story editing commands")
+    parser.add_argument("--curses", action="store_true", help="Use the legacy curses box interface")
     parser.add_argument("--validate", action="store_true")
     parser.add_argument("--dump", action="store_true")
     args = parser.parse_args()
@@ -4353,7 +4748,10 @@ def main() -> int:
         print(dump_world(world))
         return 0
 
-    curses.wrapper(run_curses, world, data_file, args.editor)
+    if args.curses:
+        curses.wrapper(run_curses, world, data_file, args.editor)
+    else:
+        run_cli(world, data_file, args.editor)
     return 0
 
 

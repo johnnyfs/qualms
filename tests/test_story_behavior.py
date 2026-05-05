@@ -379,5 +379,28 @@ class StoryBehaviorTests(unittest.TestCase):
         self.assertNotIn("hangs on the wall", self.state.inventory[portrait.id].description)
 
 
+class StoryCliTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.world = dq.load_world(STELLAR)
+        self.state = dq.initial_game_state(self.world, editor_enabled=False)
+
+    def test_command_words_map_to_existing_keys(self) -> None:
+        self.assertEqual(dq.command_to_key("continue", self.state), ord("1"))
+        self.state.view = "system"
+
+        self.assertEqual(dq.command_to_key("inventory", self.state), ord("i"))
+        self.assertEqual(dq.command_to_key("go 2", self.state), ord("2"))
+        self.assertEqual(dq.command_to_key("menu", self.state), ord("q"))
+        self.assertEqual(dq.command_to_key("look", self.state), -1)
+
+    def test_current_screen_lines_render_started_destination(self) -> None:
+        self.state.view = "system"
+
+        lines = dq.current_screen_lines(self.world, self.state)
+
+        self.assertIn("Blemish: Mining Colony 5", lines[0])
+        self.assertTrue(any("Pointless Bar" in line for line in lines))
+
+
 if __name__ == "__main__":
     unittest.main()

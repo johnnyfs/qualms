@@ -2,7 +2,7 @@
 
 Qualms is a prototype for a rules-driven story engine and a nova-like game built on top of it. The long-term goal is to define a compact declarative model for game rules that can be projected into different genres, interfaces, and implementations while preserving the same core behavior.
 
-The current playable game is still Dark Qualms: a story-first bounty-hunter prototype with a maintained curses interface. The maintained story source is now `story.qualms.yaml`; the curses UI loads and edits that YAML file directly. The YAML schema uses genre-agnostic primitives: entities, traits, relations, actions, rules, and effects/assertions. Genre-specific concepts such as systems, orbitals, ships, people, inventory, and travel are expressed by authored preludes and story content rather than hard-coded as engine categories.
+The current playable game is still Dark Qualms: a story-first bounty-hunter prototype with a maintained prompt CLI. The maintained story source is now `story.qualms.yaml`; the CLI loads and edits that YAML file directly. The YAML schema uses genre-agnostic primitives: entities, traits, relations, actions, rules, and effects/assertions. Genre-specific concepts such as systems, orbitals, ships, people, inventory, and travel are expressed by authored preludes and story content rather than hard-coded as engine categories.
 
 ## Specs
 
@@ -18,7 +18,7 @@ Technical direction now lives in `specs/`:
 
 - `specs/`: technical design documents for the rules engine and future YAML schema.
 - `stories/`: active story data. The current story is `stories/stellar/story.qualms.yaml`.
-- `curses/`: maintained text interface for playing and editing the story graph.
+- `curses/`: maintained text interface for playing and editing the story graph. The default interface is now prompt-based; the older curses box UI remains available with `--curses`.
 - `godot/`: paused 2D orbital-flight prototype; kept for possible future interface work.
 - `examples/`: valid YAML sample story datasets kept for reference.
 
@@ -38,7 +38,7 @@ Run with the in-game editor exposed:
 ./run-dev.sh
 ```
 
-Both scripts use the curses interface. By default they load:
+Both scripts use the prompt CLI. By default they load:
 
 ```sh
 stories/stellar/story.qualms.yaml
@@ -73,9 +73,19 @@ Dump the defined narrative surface:
 ./run.sh --dump
 ```
 
+Install CLI dependencies when needed:
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install -r requirements.txt
+```
+
+The prompt UI uses `prompt_toolkit` when installed, including command history, tab completion, and common line-editing keys. If it is missing, the game falls back to basic `input()`.
+
 ## Controls
 
-- Number: travel to a destination or choose a local destination
+- Number, or commands like `go 1`: travel to a destination or choose a local destination
 - `I`: open inventory
 - `L`: leave system from the system screen; land from orbit or station approach
 - `T`: take off from the docked destination or return to the system destination list from orbit
@@ -84,11 +94,13 @@ Dump the defined narrative surface:
 - `M`: show the local map
 - `Q`: open the main menu
 
+The prompt also accepts command words such as `inventory`, `menu`, `back`, `land`, `take off`, `board`, `refuel`, `save`, `restore`, and `quit`.
+
 The main menu provides Continue, New Game, Save, Restore, and Quit. Save and restore use JSON snapshots of runtime state. Press Enter at either filename prompt to reuse the last filename, or the default save path if none has been used yet.
 
 ## Editor Mode
 
-`./run-dev.sh` enables an editor sub-box below the game view. These commands are hidden and disabled in normal play.
+`./run-dev.sh` enables editor commands below the game view. These commands are hidden and disabled in normal play.
 
 `A` means:
 

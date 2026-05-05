@@ -4,3 +4,4 @@ export.cfg
 export_presets.cfg
 *.translation
 __pycache__/
+.venv/
