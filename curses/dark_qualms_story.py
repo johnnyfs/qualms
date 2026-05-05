@@ -18,7 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from qualms import ActionAttempt, ActionResult, RulesEngine
+from qualms import ActionAttempt, ActionResult, RulesEngine, WorldState
 from qualms.story_writer import write_story_world_yaml
 from qualms.yaml_loader import load_game_definition
 
@@ -128,6 +128,49 @@ class NamedTarget:
     name: str
     value: Any
     aliases: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class GenericCliEntityView:
+    id: str
+    name: str
+    description: str
+    traits: frozenset[str]
+
+
+@dataclass(frozen=True)
+class GenericCliActionView:
+    command: str
+    action_id: str
+    args: dict[str, Any]
+    target_id: str | None = None
+
+
+@dataclass(frozen=True)
+class GenericCliView:
+    actor_id: str
+    location: GenericCliEntityView
+    go_targets: tuple[GenericCliEntityView, ...] = ()
+    people: tuple[GenericCliEntityView, ...] = ()
+    things: tuple[GenericCliEntityView, ...] = ()
+    inventory: tuple[GenericCliEntityView, ...] = ()
+    actions: tuple[GenericCliActionView, ...] = ()
+
+
+@dataclass
+class GenericCliState:
+    definition: Any
+    runtime_state: WorldState
+    engine: RulesEngine
+    actor_id: str
+    message: str = ""
+    pending_messages: tuple[str, ...] = ()
+    pending_index: int = 0
+    last_save_path: str | None = None
+
+
+class GenericCliContractError(ValueError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -3345,6 +3388,214 @@ def current_destination(world: StoryWorld, state: GameState) -> LandingOption | 
     if orbital is None:
         return None
     return destination_at_path(orbital, state.destination_path)
+
+
+GENERIC_CLI_REQUIRED_TRAITS = {
+    "Presentable": ("name", "description"),
+    "Actor": (),
+    "Location": (),
+    "Relocatable": (),
+}
+GENERIC_CLI_REQUIRED_RELATIONS = {
+    "At": ("subject", "location"),
+    "CanSee": ("actor", "target"),
+}
+GENERIC_CLI_REQUIRED_ACTIONS = {
+    "Enter": ("actor", "destination"),
+    "Examine": ("actor", "target"),
+}
+
+
+def validate_generic_cli_contract(definition: Any) -> None:
+    errors: list[str] = []
+    for trait_id, field_ids in GENERIC_CLI_REQUIRED_TRAITS.items():
+        trait = definition.traits.get(trait_id)
+        if trait is None:
+            errors.append(f"missing trait {trait_id}")
+            continue
+        known_fields = {field.id for field in trait.fields}
+        for field_id in field_ids:
+            if field_id not in known_fields:
+                errors.append(f"trait {trait_id} must define field {field_id}")
+    for relation_id, param_ids in GENERIC_CLI_REQUIRED_RELATIONS.items():
+        relation = definition.relations.get(relation_id)
+        if relation is None:
+            errors.append(f"missing relation {relation_id}({', '.join(param_ids)})")
+            continue
+        actual = tuple(param.id for param in relation.parameters)
+        if actual != param_ids:
+            errors.append(f"relation {relation_id} must have params ({', '.join(param_ids)})")
+    for action_id, param_ids in GENERIC_CLI_REQUIRED_ACTIONS.items():
+        action = definition.actions.get(action_id)
+        if action is None:
+            errors.append(f"missing action {action_id}({', '.join(param_ids)})")
+            continue
+        actual = tuple(param.id for param in action.parameters)
+        if actual != param_ids:
+            errors.append(f"action {action_id} must have params ({', '.join(param_ids)})")
+    if errors:
+        raise GenericCliContractError("Generic CLI requires core prelude support: " + "; ".join(errors))
+
+
+def initial_generic_cli_state(definition: Any) -> GenericCliState:
+    validate_generic_cli_contract(definition)
+    runtime_state = definition.instantiate()
+    actor_id = generic_cli_actor_id(definition, runtime_state)
+    start_location = definition.metadata.get("start", {}).get("location")
+    if isinstance(start_location, str) and start_location in runtime_state.entities:
+        runtime_state.assert_relation("At", [actor_id, start_location])
+    if generic_cli_current_location_id(runtime_state, actor_id) is None:
+        raise GenericCliContractError(f"Generic CLI could not find current location for actor {actor_id}")
+    return GenericCliState(
+        definition=definition,
+        runtime_state=runtime_state,
+        engine=RulesEngine(definition),
+        actor_id=actor_id,
+    )
+
+
+def generic_cli_actor_id(definition: Any, runtime_state: WorldState) -> str:
+    actor_id = definition.metadata.get("start", {}).get("actor")
+    if isinstance(actor_id, str) and actor_id in runtime_state.entities and runtime_state.has_trait(actor_id, "Actor"):
+        return actor_id
+    actors = [entity_id for entity_id in runtime_state.entities if runtime_state.has_trait(entity_id, "Actor")]
+    if len(actors) == 1:
+        return actors[0]
+    if isinstance(actor_id, str):
+        raise GenericCliContractError(f"Generic CLI start.actor {actor_id!r} must reference an Actor entity")
+    raise GenericCliContractError("Generic CLI requires story.start.actor or exactly one Actor entity")
+
+
+def generic_cli_current_location_id(runtime_state: WorldState, actor_id: str) -> str | None:
+    for entity_id in runtime_state.entities:
+        if entity_id == actor_id or not runtime_state.has_trait(entity_id, "Location"):
+            continue
+        if generic_relation_true(runtime_state, "At", [actor_id, entity_id]):
+            return entity_id
+    return None
+
+
+def generic_cli_view(state: GenericCliState) -> GenericCliView:
+    location_id = generic_cli_current_location_id(state.runtime_state, state.actor_id)
+    if location_id is None:
+        raise GenericCliContractError(f"Generic CLI could not find current location for actor {state.actor_id}")
+    visible = [
+        entity_id
+        for entity_id in state.runtime_state.entities
+        if entity_id != state.actor_id
+        and entity_id != location_id
+        and state.runtime_state.has_trait(entity_id, "Presentable")
+        and state.runtime_state.has_trait(entity_id, "Relocatable")
+        and generic_relation_true(state.runtime_state, "CanSee", [state.actor_id, entity_id])
+    ]
+    inventory = [
+        entity_id
+        for entity_id in state.runtime_state.entities
+        if entity_id != state.actor_id
+        and state.runtime_state.has_trait(entity_id, "Presentable")
+        and generic_relation_true(state.runtime_state, "CarriedBy", [state.actor_id, entity_id])
+    ]
+    visible_set = set(visible)
+    inventory_set = set(inventory)
+    go_targets = tuple(
+        generic_entity_view(state.runtime_state, entity_id)
+        for entity_id in visible
+        if state.runtime_state.has_trait(entity_id, "Location")
+        and not state.runtime_state.has_trait(entity_id, "Boardable")
+        and generic_action_available(state, "Enter", {"actor": state.actor_id, "destination": entity_id})
+    )
+    people = tuple(
+        generic_entity_view(state.runtime_state, entity_id)
+        for entity_id in visible
+        if state.runtime_state.has_trait(entity_id, "Actor")
+    )
+    things = tuple(
+        generic_entity_view(state.runtime_state, entity_id)
+        for entity_id in visible
+        if entity_id not in {view.id for view in go_targets}
+        and entity_id not in {view.id for view in people}
+    )
+    inventory_views = tuple(generic_entity_view(state.runtime_state, entity_id) for entity_id in inventory)
+    return GenericCliView(
+        actor_id=state.actor_id,
+        location=generic_entity_view(state.runtime_state, location_id),
+        go_targets=go_targets,
+        people=people,
+        things=things,
+        inventory=inventory_views,
+        actions=tuple(generic_cli_actions(state, visible_set, inventory_set)),
+    )
+
+
+def generic_cli_actions(state: GenericCliState, visible_ids: set[str], inventory_ids: set[str]) -> list[GenericCliActionView]:
+    actions: list[GenericCliActionView] = []
+    visible_and_inventory = list(dict.fromkeys([*visible_ids, *inventory_ids]))
+    for entity_id in visible_and_inventory:
+        view = generic_entity_view(state.runtime_state, entity_id)
+        if generic_action_available(state, "Examine", {"actor": state.actor_id, "target": entity_id}):
+            actions.append(GenericCliActionView(f"examine {view.name}", "Examine", {"actor": state.actor_id, "target": entity_id}, entity_id))
+    for entity_id in visible_ids:
+        view = generic_entity_view(state.runtime_state, entity_id)
+        if state.runtime_state.has_trait(entity_id, "Location") and not state.runtime_state.has_trait(entity_id, "Boardable"):
+            args = {"actor": state.actor_id, "destination": entity_id}
+            if generic_action_available(state, "Enter", args):
+                actions.append(GenericCliActionView(f"go {view.name}", "Enter", args, entity_id))
+        if state.runtime_state.has_trait(entity_id, "Portable"):
+            args = {"actor": state.actor_id, "item": entity_id}
+            if generic_action_available(state, "Take", args):
+                actions.append(GenericCliActionView(f"take {view.name}", "Take", args, entity_id))
+        if state.runtime_state.has_trait(entity_id, "Social"):
+            args = {"actor": state.actor_id, "target": entity_id}
+            if generic_action_available(state, "Talk", args):
+                actions.append(GenericCliActionView(f"talk to {view.name}", "Talk", args, entity_id))
+        if state.runtime_state.has_trait(entity_id, "Boardable"):
+            args = {"actor": state.actor_id, "ship": entity_id}
+            if generic_action_available(state, "Board", args):
+                actions.append(GenericCliActionView(f"board {view.name}", "Board", args, entity_id))
+        args = {"actor": state.actor_id, "target": entity_id}
+        if generic_action_available(state, "PowerUp", args):
+            actions.append(GenericCliActionView(f"power up {view.name}", "PowerUp", args, entity_id))
+    for entity_id in inventory_ids:
+        view = generic_entity_view(state.runtime_state, entity_id)
+        if state.runtime_state.has_trait(entity_id, "Equipment"):
+            args = {"actor": state.actor_id, "item": entity_id}
+            if generic_action_available(state, "Equip", args):
+                actions.append(GenericCliActionView(f"equip {view.name}", "Equip", args, entity_id))
+        if state.runtime_state.has_trait(entity_id, "Usable"):
+            for target_id in visible_and_inventory:
+                if target_id == entity_id:
+                    continue
+                target = generic_entity_view(state.runtime_state, target_id)
+                args = {"actor": state.actor_id, "source": entity_id, "target": target_id}
+                if generic_action_available(state, "Use", args):
+                    actions.append(GenericCliActionView(f"use {view.name} on {target.name}", "Use", args, target_id))
+    return actions
+
+
+def generic_entity_view(runtime_state: WorldState, entity_id: str) -> GenericCliEntityView:
+    fields = runtime_state.entity(entity_id).trait("Presentable").fields
+    return GenericCliEntityView(
+        id=entity_id,
+        name=str(fields.get("name") or entity_id),
+        description=str(fields.get("description") or ""),
+        traits=frozenset(runtime_state.entity(entity_id).traits),
+    )
+
+
+def generic_action_available(state: GenericCliState, action_id: str, args: dict[str, Any]) -> bool:
+    if action_id not in state.definition.actions:
+        return False
+    result = state.engine.attempt(state.runtime_state.clone(), ActionAttempt(action_id, args))
+    return result.status not in {"rejected", "failed"}
+
+
+def generic_relation_true(runtime_state: WorldState, relation: str, args: list[Any]) -> bool:
+    if relation not in runtime_state.definition.relations:
+        return False
+    try:
+        return bool(runtime_state.test(relation, args))
+    except (KeyError, ValueError):
+        return False
 
 
 def command_words_for_state(world: StoryWorld, state: GameState) -> list[str]:

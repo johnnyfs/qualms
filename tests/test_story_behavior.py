@@ -421,6 +421,46 @@ class StoryCliTests(unittest.TestCase):
         self.assertIn("restart", commands)
         self.assertIn("quit", commands)
 
+    def test_generic_cli_contract_and_view_for_stellar_story(self) -> None:
+        definition = dq.load_game_definition(STELLAR)
+        generic_state = dq.initial_generic_cli_state(definition)
+
+        view = dq.generic_cli_view(generic_state)
+
+        self.assertEqual(view.location.name, "Mining Colony 5")
+        self.assertEqual([target.name for target in view.go_targets], ["Pointless Bar", "Pointless Settlement"])
+        self.assertIn("go Pointless Bar", [action.command for action in view.actions])
+
+        go_bar = next(action for action in view.actions if action.command == "go Pointless Bar")
+        result = generic_state.engine.attempt(generic_state.runtime_state, dq.ActionAttempt(go_bar.action_id, go_bar.args))
+        self.assertEqual(result.status, "succeeded")
+        view = dq.generic_cli_view(generic_state)
+
+        self.assertEqual(view.location.name, "Pointless Bar")
+        self.assertIn("Stu", [person.name for person in view.people])
+        self.assertIn("Portrait of Enrick", [thing.name for thing in view.things])
+        self.assertIn("take Portrait of Enrick", [action.command for action in view.actions])
+        self.assertIn("talk to Stu", [action.command for action in view.actions])
+
+    def test_generic_cli_contract_reports_missing_core_support(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "bad.qualms.yaml"
+            path.write_text(
+                """
+qualms: "0.1"
+id: bad-cli-story
+story:
+  entities:
+    - id: player
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            definition = dq.load_game_definition(path)
+
+        with self.assertRaisesRegex(dq.GenericCliContractError, "Generic CLI requires core prelude support"):
+            dq.validate_generic_cli_contract(definition)
+
     def test_cli_text_commands_drive_story_and_builtin_save_restore(self) -> None:
         self.world, self.state, should_quit = dq.handle_cli_command(
             None,
