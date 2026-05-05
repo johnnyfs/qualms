@@ -461,6 +461,51 @@ story:
         with self.assertRaisesRegex(dq.GenericCliContractError, "Generic CLI requires core prelude support"):
             dq.validate_generic_cli_contract(definition)
 
+    def test_generic_cli_screen_prints_visible_world_without_ev_labels(self) -> None:
+        definition = dq.load_game_definition(STELLAR)
+        state = dq.initial_generic_cli_state(definition)
+
+        lines = dq.generic_cli_screen_lines(state)
+        commands = dq.generic_command_words_for_state(state)
+
+        self.assertEqual(lines[0], "Mining Colony 5")
+        self.assertTrue(any("You can go to Pointless Bar and Pointless Settlement." == line for line in lines))
+        self.assertNotIn("Exits", "\n".join(lines))
+        self.assertIn("go Pointless Bar", commands)
+        self.assertIn("save", commands)
+        self.assertIn("restore", commands)
+        self.assertIn("restart", commands)
+        self.assertIn("quit", commands)
+
+    def test_generic_cli_commands_drive_story_and_builtin_save_restore(self) -> None:
+        definition = dq.load_game_definition(STELLAR)
+        state = dq.initial_generic_cli_state(definition)
+
+        state, should_quit = dq.handle_generic_cli_command(state, "go Pointless Bar", STELLAR)
+        self.assertFalse(should_quit)
+        self.assertEqual(dq.generic_cli_view(state).location.name, "Pointless Bar")
+
+        state, should_quit = dq.handle_generic_cli_command(state, "take Portrait of Enrick", STELLAR)
+        self.assertFalse(should_quit)
+        self.assertIn("Portrait of Enrick", [item.name for item in dq.generic_cli_view(state).inventory])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_path = Path(tmpdir) / "generic.save.json"
+            state, should_quit = dq.handle_generic_cli_command(state, f"save {save_path}", STELLAR)
+            self.assertFalse(should_quit)
+            self.assertTrue(save_path.exists())
+
+            state, should_quit = dq.handle_generic_cli_command(state, "restart", STELLAR)
+            self.assertFalse(should_quit)
+            self.assertNotIn("Portrait of Enrick", [item.name for item in dq.generic_cli_view(state).inventory])
+
+            state, should_quit = dq.handle_generic_cli_command(state, f"restore {save_path}", STELLAR)
+            self.assertFalse(should_quit)
+            self.assertIn("Portrait of Enrick", [item.name for item in dq.generic_cli_view(state).inventory])
+
+        state, should_quit = dq.handle_generic_cli_command(state, "quit", STELLAR)
+        self.assertTrue(should_quit)
+
     def test_cli_text_commands_drive_story_and_builtin_save_restore(self) -> None:
         self.world, self.state, should_quit = dq.handle_cli_command(
             None,

@@ -18,7 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from qualms import ActionAttempt, ActionResult, RulesEngine, WorldState
+from qualms import ActionAttempt, ActionResult, Entity, RulesEngine, TraitInstance, WorldState
 from qualms.story_writer import write_story_world_yaml
 from qualms.yaml_loader import load_game_definition
 
@@ -34,6 +34,7 @@ MAP_WIDTH = 58
 MAP_HEIGHT = 17
 DEFAULT_HOP_DISTANCE_AU = 200000.0
 SAVE_FORMAT_VERSION = 1
+GENERIC_SAVE_FORMAT_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -2436,6 +2437,181 @@ def read_save_game(path: Path) -> dict[str, Any]:
     return data
 
 
+def generic_cli_state_to_save_data(state: GenericCliState) -> dict[str, Any]:
+    return {
+        "qualms_generic_save": GENERIC_SAVE_FORMAT_VERSION,
+        "actor_id": state.actor_id,
+        "message": state.message,
+        "pending_messages": list(state.pending_messages),
+        "pending_index": state.pending_index,
+        "runtime_state": generic_world_state_to_save_data(state.runtime_state),
+    }
+
+
+def generic_world_state_to_save_data(state: WorldState) -> dict[str, Any]:
+    return {
+        "entities": {
+            entity_id: {
+                "metadata": json_safe_value(entity.metadata),
+                "traits": {
+                    trait_id: {
+                        "parameters": json_safe_value(trait.parameters),
+                        "fields": json_safe_value(trait.fields),
+                    }
+                    for trait_id, trait in entity.traits.items()
+                },
+            }
+            for entity_id, entity in state.entities.items()
+        },
+        "memory": fact_store_to_save_data(state.memory.facts),
+        "current_relations": relation_store_to_save_data(state.current_relations),
+        "remembered_relations": relation_store_to_save_data(state.remembered_relations),
+        "events": json_safe_value(state.events),
+        "allocators": dict(state.allocators),
+    }
+
+
+def json_safe_value(value: Any) -> Any:
+    if isinstance(value, tuple):
+        return [json_safe_value(item) for item in value]
+    if isinstance(value, list):
+        return [json_safe_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): json_safe_value(item) for key, item in value.items()}
+    return value
+
+
+def fact_store_to_save_data(facts: set[tuple[str, tuple[Any, ...]]]) -> list[dict[str, Any]]:
+    return [
+        {"id": fact_id, "args": json_safe_value(args)}
+        for fact_id, args in sorted(facts, key=lambda item: (item[0], repr(item[1])))
+    ]
+
+
+def relation_store_to_save_data(relations: set[tuple[str, tuple[Any, ...]]]) -> list[dict[str, Any]]:
+    return [
+        {"relation": relation_id, "args": json_safe_value(args)}
+        for relation_id, args in sorted(relations, key=lambda item: (item[0], repr(item[1])))
+    ]
+
+
+def write_generic_save_game(path: Path, state: GenericCliState) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = generic_cli_state_to_save_data(state)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def read_generic_save_game(path: Path) -> dict[str, Any]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or data.get("qualms_generic_save") != GENERIC_SAVE_FORMAT_VERSION:
+        raise ValueError("unsupported generic CLI save file")
+    if not isinstance(data.get("runtime_state"), dict):
+        raise ValueError("generic CLI save file is missing runtime_state")
+    return data
+
+
+def restore_generic_cli_state(definition: Any, data: dict[str, Any]) -> GenericCliState:
+    runtime_state = restore_generic_world_state(definition, require_saved_object(data, "runtime_state"))
+    actor_id = data.get("actor_id")
+    if not isinstance(actor_id, str) or actor_id not in runtime_state.entities or not runtime_state.has_trait(actor_id, "Actor"):
+        raise ValueError("generic CLI save file references an unknown actor")
+    if generic_cli_current_location_id(runtime_state, actor_id) is None:
+        raise ValueError("generic CLI save file has no current actor location")
+    message = data.get("message", "")
+    if not isinstance(message, str):
+        raise ValueError("message must be a string")
+    return GenericCliState(
+        definition=definition,
+        runtime_state=runtime_state,
+        engine=RulesEngine(definition),
+        actor_id=actor_id,
+        message=message,
+        pending_messages=tuple(saved_string_list(data.get("pending_messages", []), "pending_messages")),
+        pending_index=int(data.get("pending_index", 0) or 0),
+    )
+
+
+def restore_generic_world_state(definition: Any, raw_state: dict[str, Any]) -> WorldState:
+    state = WorldState(definition=definition)
+    raw_entities = require_saved_object(raw_state, "entities")
+    for entity_id, raw_entity in raw_entities.items():
+        if not isinstance(raw_entity, dict):
+            raise ValueError(f"entity {entity_id} must be an object")
+        entity = Entity(id=str(entity_id), metadata=dict(raw_entity.get("metadata", {})))
+        raw_traits = raw_entity.get("traits", {})
+        if not isinstance(raw_traits, dict):
+            raise ValueError(f"entity {entity_id}.traits must be an object")
+        for trait_id, raw_trait in raw_traits.items():
+            if not isinstance(raw_trait, dict):
+                raise ValueError(f"trait {entity_id}.{trait_id} must be an object")
+            parameters = raw_trait.get("parameters", {})
+            fields = raw_trait.get("fields", {})
+            if not isinstance(parameters, dict) or not isinstance(fields, dict):
+                raise ValueError(f"trait {entity_id}.{trait_id} parameters and fields must be objects")
+            entity.traits[str(trait_id)] = TraitInstance(
+                definition_id=str(trait_id),
+                parameters=dict(parameters),
+                fields=dict(fields),
+            )
+        state.entities[entity.id] = entity
+
+    state.memory.facts = saved_fact_store(raw_state.get("memory", []), "memory")
+    state.current_relations = saved_relation_store(raw_state.get("current_relations", []), "current_relations")
+    state.remembered_relations = saved_relation_store(raw_state.get("remembered_relations", []), "remembered_relations")
+    raw_events = raw_state.get("events", [])
+    if not isinstance(raw_events, list) or not all(isinstance(event, dict) for event in raw_events):
+        raise ValueError("events must be a list of objects")
+    state.events = list(raw_events)
+    raw_allocators = raw_state.get("allocators", {})
+    if not isinstance(raw_allocators, dict):
+        raise ValueError("allocators must be an object")
+    state.allocators = {str(key): int(value) for key, value in raw_allocators.items()}
+    return state
+
+
+def require_saved_object(raw_state: dict[str, Any], field: str) -> dict[str, Any]:
+    value = raw_state.get(field)
+    if not isinstance(value, dict):
+        raise ValueError(f"{field} must be an object")
+    return value
+
+
+def saved_fact_store(value: Any, field: str) -> set[tuple[str, tuple[Any, ...]]]:
+    if not isinstance(value, list):
+        raise ValueError(f"{field} must be a list")
+    facts: set[tuple[str, tuple[Any, ...]]] = set()
+    for index, raw_fact in enumerate(value):
+        if not isinstance(raw_fact, dict) or not isinstance(raw_fact.get("id"), str):
+            raise ValueError(f"{field}[{index}] must define id")
+        raw_args = raw_fact.get("args", [])
+        if not isinstance(raw_args, list):
+            raise ValueError(f"{field}[{index}].args must be a list")
+        facts.add((raw_fact["id"], tuple(saved_hashable_value(arg) for arg in raw_args)))
+    return facts
+
+
+def saved_relation_store(value: Any, field: str) -> set[tuple[str, tuple[Any, ...]]]:
+    if not isinstance(value, list):
+        raise ValueError(f"{field} must be a list")
+    relations: set[tuple[str, tuple[Any, ...]]] = set()
+    for index, raw_relation in enumerate(value):
+        if not isinstance(raw_relation, dict) or not isinstance(raw_relation.get("relation"), str):
+            raise ValueError(f"{field}[{index}] must define relation")
+        raw_args = raw_relation.get("args", [])
+        if not isinstance(raw_args, list):
+            raise ValueError(f"{field}[{index}].args must be a list")
+        relations.add((raw_relation["relation"], tuple(saved_hashable_value(arg) for arg in raw_args)))
+    return relations
+
+
+def saved_hashable_value(value: Any) -> Any:
+    if isinstance(value, list):
+        return tuple(saved_hashable_value(item) for item in value)
+    if isinstance(value, dict):
+        return tuple(sorted((key, saved_hashable_value(item)) for key, item in value.items()))
+    return value
+
+
 def restore_game_state(world: StoryWorld, data: dict[str, Any], editor_enabled: bool) -> GameState:
     raw_state = data.get("state")
     if not isinstance(raw_state, dict):
@@ -3226,6 +3402,20 @@ def run_cli(world: StoryWorld, data_path: Path, editor_enabled: bool = False) ->
             return
 
 
+def run_generic_cli(definition: Any, data_path: Path) -> None:
+    prompter = CliPrompter()
+    state = initial_generic_cli_state(definition)
+
+    while True:
+        render_generic_cli_screen(state)
+        command = prompter.read_command(generic_command_words_for_state(state))
+        if command is None:
+            return
+        state, should_quit = handle_generic_cli_command(state, command, data_path)
+        if should_quit:
+            return
+
+
 def render_cli_screen(world: StoryWorld, state: GameState) -> None:
     width = max(40, min(100, shutil.get_terminal_size(fallback=(80, 24)).columns))
     lines = adventure_screen_lines(world, state)
@@ -3238,6 +3428,184 @@ def render_cli_screen(world: StoryWorld, state: GameState) -> None:
     print("=" * min(width, 80))
     for line in wrap_lines(lines, width):
         print(line)
+
+
+def render_generic_cli_screen(state: GenericCliState) -> None:
+    width = max(40, min(100, shutil.get_terminal_size(fallback=(80, 24)).columns))
+    lines = generic_cli_screen_lines(state)
+
+    print()
+    print("=" * min(width, 80))
+    for line in wrap_lines(lines, width):
+        print(line)
+
+
+def generic_cli_screen_lines(state: GenericCliState) -> list[str]:
+    if state.pending_messages:
+        index = min(state.pending_index, len(state.pending_messages) - 1)
+        return [state.pending_messages[index], "", "continue"]
+
+    view = generic_cli_view(state)
+    lines = [view.location.name]
+    if view.location.description:
+        lines.extend(["", view.location.description])
+    if state.message:
+        lines.extend(["", state.message])
+    if view.go_targets:
+        lines.extend(["", f"You can go to {format_name_list([target.name for target in view.go_targets])}."])
+    if view.people:
+        lines.extend(["", f"You can see {format_name_list([person.name for person in view.people])}."])
+
+    unnamed_visible: list[str] = []
+    for thing in view.things:
+        if thing.description:
+            lines.extend(["", thing.description])
+        else:
+            unnamed_visible.append(thing.name)
+    if unnamed_visible:
+        lines.extend(["", f"You can see {format_name_list(unnamed_visible)}."])
+    if view.inventory:
+        lines.extend(["", f"You are carrying {format_name_list([item.name for item in view.inventory])}."])
+    return lines
+
+
+def generic_command_words_for_state(state: GenericCliState) -> list[str]:
+    words = [
+        "look",
+        "continue",
+        "inventory",
+        "inv",
+        "save",
+        "restore",
+        "load",
+        "restart",
+        "quit",
+        "exit",
+        "go",
+        "enter",
+        "examine",
+        "look at",
+        "take",
+        "get",
+        "talk",
+        "talk to",
+        "use",
+        "use on",
+        "equip",
+        "board",
+        "power up",
+    ]
+    view = generic_cli_view(state)
+    for entity in [view.location, *view.go_targets, *view.people, *view.things, *view.inventory]:
+        words.append(entity.name)
+    for action in view.actions:
+        words.extend(generic_action_aliases(action))
+    return words
+
+
+def handle_generic_cli_command(state: GenericCliState, command: str, data_path: Path) -> tuple[GenericCliState, bool]:
+    normalized = normalize_command(command)
+    if normalized in {"quit", "exit"}:
+        return state, True
+    if normalized_matches_verb(normalized, "save"):
+        save_generic_cli_game(data_path, state, command)
+        return state, False
+    if normalized_matches_verb(normalized, "restore") or normalized_matches_verb(normalized, "load"):
+        return restore_generic_cli_game(data_path, state, command), False
+    if normalized == "restart":
+        last_save_path = state.last_save_path
+        state = initial_generic_cli_state(state.definition)
+        state.last_save_path = last_save_path
+        state.message = "Restarted."
+        return state, False
+    if state.pending_messages:
+        advance_generic_cli_messages(state)
+        return state, False
+    if not normalized or normalized in {"look", "l", "continue"}:
+        state.message = ""
+        return state, False
+    if normalized in {"inventory", "inv", "i"}:
+        items = generic_cli_view(state).inventory
+        state.message = "Inventory: " + format_name_list([item.name for item in items]) + "." if items else "Inventory: empty."
+        return state, False
+
+    action, error = find_generic_cli_action(command, generic_cli_view(state).actions)
+    if error:
+        state.message = error
+    elif action is None:
+        state.message = f"Unknown command: {command.strip()}"
+    else:
+        apply_generic_cli_action(state, action)
+    return state, False
+
+
+def advance_generic_cli_messages(state: GenericCliState) -> None:
+    if not state.pending_messages:
+        return
+    if state.pending_index < len(state.pending_messages) - 1:
+        state.pending_index += 1
+        return
+    state.pending_messages = ()
+    state.pending_index = 0
+    state.message = ""
+
+
+def find_generic_cli_action(command: str, actions: tuple[GenericCliActionView, ...]) -> tuple[GenericCliActionView | None, str | None]:
+    normalized = normalize_command(command)
+    exact = [action for action in actions if normalized in {normalize_command(alias) for alias in generic_action_aliases(action)}]
+    if len(exact) == 1:
+        return exact[0], None
+    if len(exact) > 1:
+        return None, ambiguous_generic_cli_action_message(exact)
+    prefix = [
+        action
+        for action in actions
+        if any(normalize_command(alias).startswith(normalized) for alias in generic_action_aliases(action))
+    ]
+    if len(prefix) == 1:
+        return prefix[0], None
+    if len(prefix) > 1:
+        return None, ambiguous_generic_cli_action_message(prefix)
+    return None, None
+
+
+def ambiguous_generic_cli_action_message(actions: Iterable[GenericCliActionView]) -> str:
+    commands = sorted({action.command for action in actions})
+    return "Ambiguous: " + format_name_list(commands) + "."
+
+
+def generic_action_aliases(action: GenericCliActionView) -> tuple[str, ...]:
+    aliases = [action.command]
+    normalized = normalize_command(action.command)
+    for source, replacements in {
+        "examine ": ("look at ", "x "),
+        "go ": ("enter ",),
+        "take ": ("get ",),
+    }.items():
+        if normalized.startswith(source):
+            target = action.command[len(source) :]
+            aliases.extend(f"{replacement}{target}" for replacement in replacements)
+    return tuple(aliases)
+
+
+def apply_generic_cli_action(state: GenericCliState, action: GenericCliActionView) -> None:
+    result = state.engine.attempt(state.runtime_state, ActionAttempt(action.action_id, action.args))
+    if result.status == "failed":
+        state.message = f"Action failed: {result.error}"
+        return
+    if result.status == "rejected":
+        state.message = "That does not work."
+        return
+
+    messages = action_texts(result)
+    if messages:
+        state.pending_messages = messages
+        state.pending_index = 0
+        state.message = ""
+    else:
+        state.pending_messages = ()
+        state.pending_index = 0
+        state.message = ""
 
 
 def adventure_screen_lines(world: StoryWorld, state: GameState) -> list[str]:
@@ -3731,6 +4099,21 @@ def save_cli_game(input_surface: Any, data_path: Path, state: GameState, command
         state.message = f"Save failed: {error}"
 
 
+def save_generic_cli_game(data_path: Path, state: GenericCliState, command: str) -> None:
+    requested = command_remainder(command, "save")
+    if not requested:
+        requested = state.last_save_path or str(default_save_path(data_path))
+    try:
+        save_path = resolve_save_path(requested, data_path)
+        write_generic_save_game(save_path, state)
+        state.last_save_path = str(save_path)
+        state.message = f"Saved: {save_path}"
+        state.pending_messages = ()
+        state.pending_index = 0
+    except (OSError, ValueError) as error:
+        state.message = f"Save failed: {error}"
+
+
 def restore_cli_game(
     input_surface: Any,
     world: StoryWorld,
@@ -3748,6 +4131,23 @@ def restore_cli_game(
         restored.last_save_path = str(save_path)
         restored.view = "system"
         restored.message = f"Restored: {save_path}"
+        return restored
+    except (OSError, ValueError, KeyError, json.JSONDecodeError) as error:
+        state.message = f"Restore failed: {error}"
+        return state
+
+
+def restore_generic_cli_game(data_path: Path, state: GenericCliState, command: str) -> GenericCliState:
+    requested = command_remainder(command, "restore") or command_remainder(command, "load")
+    if not requested:
+        requested = state.last_save_path or str(default_save_path(data_path))
+    try:
+        save_path = resolve_save_path(requested, data_path)
+        restored = restore_generic_cli_state(state.definition, read_generic_save_game(save_path))
+        restored.last_save_path = str(save_path)
+        restored.message = f"Restored: {save_path}"
+        restored.pending_messages = ()
+        restored.pending_index = 0
         return restored
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as error:
         state.message = f"Restore failed: {error}"
@@ -5771,10 +6171,20 @@ def main() -> int:
     args = parser.parse_args()
 
     data_file = resolve_data_file(args.data or args.data_path or DATA_PATH)
-    world = load_world(data_file)
     if args.validate:
+        load_game_definition(data_file)
         print(f"story data ok: {data_file}")
         return 0
+
+    if not args.curses and not args.editor and not args.dump:
+        try:
+            run_generic_cli(load_game_definition(data_file), data_file)
+        except GenericCliContractError as error:
+            print(f"Generic CLI contract error: {error}", file=sys.stderr)
+            return 2
+        return 0
+
+    world = load_world(data_file)
     if args.dump:
         print(dump_world(world))
         return 0
