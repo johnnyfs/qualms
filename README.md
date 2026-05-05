@@ -73,15 +73,13 @@ Dump the defined narrative surface:
 ./run.sh --dump
 ```
 
-Install CLI dependencies when needed:
+Sync CLI dependencies when needed:
 
 ```sh
-python3 -m venv .venv
-. .venv/bin/activate
-python3 -m pip install -r requirements.txt
+uv sync
 ```
 
-The prompt UI uses `prompt_toolkit` when installed, including command history, tab completion, and common line-editing keys. If it is missing, the game falls back to basic `input()`.
+Python dependencies are managed by `uv` through `pyproject.toml` and `uv.lock`. The run scripts use `uv run`, so they will create or update the local `.venv` automatically. The prompt UI uses `prompt_toolkit` when installed, including command history, tab completion, and common line-editing keys. If it is missing, the game falls back to basic `input()`.
 
 ## Controls
 

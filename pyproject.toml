@@ -1,0 +1,13 @@
+[project]
+name = "qualms"
+version = "0.1.0"
+description = "Rules-driven story engine and Dark Qualms story prototype."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "PyYAML>=6.0",
+    "prompt-toolkit>=3.0",
+]
+
+[tool.uv]
+package = false
