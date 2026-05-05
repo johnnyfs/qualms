@@ -4,9 +4,9 @@ This roadmap starts from the current source of truth: `story.qualms.yaml` files 
 
 ## Current Baseline
 
-- The curses interface loads and saves `story.qualms.yaml` directly.
-- Story data is authored as entities, trait fields, initial assertions, facts, and rules.
-- The curses UI projects the compiled runtime definition into menu-oriented editor data.
+- The default prompt CLI loads and saves `story.qualms.yaml` directly; the legacy curses UI remains available behind `--curses`.
+- Story data is authored as entities, trait fields, initial assertions, stored relations, legacy facts, and rules.
+- The prompt UI and curses UI project the compiled runtime definition into playable/editor data.
 - Action resolution for scripted interactions goes through `RulesEngine`.
 - The maintained story and examples validate through the YAML loader.
 
@@ -19,10 +19,12 @@ This roadmap starts from the current source of truth: `story.qualms.yaml` files 
 ## Runtime Priorities
 
 - Move more curses-specific action helpers onto declarative actions and effects.
-- Tighten relation setters so authored effects can assert relations instead of mutating trait fields directly.
+- Continue moving durable remembered state from legacy facts into stored relations.
+- Tighten relation setters so authored effects can assert or retract relations instead of mutating trait fields directly.
 - Keep effects non-recursive: applying an effect must not dispatch another action through the rules engine.
 - Preserve deterministic rule ordering by phase, priority, and document order.
 - Roll back failed action attempts atomically.
+- Add a query layer once prompt/coauthoring usage clarifies what state needs to be asked for; avoid designing that API ahead of observed needs.
 
 ## Authoring Priorities
 
@@ -33,7 +35,8 @@ This roadmap starts from the current source of truth: `story.qualms.yaml` files 
 
 ## Interface Priorities
 
-- Keep the curses editor as the simplest reference implementation.
+- Keep the prompt CLI as the maintained playable interface.
+- Keep the curses editor as a legacy/reference editor while migration continues.
 - Continue treating UI dataclasses as a projection of the YAML runtime definition, not as an independent story model.
 - Add editor affordances incrementally, with save/reload validation after each change.
 - Defer richer interfaces until the runtime and schema contracts are stable enough to share across implementations.

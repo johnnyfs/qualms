@@ -8,7 +8,7 @@ Move the playable/editor interface from a curses box UI toward a classic command
 
 ## Step 1: Prompt CLI Baseline
 
-Status: in progress.
+Status: implemented.
 
 - Keep the current command-driven game state and runtime behavior.
 - Render the same display/menu information as plain text each turn.
@@ -20,12 +20,15 @@ Status: in progress.
 
 ## Step 2: Command Registry
 
+Status: partially implemented by the prompt command flow.
+
 - Replace ad hoc command aliases with a state-aware command registry.
-- Keep number commands as aliases for visible choices.
 - Add verbs such as `look`, `go`, `enter`, `examine`, `take`, `talk`, `use`, `board`, `land`, `takeoff`, `jump`, `inventory`, `save`, `restore`, `reload`, and `edit`.
 - Make each command declare help text, availability, completion candidates, and dispatch behavior.
 
 ## Step 3: State-Aware Completion
+
+Status: partially implemented by visible-target completion.
 
 - Complete currently legal verbs.
 - Complete visible destinations, objects, NPCs, ships, inventory items, save paths, and editor targets.
@@ -52,5 +55,5 @@ Status: in progress.
 ## Current Risks
 
 - `curses/dark_qualms_story.py` still contains UI, command dispatch, and editor prompting in one module.
-- The prompt CLI currently maps command words back into legacy key handling; the registry step should remove that coupling.
+- The prompt CLI has its own command handling, but it is still implemented in the same large module as projection and editor code.
 - Dependency management is still minimal and should become a proper package setup before adding provider-specific AI dependencies.

@@ -181,19 +181,33 @@ set:
       value: { var: location }
 ```
 
+Stored relation example:
+
+```yaml
+id: Visited
+persistence: remembered
+params:
+  - id: actor
+    type: ref<Actor>
+  - id: location
+    type: ref<Location>
+```
+
 Fields:
 
 - `id`: required relation id.
 - `params`: required ordered `ParameterDef` list.
-- `get`: required `Predicate`.
+- `get`: `Predicate`, required unless `persistence` is set.
 - `set`: optional ordered `Effect` list.
+- `persistence`: optional, one of `current`, `remembered`, or `both`.
 
 Validation:
 
 - Every parameter referenced by `get` or `set` must exist.
 - `get` must be pure.
 - `set` must not contain action attempts.
-- `assert Relation(...)` is valid only when `set` is present.
+- `assert Relation(...)` is valid only when `set` or `persistence` is present.
+- `retract Relation(...)` is valid only when `persistence` is present.
 
 ## ActionDefinition
 
@@ -302,7 +316,19 @@ Exactly one effect operation key must be present.
       - { ref: impact-crater }
 ```
 
-Asserts a writable relation. The relation's `set` effects apply directly.
+Asserts a writable or stored relation. A relation with `set` applies those effects directly; a relation with `persistence` stores the tuple.
+
+### retract
+
+```yaml
+- retract:
+    relation: Aboard
+    args:
+      - { ref: player }
+      - { ref: canary }
+```
+
+Retracts a stored relation tuple. This is valid only for relations with `persistence`.
 
 ### set_fact
 
@@ -428,6 +454,9 @@ compare:
   left: Expression
   op: "==" | "!=" | "<" | "<=" | ">" | ">="
   right: Expression
+contains:
+  collection: Expression
+  item: Expression
 ```
 
 Validation:
@@ -461,6 +490,50 @@ Rules:
 - `{ var: name }` resolves an action parameter, pattern binding, rulebook parameter, trait parameter, or effect-local binding.
 - `{ field: ... }` is valid only in definitions that are allowed to access the referenced trait field.
 - `{ allocate: prefix }` is valid only as `create.id`.
+
+## Scoped Entity Id Authoring
+
+Entity ids compile to stable full ids. YAML may use nesting or an explicit parent/origin to avoid repeating long prefixes:
+
+```yaml
+story:
+  entities:
+    - id: mining-colony-5
+      kind: Destination
+      children:
+        - id: pointless-bar
+          kind: Destination
+        - id: object:portrait-of-enrick
+          kind: StoryObject
+    - id: control-console
+      parent: canary:bridge
+      kind: StoryObject
+```
+
+Compilation:
+
+- A nested child id is appended to its parent with `:`.
+- `parent: full:id` and `origin: full:id` are equivalent top-level shorthand for appending `id` to a full prefix.
+- `children`, `parent`, and `origin` are authoring syntax only; runtime entity ids are ordinary full ids.
+- Nesting or parent/origin does not assert containment, location, ownership, or any other relation.
+
+Scoped local references use a leading colon:
+
+```yaml
+rules:
+  - id: block-key
+    phase: before
+    match:
+      action: Examine
+      args:
+        target: { ref: ":object:key" }
+```
+
+Resolution rules:
+
+- `:local-id` resolves in the nearest entity scope, then outer scopes.
+- Top-level `story.assertions`, `story.facts`, and `story.start` may use `:local-id` only when the local id is unique in the document.
+- Full ids remain legal everywhere and are not rewritten.
 
 ## KindDefinition
 
@@ -583,6 +656,8 @@ Fields:
 - `traits`: ordered `TraitAttachment` list, default `[]`.
 - `fields`: optional shorthand map from trait id to field values.
 - `rules`: ordered `RuleDefinition` list, default `[]`.
+- `children`: ordered nested `EntitySpec` list, default `[]`.
+- `parent` / `origin`: optional full id prefix for a top-level entity. At most one may be present.
 - `metadata`: optional mapping ignored by the core runtime.
 
 Compilation:
@@ -632,7 +707,7 @@ story:
       args: [{ literal: tutorial }]
 ```
 
-Facts are remembered state, not current physical relation state.
+Facts are untyped legacy memory state. New authored memory should generally be a stored relation such as `Visited(actor, location)` or `SequenceComplete(sequence)`.
 
 ## Start
 
@@ -705,11 +780,12 @@ An implementation should validate in this order:
 6. Validate trait fields and parameter defaults.
 7. Validate relation predicates and setters.
 8. Validate action predicates and default effects.
-9. Expand kinds and rulebooks.
-10. Validate entity specs and initial assertions.
-11. Validate rule patterns, variables, guards, and effects.
-12. Instantiate initial `WorldState`.
-13. Run prelude/story invariants, such as reciprocal hops for a nova-like prelude.
+9. Expand scoped entity ids and local refs.
+10. Expand kinds and rulebooks.
+11. Validate entity specs and initial assertions.
+12. Validate rule patterns, variables, guards, and effects.
+13. Instantiate initial `WorldState`.
+14. Run prelude/story invariants, such as reciprocal hops for a nova-like prelude.
 
 ## Current Nova-Like Qualms Projection
 
@@ -719,5 +795,5 @@ The current game should become a prelude plus story:
 - `Presentable`, `Location`, `Relocatable`, `Container`, `Portable`, `Equipment`, `Actor`, `Vehicle`, `Boardable`, and `Jumpable` become traits.
 - Current `before` entries become `before` rules.
 - Current `use_rules` become `after` or `instead` rules matching `Use(source, target)`.
-- Current string facts become structured facts or structured relations.
+- Remaining string facts become stored relations where the shape is stable.
 - Current nested destinations become entities plus initial `Contains`/`At`/`Orbits` assertions.

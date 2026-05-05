@@ -16,15 +16,15 @@ This document describes the runtime model that should be shared by every Qualms 
 
 `TraitDefinition` describes a named capability. It may define fields, relation definitions, action definitions, rules, and constraints. A trait instance is the data for one trait attached to one entity.
 
-`RelationDefinition` is the public query interface over world state. A relation is pure when it only has a tester. A relation is writable when it also defines an assertion body. Effects can assert writable relations without running another action pipeline.
+`RelationDefinition` is the public query interface over world state. A relation is derived when it has a tester, writable when it defines an assertion body, and stored when it declares persistence. Effects can assert writable or stored relations without running another action pipeline.
 
 `ActionDefinition` describes a semantic transition request. Actions are what rules observe, block, replace, and extend.
 
-`Effect` is a primitive result instruction applied while resolving an action or rule. Effects mutate state, create/destroy entities, assert writable relations, set/clear memory, or emit output events. Effects do not recursively trigger action rules.
+`Effect` is a primitive result instruction applied while resolving an action or rule. Effects mutate state, create/destroy entities, assert or retract stored relations, assert writable relations, set/clear legacy memory facts, or emit output events. Effects do not recursively trigger action rules.
 
 `Rule` is a pattern plus phase plus guard plus effects. Rules match actions, not UI commands.
 
-`WorldState` stores entities, trait field values, memory facts, and emitted events. It does not need to remember authoring constructs such as kinds or rulebooks unless an implementation wants provenance for an editor.
+`WorldState` stores entities, trait field values, stored relation tuples, legacy memory facts, and emitted events. It does not need to remember authoring constructs such as kinds or rulebooks unless an implementation wants provenance for an editor.
 
 `KindDefinition` and `RuleBookDefinition` are compile-time authoring constructs. They may be retained as metadata, but they are not required for runtime action resolution.
 
@@ -45,12 +45,15 @@ classDiagram
   class WorldState {
     +entities: EntityStore
     +memory: MemoryStore
+    +current_relations: Set~RelationTuple~
+    +remembered_relations: Set~RelationTuple~
     +events: List~Event~
     +has_trait(entity, trait_id) bool
     +get_field(entity, trait_id, field_id) Value
     +set_field(entity, trait_id, field_id, value) void
     +test(relation_id, args) bool
     +assert(relation_id, args) EffectResult
+    +retract(relation_id, args) EffectResult
     +clone_for_transaction() WorldState
   }
 
@@ -81,6 +84,9 @@ classDiagram
   class RelationDefinition {
     +id: RelationId
     +parameters: List~ParameterDef~
+    +get: Predicate?
+    +set_effects: List~Effect~?
+    +persistence: current | remembered | both | null
     +test(state, args) bool
     +can_assert() bool
     +assert(state, args) List~Effect~
@@ -198,7 +204,7 @@ Parameterized traits are template expansions. For example, `Traversable<TravelAc
 
 ## Relation Definition
 
-Relations are public predicates over world state:
+Relations are public predicates over world state. A relation can be derived from fields, writable through a setter, stored directly, or both derived and writable through explicit effects:
 
 ```text
 relation At(r: Relocatable, l: Location)
@@ -209,12 +215,17 @@ relation At(r: Relocatable, l: Location)
 Required behavior:
 
 - `test(state, args)` is pure and deterministic.
-- `assert(state, args)` is allowed only when the relation defines a setter.
+- `assert(state, args)` is allowed when the relation defines a setter or declares persistence.
 - Asserting a writable relation applies the setter's effects directly.
+- Asserting a stored relation writes the relation tuple into its configured store.
+- `persistence: current` stores present-tense state; `remembered` stores past/long-lived state; `both` writes and tests against both.
+- `retract(state, args)` is allowed only for stored relations and removes the tuple from the configured store.
 - Asserting a relation does not create an `ActionAttempt` and does not run action rules.
-- A pure derived relation, such as `Nearby(a, b)`, has no setter and cannot be asserted.
+- A pure derived relation, such as `Nearby(a, b)`, has no setter or persistence and cannot be asserted.
 
 Writable relations are the preferred mutation surface for rules and action defaults. This lets story authors say `assert At(enemy, spawn_point)` without exposing `Relocatable.location` as the public schema.
+
+Stored relations are the preferred way to model remembered facts. For example, `Visited(actor, location)` can be `persistence: remembered` and asserted by an `after Enter` rule.
 
 ## Action Definition
 
@@ -281,6 +292,7 @@ Effects are primitive state/output instructions. Minimum required effects:
 
 ```text
 assert relation(args...)
+retract relation(args...)
 set_fact fact(args...)
 clear_fact fact(args...)
 emit event
@@ -291,7 +303,7 @@ revoke_trait entity trait
 set_field entity.trait.field value
 ```
 
-Preferred authored effects should use `assert relation(...)` instead of `set_field`. `set_field` exists for trait/action/relation definitions and low-level engine preludes; story content should rarely need it.
+Preferred authored effects should use `assert relation(...)` and `retract relation(...)` instead of `set_field` or untyped facts. `set_field` exists for trait/action/relation definitions and low-level engine preludes; story content should rarely need it.
 
 Required behavior:
 
@@ -318,9 +330,12 @@ fact fact(args...)
 has_trait entity trait
 equals left right
 compare left op right
+contains collection item
 ```
 
 Predicates are pure. They may query world state, relation tests, memory facts, action arguments, constants, and local rule bindings.
+
+Open TODO: once the prompt UI and coauthoring tools have more real usage, define a small query layer over entities, traits, and relations. The current object structure is enough for direct engine evaluation, but UI/tool projections will likely need supported queries rather than ad hoc scans.
 
 ## Action Resolution Sequence
 
