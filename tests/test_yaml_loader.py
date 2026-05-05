@@ -133,6 +133,42 @@ class YamlLoaderTests(unittest.TestCase):
         self.assertTrue(state.has_trait("room", "Container"))
         self.assertEqual(state.get_field("room", "Presentable", "name"), "Room")
 
+    def test_stored_remembered_relation_instantiates_from_initial_assertion(self) -> None:
+        path = write_yaml(
+            f"""
+            qualms: "0.1"
+            id: remembered-story
+            imports:
+              - "{CORE_PRELUDE}"
+            definitions:
+              relations:
+                - id: Visited
+                  persistence: remembered
+                  params:
+                    - id: actor
+                      type: ref<Actor>
+                    - id: location
+                      type: ref<Location>
+            story:
+              entities:
+                - id: player
+                  kind: Person
+                - id: room
+                  kind: Place
+              assertions:
+                - relation: Visited
+                  args:
+                    - {{ ref: player }}
+                    - {{ ref: room }}
+            """
+        )
+
+        definition = load_game_definition(path)
+        state = definition.instantiate()
+
+        self.assertTrue(state.test("Visited", ["player", "room"]))
+        self.assertIn(("Visited", ("player", "room")), state.remembered_relations)
+
     def test_unknown_trait_fails_validation(self) -> None:
         path = write_yaml(
             """

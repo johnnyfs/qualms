@@ -119,6 +119,46 @@ class CoreRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not writable"):
             state.assert_relation("Nearby", ["room-a", "room-b"])
 
+    def test_stored_remembered_relation_can_be_asserted_and_retracted(self) -> None:
+        visited = RelationDefinition(
+            id="Visited",
+            parameters=(
+                ParameterDefinition("actor", "entity"),
+                ParameterDefinition("location", "ref<Location>"),
+            ),
+            persistence="remembered",
+        )
+        forget = ActionDefinition(
+            id="ForgetVisit",
+            parameters=(
+                ParameterDefinition("actor", "entity"),
+                ParameterDefinition("location", "ref<Location>"),
+            ),
+            default_effects=(
+                {
+                    "retract": {
+                        "relation": "Visited",
+                        "args": [{"var": "actor"}, {"var": "location"}],
+                    }
+                },
+            ),
+        )
+        definition = movement_definition(extra_relations=(visited,), extra_actions=(forget,))
+        state = definition.instantiate()
+
+        state.assert_relation("Visited", ["player", "room-a"])
+        self.assertTrue(state.test("Visited", ["player", "room-a"]))
+        self.assertIn(("Visited", ("player", "room-a")), state.remembered_relations)
+        self.assertNotIn(("Visited", ("player", "room-a")), state.current_relations)
+
+        result = RulesEngine(definition).attempt(
+            state,
+            ActionAttempt("ForgetVisit", {"actor": "player", "location": "room-a"}),
+        )
+
+        self.assertTrue(result.succeeded)
+        self.assertFalse(state.test("Visited", ["player", "room-a"]))
+
     def test_action_default_effects_apply_without_rules(self) -> None:
         definition = movement_definition()
         state = definition.instantiate()

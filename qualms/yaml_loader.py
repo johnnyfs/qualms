@@ -214,16 +214,22 @@ def parse_field(raw: Any, context: str) -> FieldDefinition:
 def parse_relation(raw: Any, context: str) -> RelationDefinition:
     mapping = require_mapping_value(raw, context)
     relation_id = require_id(mapping.get("id"), f"{context}.id")
-    if "get" not in mapping:
-        raise SchemaError(f"{context}.{relation_id}.get is required")
+    persistence = mapping.get("persistence")
+    if persistence is not None:
+        persistence = require_string(persistence, f"{context}.{relation_id}.persistence")
+        if persistence not in {"current", "remembered", "both"}:
+            raise SchemaError(f"{context}.{relation_id}.persistence must be current, remembered, or both")
+    if "get" not in mapping and persistence is None:
+        raise SchemaError(f"{context}.{relation_id}.get is required unless persistence is set")
     set_effects = mapping.get("set")
     if set_effects is not None and not isinstance(set_effects, list):
         raise SchemaError(f"{context}.{relation_id}.set must be a list")
     return RelationDefinition(
         id=relation_id,
         parameters=tuple(parse_parameters(mapping.get("params", []), f"{context}.{relation_id}.params")),
-        get=copy.deepcopy(mapping["get"]),
+        get=copy.deepcopy(mapping.get("get")),
         set_effects=tuple(copy.deepcopy(set_effects)) if set_effects is not None else None,
+        persistence=persistence,
     )
 
 
@@ -455,6 +461,12 @@ def validate_effect_refs(effects: tuple[dict[str, Any], ...] | list[dict[str, An
                 raise SchemaError(f"{context}[{index}] references unknown relation {relation_id}")
             if not definition.relation(relation_id).can_assert():
                 raise SchemaError(f"{context}[{index}] references non-writable relation {relation_id}")
+        elif op == "retract":
+            relation_id = operand.get("relation")
+            if relation_id not in definition.relations:
+                raise SchemaError(f"{context}[{index}] references unknown relation {relation_id}")
+            if definition.relation(relation_id).persistence is None:
+                raise SchemaError(f"{context}[{index}] references non-stored relation {relation_id}")
         elif op in {"set_fact", "clear_fact", "emit", "set_field", "destroy"}:
             continue
         elif op == "create":

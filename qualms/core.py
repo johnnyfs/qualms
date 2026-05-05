@@ -84,11 +84,12 @@ class Entity:
 class RelationDefinition:
     id: str
     parameters: tuple[ParameterDefinition, ...]
-    get: PredicateSpec
+    get: PredicateSpec | None = None
     set_effects: tuple[EffectSpec, ...] | None = None
+    persistence: str | None = None
 
     def can_assert(self) -> bool:
-        return self.set_effects is not None
+        return self.set_effects is not None or self.persistence is not None
 
 
 @dataclass(frozen=True)
@@ -154,6 +155,8 @@ class WorldState:
     definition: "GameDefinition"
     entities: dict[str, Entity] = field(default_factory=dict)
     memory: MemoryStore = field(default_factory=MemoryStore)
+    current_relations: set[tuple[str, tuple[Any, ...]]] = field(default_factory=set)
+    remembered_relations: set[tuple[str, tuple[Any, ...]]] = field(default_factory=set)
     events: list[dict[str, Any]] = field(default_factory=list)
     allocators: dict[str, int] = field(default_factory=dict)
 
@@ -163,6 +166,8 @@ class WorldState:
     def replace_from(self, other: "WorldState") -> None:
         self.entities = other.entities
         self.memory = other.memory
+        self.current_relations = other.current_relations
+        self.remembered_relations = other.remembered_relations
         self.events = other.events
         self.allocators = other.allocators
 
@@ -193,20 +198,60 @@ class WorldState:
 
     def test(self, relation_id: str, args: list[Any] | tuple[Any, ...]) -> bool:
         relation = self.definition.relation(relation_id)
+        if relation.persistence is not None:
+            return self._stored_relation_key(relation_id, args) in self._relation_store_for_test(relation.persistence)
+        if relation.get is None:
+            raise ValueError(f"relation {relation_id} has no tester")
         bindings = relation_bindings(relation, args)
         return bool(evaluate_predicate(relation.get, self, bindings))
 
     def assert_relation(self, relation_id: str, args: list[Any] | tuple[Any, ...]) -> None:
         relation = self.definition.relation(relation_id)
+        if relation.persistence is not None:
+            key = self._stored_relation_key(relation_id, args)
+            for store in self._relation_stores_for_write(relation.persistence):
+                store.add(key)
+            return
         if relation.set_effects is None:
             raise ValueError(f"relation {relation_id} is not writable")
         bindings = relation_bindings(relation, args)
         apply_effects(relation.set_effects, self, bindings)
 
+    def retract_relation(self, relation_id: str, args: list[Any] | tuple[Any, ...]) -> None:
+        relation = self.definition.relation(relation_id)
+        if relation.persistence is None:
+            raise ValueError(f"relation {relation_id} is not stored")
+        key = self._stored_relation_key(relation_id, args)
+        for store in self._relation_stores_for_write(relation.persistence):
+            store.discard(key)
+
     def allocate(self, prefix: str) -> str:
         next_value = self.allocators.get(prefix, 1)
         self.allocators[prefix] = next_value + 1
         return f"{prefix}-{next_value}"
+
+    def _stored_relation_key(self, relation_id: str, args: list[Any] | tuple[Any, ...]) -> tuple[str, tuple[Any, ...]]:
+        relation = self.definition.relation(relation_id)
+        relation_bindings(relation, args)
+        return (relation_id, tuple(make_hashable(arg) for arg in args))
+
+    def _relation_stores_for_write(self, persistence: str) -> tuple[set[tuple[str, tuple[Any, ...]]], ...]:
+        if persistence == "current":
+            return (self.current_relations,)
+        if persistence == "remembered":
+            return (self.remembered_relations,)
+        if persistence == "both":
+            return (self.current_relations, self.remembered_relations)
+        raise ValueError(f"unknown relation persistence {persistence}")
+
+    def _relation_store_for_test(self, persistence: str) -> set[tuple[str, tuple[Any, ...]]]:
+        if persistence == "current":
+            return self.current_relations
+        if persistence == "remembered":
+            return self.remembered_relations
+        if persistence == "both":
+            return self.current_relations | self.remembered_relations
+        raise ValueError(f"unknown relation persistence {persistence}")
 
 
 @dataclass(frozen=True)
@@ -543,6 +588,10 @@ def apply_effect(effect: EffectSpec, state: WorldState, bindings: Bindings) -> N
     if op == "assert":
         args = [evaluate_expression(arg, state, bindings) for arg in operand.get("args", [])]
         state.assert_relation(operand["relation"], args)
+        return
+    if op == "retract":
+        args = [evaluate_expression(arg, state, bindings) for arg in operand.get("args", [])]
+        state.retract_relation(operand["relation"], args)
         return
     if op == "set_fact":
         args = [evaluate_expression(arg, state, bindings) for arg in operand.get("args", [])]
