@@ -3531,6 +3531,9 @@ def run_curses(stdscr: curses.window, world: StoryWorld, data_path: Path, editor
 
 
 def run_cli(world: StoryWorld, data_path: Path, editor_enabled: bool = False) -> None:
+    if editor_enabled:
+        run_cli_app_editor(world, data_path)
+        return
     prompter = CliPrompter()
     state = initial_game_state(world, editor_enabled)
     state.view = "system"
@@ -3552,6 +3555,26 @@ def run_cli(world: StoryWorld, data_path: Path, editor_enabled: bool = False) ->
         world, state, should_quit = handle_cli_command(prompter, world, data_path, editor_enabled, state, command)
         if should_quit:
             return
+
+
+def run_cli_app_editor(world: StoryWorld, data_path: Path) -> None:
+    from cli_app import CliAppDeps, run_cli_app
+
+    state = initial_game_state(world, True)
+    deps = CliAppDeps(
+        state=state,
+        adventure_screen_lines=adventure_screen_lines,
+        append_gameplay_screen=append_gameplay_screen,
+        append_gameplay_entry=append_gameplay_entry,
+        handle_cli_command=handle_cli_command,
+        run_coauthor=run_coauthor_editor_prompt,
+        reload_world=reload_world_preserving_state,
+        coauthor_command_words=coauthor_command_words,
+        command_words_for_state=command_words_for_state,
+        normalize_command=normalize_command,
+        focus_descriptor=focus_descriptor,
+    )
+    run_cli_app(world, data_path, True, deps)
 
 
 def run_generic_cli(definition: Any, data_path: Path) -> None:
@@ -3986,6 +4009,20 @@ def current_destination(world: StoryWorld, state: GameState) -> LandingOption | 
     if orbital is None:
         return None
     return destination_at_path(orbital, state.destination_path)
+
+
+def focus_descriptor(world: StoryWorld, state: GameState) -> tuple[str, str]:
+    destination = current_destination(world, state)
+    if destination is not None:
+        return destination.id, destination.name
+    orbital = current_orbital(world, state)
+    if orbital is not None:
+        return orbital.id, orbital.name
+    try:
+        system = world.system_by_id(state.system_id)
+    except KeyError:
+        return state.system_id or "?", state.system_id or "?"
+    return system.id, system.name
 
 
 def linked_destination_entries(state: GameState, orbital: Orbital, destination: LandingOption) -> list[tuple[list[int], LandingOption]]:
