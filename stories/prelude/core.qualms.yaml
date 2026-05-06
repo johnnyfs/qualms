@@ -18,6 +18,14 @@ definitions:
     - id: Actor
 
     - id: Location
+      relations:
+        - id: Path
+          persistence: current
+          params:
+            - id: source
+              type: ref<Location>
+            - id: target
+              type: ref<Location>
 
     - id: Relocatable
       fields:

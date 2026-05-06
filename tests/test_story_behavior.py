@@ -3,18 +3,24 @@ from __future__ import annotations
 import copy
 import importlib.util
 import io
-import os
 import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
 STELLAR = ROOT / "stories" / "stellar" / "story.qualms.yaml"
 BLANK = ROOT / "examples" / "blank" / "story.qualms.yaml"
 SOL_PROOF = ROOT / "examples" / "sol-proof" / "story.qualms.yaml"
+
+
+class TtyStringIO(io.StringIO):
+    def isatty(self) -> bool:
+        return True
 
 
 def load_story_module():
@@ -425,14 +431,15 @@ class StoryCliTests(unittest.TestCase):
         self.assertIn("quit", commands)
         self.assertNotIn("continue", commands)
 
-    def test_cli_status_bar_places_location_and_mode_flags(self) -> None:
-        bar = dq.format_status_bar("Blemish: Mining Colony 5", "Editing On", 56, styled=False)
+    def test_editor_command_words_include_coauthor_prompt(self) -> None:
+        state = dq.initial_game_state(self.world, editor_enabled=True)
+        state.view = "system"
 
-        self.assertEqual(len(bar), 56)
-        self.assertTrue(bar.startswith(" Blemish: Mining Colony 5"))
-        self.assertTrue(bar.endswith("Editing On "))
+        commands = dq.command_words_for_state(self.world, state)
 
-    def test_editor_cli_render_uses_status_flag_without_editor_menu(self) -> None:
+        self.assertIn("prompt", commands)
+
+    def test_cli_render_prints_story_lines_without_status_bar(self) -> None:
         state = dq.initial_game_state(self.world, editor_enabled=True)
         state.view = "system"
         output = io.StringIO()
@@ -442,63 +449,163 @@ class StoryCliTests(unittest.TestCase):
 
         text = output.getvalue()
         lines = text.splitlines()
-        self.assertTrue(lines[1].startswith(" Blemish: Mining Colony 5"))
-        self.assertTrue(lines[1].endswith("Editing On "))
+        self.assertTrue(lines[1].startswith("Blemish: Mining Colony 5"))
+        self.assertNotIn("Editing On", text)
         self.assertNotIn("\nEditor\n", text)
         self.assertNotIn("A: add", text)
 
     def test_cli_prompter_keeps_plain_mode_without_tty(self) -> None:
-        prompter = dq.CliPrompter()
+        with (
+            patch.object(dq.sys, "stdin", Mock(isatty=lambda: False)),
+            patch.object(dq.sys, "stdout", Mock(isatty=lambda: False)),
+        ):
+            prompter = dq.CliPrompter()
 
-        self.assertFalse(prompter.fullscreen_available)
+        self.assertIsNone(prompter._session)
+        self.assertFalse(prompter._prompt_toolkit_available)
 
-    def test_fullscreen_cli_transcript_appends_commands_and_results(self) -> None:
-        prompter = dq.CliPrompter()
+    def test_render_cli_lines_prints_direct_output_blocks(self) -> None:
+        output = io.StringIO()
 
-        prompter.append_screen_lines(["First room.", "", "A thing is here."])
-        prompter.append_screen_command("inventory")
-        prompter.append_screen_lines(["Inventory: empty."])
+        with redirect_stdout(output):
+            dq.render_cli_lines(["First room.", "", "A thing is here."])
 
-        self.assertEqual(
-            prompter._screen_transcript,
-            [
-                "",
-                "",
-                "",
-                "",
-                "",
-                "First room.",
-                "",
-                "A thing is here.",
-                "",
-                "",
-                "> inventory",
-                "",
-                "Inventory: empty.",
-                "",
-            ],
+        self.assertEqual(output.getvalue().splitlines(), ["", "First room.", "", "A thing is here."])
+
+    def test_render_cli_lines_styles_title_and_generic_object_lists_on_tty(self) -> None:
+        output = TtyStringIO()
+
+        with redirect_stdout(output):
+            dq.render_cli_lines(["First room.", "", "You see: Rock and Spade."])
+
+        self.assertIn(f"{dq.CLI_BRIGHT}First room.{dq.CLI_RESET}", output.getvalue())
+        self.assertIn(f"You see: {dq.CLI_BRIGHT}Rock and Spade{dq.CLI_RESET}.", output.getvalue())
+
+    def test_render_cli_lines_styles_coauthor_transcript_on_tty(self) -> None:
+        output = TtyStringIO()
+
+        with redirect_stdout(output):
+            dq.render_cli_lines(["Coauthor:", "Agent: added a room", "Tool call: qualms__validate {}"])
+
+        text = output.getvalue()
+        self.assertIn(f"{dq.CLI_CYAN}Agent: added a room{dq.CLI_RESET}", text)
+        self.assertIn(f"{dq.CLI_GRAY}Tool call: qualms__validate {{}}{dq.CLI_RESET}", text)
+
+    def test_render_cli_lines_skips_empty_blocks(self) -> None:
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            dq.render_cli_lines([])
+
+        self.assertEqual(output.getvalue(), "")
+
+    def test_cli_prompter_prints_blank_line_before_command_prompt(self) -> None:
+        with (
+            patch.object(dq.sys, "stdin", Mock(isatty=lambda: False)),
+            patch.object(dq.sys, "stdout", Mock(isatty=lambda: False)),
+        ):
+            prompter = dq.CliPrompter()
+        output = io.StringIO()
+
+        with patch("builtins.input", return_value="look"), redirect_stdout(output):
+            command = prompter.read_command([])
+
+        self.assertEqual(command, "look")
+        self.assertEqual(output.getvalue(), "\n")
+
+    def test_tab_toggle_enters_and_leaves_coauthor_mode(self) -> None:
+        self.state.editor_enabled = True
+
+        self.world, self.state, should_quit = dq.handle_cli_command(
+            None,
+            self.world,
+            STELLAR,
+            True,
+            self.state,
+            dq.CLI_TOGGLE_COAUTHOR,
         )
 
-    def test_fullscreen_transcript_scroll_offset_tracks_tail(self) -> None:
-        original_terminal_size = dq.shutil.get_terminal_size
-        try:
-            dq.shutil.get_terminal_size = lambda fallback=(80, 24): os.terminal_size((40, 7))
+        self.assertFalse(should_quit)
+        self.assertTrue(self.state.coauthor_mode)
+        self.assertIn("Coauthor mode", self.state.message)
 
-            text = dq.transcript_body_text(["one", "two", "three", "four", "five"])
-            visible_height = dq.transcript_visible_height(["one", "two", "three", "four", "five"])
-            bottom = dq.transcript_vertical_scroll(["one", "two", "three", "four", "five"], 0)
-            scrolled_up = dq.transcript_vertical_scroll(["one", "two", "three", "four", "five"], 2)
-            cursor = dq.transcript_cursor_line(["one", "two", "three", "four", "five"], 0)
-        finally:
-            dq.shutil.get_terminal_size = original_terminal_size
+        self.world, self.state, should_quit = dq.handle_cli_command(
+            None,
+            self.world,
+            STELLAR,
+            True,
+            self.state,
+            dq.CLI_TOGGLE_COAUTHOR,
+        )
 
-        self.assertEqual(text.splitlines(), ["one", "two", "three", "four", "five"])
-        self.assertEqual(visible_height, 4)
-        self.assertEqual(bottom, 1)
-        self.assertEqual(scrolled_up, 0)
-        self.assertEqual(cursor, bottom)
+        self.assertFalse(should_quit)
+        self.assertFalse(self.state.coauthor_mode)
+        self.assertEqual(self.state.message, "Story mode.")
+
+    def test_editor_prompt_command_runs_coauthor_without_adventure_handling(self) -> None:
+        result = SimpleNamespace(
+            committed=False,
+            transcript=[
+                SimpleNamespace(kind="agent", content="Request: add a room", name=None),
+                SimpleNamespace(kind="tool_call", content="{}", name="qualms__validate"),
+                SimpleNamespace(kind="tool_result", content="Validation succeeded.", name="qualms__validate"),
+            ],
+            output=SimpleNamespace(
+                message="Added a room.",
+                summary="Added a room.",
+                feedback=SimpleNamespace(confusing="none", tooling="none"),
+            ),
+        )
+        self.state.editor_enabled = True
+
+        with patch.object(dq, "run_coauthor_editor_prompt", return_value=result) as runner:
+            self.world, self.state, should_quit = dq.handle_cli_command(
+                None,
+                self.world,
+                STELLAR,
+                True,
+                self.state,
+                "prompt: add a room",
+            )
+
+        self.assertFalse(should_quit)
+        self.assertEqual(runner.call_args.args[:2], (STELLAR, "add a room"))
+        self.assertIs(runner.call_args.args[2], self.state)
+        self.assertIn("Coauthor:", self.state.message)
+        self.assertIn("Tool call: qualms__validate {}", self.state.message)
+        self.assertIn("Summary: Added a room.", self.state.message)
+
+    def test_coauthor_mode_sends_plain_text_to_session_runner(self) -> None:
+        result = SimpleNamespace(
+            committed=False,
+            transcript=[SimpleNamespace(kind="agent", content="No edits yet.", name=None)],
+            output=SimpleNamespace(
+                message="No edits yet.",
+                summary="No edits yet.",
+                feedback=SimpleNamespace(confusing="", tooling=""),
+            ),
+        )
+        self.state.editor_enabled = True
+        self.state.coauthor_mode = True
+        self.state.gameplay_history = ["Story: Observation Deck", "Player: look"]
+
+        with patch.object(dq, "run_coauthor_editor_prompt", return_value=result) as runner:
+            self.world, self.state, should_quit = dq.handle_cli_command(
+                None,
+                self.world,
+                STELLAR,
+                True,
+                self.state,
+                "what should we add next?",
+            )
+
+        self.assertFalse(should_quit)
+        self.assertEqual(runner.call_args.args[:2], (STELLAR, "what should we add next?"))
+        self.assertIs(runner.call_args.args[2], self.state)
+        self.assertIn("No edits yet.", self.state.message)
 
     def test_adventure_cli_only_reprints_location_on_change_or_look(self) -> None:
+        mining_colony = destination_by_ids(self.world, "mining-colony-5")
         self.assertIn("Blemish: Mining Colony 5", dq.adventure_screen_lines(self.world, self.state)[0])
         self.assertEqual(dq.adventure_screen_lines(self.world, self.state), [])
 
@@ -524,9 +631,101 @@ class StoryCliTests(unittest.TestCase):
         self.assertFalse(should_quit)
         self.assertIn("Blemish: Pointless Bar", dq.adventure_screen_lines(self.world, self.state)[0])
 
+        self.world, self.state, should_quit = dq.handle_cli_command(
+            None,
+            self.world,
+            STELLAR,
+            False,
+            self.state,
+            "go Mining Colony 5",
+        )
+        self.assertFalse(should_quit)
+        revisit_lines = dq.adventure_screen_lines(self.world, self.state)
+        self.assertIn("Blemish: Mining Colony 5", revisit_lines[0])
+        self.assertNotIn(mining_colony.description, "\n".join(revisit_lines))
+
         self.world, self.state, should_quit = dq.handle_cli_command(None, self.world, STELLAR, False, self.state, "look")
         self.assertFalse(should_quit)
-        self.assertIn("Blemish: Pointless Bar", dq.adventure_screen_lines(self.world, self.state)[0])
+        look_lines = dq.adventure_screen_lines(self.world, self.state)
+        self.assertIn("Blemish: Mining Colony 5", look_lines[0])
+        self.assertIn(mining_colony.description, "\n".join(look_lines))
+
+    def test_adventure_cli_lists_jump_points_from_orbit(self) -> None:
+        self.state.orbital_id = "rainbow"
+        self.state.destination_path = []
+        self.state.docked_path = []
+
+        lines = dq.adventure_screen_lines(self.world, self.state)
+        commands = dq.command_words_for_state(self.world, self.state)
+
+        self.assertTrue(any(line == "Jump points: Abegna." for line in lines))
+        self.assertIn("jump Abegna", commands)
+
+    def test_adventure_cli_does_not_have_special_go_system_from_orbit(self) -> None:
+        self.state.orbital_id = "rainbow"
+        self.state.destination_path = []
+        self.state.docked_path = []
+
+        self.world, self.state, should_quit = dq.handle_cli_command(
+            None,
+            self.world,
+            STELLAR,
+            False,
+            self.state,
+            "go system",
+        )
+
+        self.assertFalse(should_quit)
+        self.assertEqual(self.state.orbital_id, "rainbow")
+        self.assertEqual(self.state.message, "You cannot go to system.")
+
+    def test_adventure_cli_can_jump_from_orbital_orbit(self) -> None:
+        self.state.orbital_id = "rainbow"
+        self.state.destination_path = []
+        self.state.docked_path = []
+        self.state.boarded_ship_id = "canary"
+        self.state.player_ship_id = "canary"
+        self.state.ship_locations["canary"] = "orbit:empty-system:rainbow"
+        self.state.ship_fuel["canary"] = 1
+
+        self.world, self.state, should_quit = dq.handle_cli_command(
+            None,
+            self.world,
+            STELLAR,
+            False,
+            self.state,
+            "jump Abegna",
+        )
+
+        self.assertFalse(should_quit)
+        self.assertEqual(self.state.system_id, "abegna")
+        self.assertIsNone(self.state.orbital_id)
+        self.assertEqual(self.state.ship_locations["canary"], "system:abegna")
+
+    def test_adventure_cli_lists_parent_destinations_as_exits(self) -> None:
+        self.world, self.state, should_quit = dq.handle_cli_command(
+            None,
+            self.world,
+            STELLAR,
+            False,
+            self.state,
+            "go Pointless Bar",
+        )
+        self.assertFalse(should_quit)
+        lines = dq.adventure_screen_lines(self.world, self.state)
+
+        self.assertTrue(any(line == "Exits: Mining Colony 5." for line in lines))
+
+        self.world, self.state, should_quit = dq.handle_cli_command(
+            None,
+            self.world,
+            STELLAR,
+            False,
+            self.state,
+            "go Mining Colony 5",
+        )
+        self.assertFalse(should_quit)
+        self.assertIn("Blemish: Mining Colony 5", dq.adventure_screen_lines(self.world, self.state)[0])
 
     def test_generic_cli_contract_and_view_for_stellar_story(self) -> None:
         definition = dq.load_game_definition(STELLAR)
@@ -544,10 +743,17 @@ class StoryCliTests(unittest.TestCase):
         view = dq.generic_cli_view(generic_state)
 
         self.assertEqual(view.location.name, "Pointless Bar")
+        self.assertIn("Mining Colony 5", [target.name for target in view.go_targets])
+        self.assertIn("go Mining Colony 5", [action.command for action in view.actions])
         self.assertIn("Stu", [person.name for person in view.people])
         self.assertIn("Portrait of Enrick", [thing.name for thing in view.things])
         self.assertIn("take Portrait of Enrick", [action.command for action in view.actions])
         self.assertIn("talk to Stu", [action.command for action in view.actions])
+
+        go_colony = next(action for action in view.actions if action.command == "go Mining Colony 5")
+        result = generic_state.engine.attempt(generic_state.runtime_state, dq.ActionAttempt(go_colony.action_id, go_colony.args))
+        self.assertEqual(result.status, "succeeded")
+        self.assertEqual(dq.generic_cli_view(generic_state).location.name, "Mining Colony 5")
 
     def test_generic_cli_contract_reports_missing_core_support(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -584,6 +790,23 @@ story:
         self.assertIn("restart", commands)
         self.assertIn("quit", commands)
         self.assertNotIn("continue", commands)
+
+    def test_generic_cli_includes_parent_destinations_as_go_targets(self) -> None:
+        definition = dq.load_game_definition(STELLAR)
+        state = dq.initial_generic_cli_state(definition)
+
+        state, should_quit = dq.handle_generic_cli_command(state, "go Pointless Settlement", STELLAR)
+        self.assertFalse(should_quit)
+        view = dq.generic_cli_view(state)
+        self.assertEqual(
+            [target.name for target in view.go_targets],
+            ["Your place", "Airlock", "Mining Colony 5"],
+        )
+
+        state, should_quit = dq.handle_generic_cli_command(state, "go Your place", STELLAR)
+        self.assertFalse(should_quit)
+        view = dq.generic_cli_view(state)
+        self.assertEqual([target.name for target in view.go_targets], ["Pointless Settlement"])
 
     def test_generic_cli_only_reprints_location_on_change_or_look(self) -> None:
         definition = dq.load_game_definition(STELLAR)

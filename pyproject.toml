@@ -5,6 +5,8 @@ description = "Rules-driven story engine and Dark Qualms story prototype."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "pydantic>=2.12",
+    "pydantic-ai-slim[anthropic,openai]>=1.0",
     "PyYAML>=6.0",
     "prompt-toolkit>=3.0",
 ]

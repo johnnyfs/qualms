@@ -890,6 +890,54 @@ story:
     args:
     - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine:collapsed-entrance
     - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine
+  - relation: Path
+    args:
+    - ref: empty-system:bolorus:abandoned-mining-platform:command-tower
+    - ref: empty-system:bolorus:abandoned-mining-platform
+  - relation: Path
+    args:
+    - ref: empty-system:bolorus:abandoned-mining-platform:command-tower:command-center
+    - ref: empty-system:bolorus:abandoned-mining-platform:command-tower
+  - relation: Path
+    args:
+    - ref: empty-system:bolorus:abandoned-mining-platform:rig-managers-office
+    - ref: empty-system:bolorus:abandoned-mining-platform
+  - relation: Path
+    args:
+    - ref: empty-system:rainbow:mining-colony-5:pointless-bar
+    - ref: empty-system:rainbow:mining-colony-5
+  - relation: Path
+    args:
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement
+    - ref: empty-system:rainbow:mining-colony-5
+  - relation: Path
+    args:
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:your-place
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement
+  - relation: Path
+    args:
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement
+  - relation: Path
+    args:
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock
+  - relation: Path
+    args:
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:abandoned-quarry
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface
+  - relation: Path
+    args:
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface
+  - relation: Path
+    args:
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine:impact-crater
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine
+  - relation: Path
+    args:
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine:collapsed-entrance
+    - ref: empty-system:rainbow:mining-colony-5:pointless-settlement:airlock:lunar-surface:active-mine
   - relation: At
     args:
     - ref: abegna:abegna-a

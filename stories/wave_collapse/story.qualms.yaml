@@ -1,0 +1,221 @@
+qualms: '0.1'
+id: wave_collapse
+imports:
+- ../prelude/nova-qualms.qualms.yaml
+metadata:
+  local_id_map:
+    player: player
+    wave-collapse: wave-collapse
+    needle: wave-collapse:needle
+    observation-deck: wave-collapse:needle:observation-deck
+    docking-spur: wave-collapse:needle:docking-spur
+    sparrow: wave-collapse:sparrow
+    fuel-cradle: wave-collapse:needle:docking-spur:object:fuel-cradle
+    signal-archive: wave-collapse:needle:signal-archive
+    beacon-control: wave-collapse:needle:beacon-control
+story:
+  start:
+    actor: player
+    system: wave-collapse
+    location: wave-collapse:needle:observation-deck
+  entities:
+  - id: player
+    kind: Player
+    fields:
+      Presentable:
+        name: Player
+        description: ''
+    metadata:
+      role: player
+      local_id: player
+  - id: wave-collapse
+    kind: System
+    fields:
+      Presentable:
+        name: Wave Collapse
+        description: A white dwarf system gone quiet around a chain of failing survey
+          beacons.
+      StarSystem:
+        star_type: White dwarf
+        x: 0.0
+        y: 0.0
+        hops: []
+    metadata:
+      local_id: wave-collapse
+  - id: wave-collapse:needle
+    kind: Station
+    fields:
+      Presentable:
+        name: Needle Station
+        description: A narrow observatory station threaded through the white dwarf's
+          magnetosphere.
+      OrbitalBody:
+        orbital_type: Station
+        parent: null
+        default_landing_path:
+        - observation-deck
+    metadata:
+      local_id: needle
+      source_type: Station
+  - id: wave-collapse:needle:observation-deck
+    kind: Destination
+    fields:
+      Presentable:
+        name: Observation Deck
+        description: The deck is dark except for probability plots stuttering across
+          the forward glass.
+    metadata:
+      local_id: observation-deck
+      display_kind: Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules: []
+  - id: wave-collapse:needle:docking-spur
+    kind: Destination
+    traits:
+    - id: Port
+    fields:
+      Presentable:
+        name: Docking Spur
+        description: A cold service spur juts from Needle Station, its single berth
+          framed by amber docking clamps and frost-scored guidance lines.
+    metadata:
+      local_id: docking-spur
+      display_kind: Destination
+      port: true
+      visible_when: []
+      visible_unless: []
+    rules: []
+  - id: wave-collapse:sparrow
+    kind: Ship
+    fields:
+      Presentable:
+        name: Skiff Sparrow
+        description: A compact station skiff with a patched hull, a cramped cockpit,
+          and a jump drive that hums like a nervous instrument.
+      Vehicle:
+        abilities: []
+    metadata:
+      local_id: sparrow
+      unlock: false
+      controlled: true
+      equipment_slots: []
+      visible_when: []
+      visible_unless: []
+    rules: []
+  - id: wave-collapse:needle:docking-spur:object:fuel-cradle
+    kind: StoryObject
+    traits:
+    - id: FuelStation
+    fields:
+      Presentable:
+        name: Fuel Cradle
+        description: A ribbed refueling cradle hooks into the berth plumbing, its
+          pressure gauges lacquered with warning chevrons and old maintenance tape.
+      FuelStation:
+        active: true
+    metadata:
+      local_id: fuel-cradle
+      interactions:
+      - Examine
+      collectable: false
+      fuel_station: true
+      visible_when: []
+      visible_unless: []
+    rules: []
+  - id: wave-collapse:needle:signal-archive
+    kind: Destination
+    fields:
+      Presentable:
+        name: Signal Archive
+        description: Cold storage racks climb into the dark around sealed reels of
+          probability telemetry, each labeled in station shorthand and faded hazard
+          ink.
+    metadata:
+      local_id: signal-archive
+      display_kind: Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules: []
+  - id: wave-collapse:needle:beacon-control
+    kind: Destination
+    fields:
+      Presentable:
+        name: Beacon Control
+        description: A narrow control room rings an antique survey-beacon console
+          with amber scopes, cracked keycaps, and a wall of folded antenna diagrams.
+    metadata:
+      local_id: beacon-control
+      display_kind: Destination
+      port: false
+      visible_when: []
+      visible_unless: []
+    rules: []
+  assertions:
+  - relation: At
+    args:
+    - ref: wave-collapse:needle
+    - ref: wave-collapse
+  - relation: At
+    args:
+    - ref: wave-collapse:needle:observation-deck
+    - ref: wave-collapse:needle
+  - relation: At
+    args:
+    - ref: wave-collapse:needle:docking-spur
+    - ref: wave-collapse:needle
+  - relation: DockedAt
+    args:
+    - ref: wave-collapse:sparrow
+    - ref: wave-collapse:needle:docking-spur
+  - relation: ControlledBy
+    args:
+    - ref: wave-collapse:sparrow
+    - ref: player
+  - relation: Path
+    args:
+    - ref: wave-collapse:needle:observation-deck
+    - ref: wave-collapse:needle:docking-spur
+  - relation: Path
+    args:
+    - ref: wave-collapse:needle:docking-spur
+    - ref: wave-collapse:needle:observation-deck
+  - relation: At
+    args:
+    - ref: wave-collapse:needle:docking-spur:object:fuel-cradle
+    - ref: wave-collapse:needle:docking-spur
+  - relation: At
+    args:
+    - ref: wave-collapse:needle:signal-archive
+    - ref: wave-collapse:needle
+  - relation: At
+    args:
+    - ref: wave-collapse:needle:beacon-control
+    - ref: wave-collapse:needle
+  - relation: Path
+    args:
+    - ref: wave-collapse:needle:observation-deck
+    - ref: wave-collapse:needle:beacon-control
+  - relation: Path
+    args:
+    - ref: wave-collapse:needle:beacon-control
+    - ref: wave-collapse:needle:observation-deck
+  - relation: Path
+    args:
+    - ref: wave-collapse:needle:observation-deck
+    - ref: wave-collapse:needle:signal-archive
+  - relation: Path
+    args:
+    - ref: wave-collapse:needle:signal-archive
+    - ref: wave-collapse:needle:observation-deck
+  - relation: Path
+    args:
+    - ref: wave-collapse:needle:beacon-control
+    - ref: wave-collapse:needle:signal-archive
+  - relation: Path
+    args:
+    - ref: wave-collapse:needle:signal-archive
+    - ref: wave-collapse:needle:beacon-control
+  facts: []

@@ -34,6 +34,7 @@ class StoryYamlConverter:
         self.assertions: list[dict[str, Any]] = []
         self.local_id_map: dict[str, str] = {}
         self.pending_rules: list[tuple[str, str, Any]] = []
+        self.pending_paths: list[tuple[str, list[str]]] = []
 
     def convert(self, world: Any) -> dict[str, Any]:
         self.add_entity(
@@ -121,6 +122,8 @@ class StoryYamlConverter:
         )
         self.assert_relation("At", [{"ref": destination_id}, {"ref": parent_entity_id}])
         self.pending_rules.append((destination_id, "destination", option))
+        if getattr(option, "paths", ()):
+            self.pending_paths.append((destination_id, list(option.paths)))
         for story_object in option.objects:
             self.convert_object(story_object, destination_id)
         for npc in option.npcs:
@@ -225,6 +228,9 @@ class StoryYamlConverter:
                 rules.extend(before_rules(entity_id, "npc", source.before, self.local_id_map))
             elif kind == "ship":
                 rules.extend(before_rules(entity_id, "ship", source.before, self.local_id_map))
+        for source_id, target_local_ids in self.pending_paths:
+            for target_local_id in target_local_ids:
+                self.assert_relation("Path", [{"ref": source_id}, {"ref": self.lookup_local_id(target_local_id)}])
 
     def add_entity(
         self,
