@@ -6,3 +6,11 @@ export_presets.cfg
 *.translation
 __pycache__/
 .venv/
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+.pnpm-store/
+coverage/
+.DS_Store

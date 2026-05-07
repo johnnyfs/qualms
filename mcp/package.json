@@ -1,0 +1,10 @@
+{
+  "name": "@quealm/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "echo 'no tests yet' && exit 0",
+    "typecheck": "echo 'no typecheck yet' && exit 0"
+  }
+}
