@@ -1,0 +1,455 @@
+qualms: "0.1"
+id: core-prelude
+
+# Migrated core prelude for the JS engine. Differences from the legacy
+# stories/prelude/core.qualms.yaml are recorded in qualms/MIGRATION.md:
+#   + IsPlayer(actor) top-level relation — gives the engine a generic
+#     entry point for "who is the player".
+#   + Item kind (Presentable + Relocatable) — was missing in the legacy
+#     prelude despite being a near-universal authoring need.
+#   - SequenceComplete relation removed — orphaned legacy memory mechanic.
+
+definitions:
+  traits:
+    - id: Presentable
+      fields:
+        - id: name
+          type: str
+          default: ""
+        - id: description
+          type: str
+          default: ""
+        - id: examine_description
+          type: str
+          default: ""
+
+    - id: Actor
+
+    - id: Location
+      relations:
+        - id: Path
+          persistence: current
+          params:
+            - id: source
+              type: ref<Location>
+            - id: target
+              type: ref<Location>
+
+    - id: Relocatable
+      fields:
+        - id: location
+          type: ref<Location>?
+          default: null
+      relations:
+        - id: At
+          params:
+            - id: subject
+              type: ref<Relocatable>
+            - id: location
+              type: ref<Location>
+          get:
+            eq:
+              - field:
+                  entity: { var: subject }
+                  trait: Relocatable
+                  field: location
+              - { var: location }
+          set:
+            - set_field:
+                entity: { var: subject }
+                trait: Relocatable
+                field: location
+                value: { var: location }
+      actions:
+        - id: Move
+          params:
+            - id: actor
+              type: ref<Actor>?
+              default: null
+            - id: subject
+              type: ref<Relocatable>
+            - id: destination
+              type: ref<Location>
+          requires: true
+          default:
+            - assert:
+                relation: At
+                args:
+                  - { var: subject }
+                  - { var: destination }
+
+    - id: Scope
+      relations:
+        - id: Aboard
+          persistence: current
+          params:
+            - id: actor
+              type: ref<Actor>
+            - id: location
+              type: ref<Location>
+
+        - id: CanTouch
+          params:
+            - id: actor
+              type: ref<Actor>
+            - id: target
+              type: ref<Relocatable>
+          get:
+            any:
+              - all:
+                  - has_trait:
+                      entity: { var: actor }
+                      trait: Relocatable
+                  - eq:
+                      - field:
+                          entity: { var: target }
+                          trait: Relocatable
+                          field: location
+                      - field:
+                          entity: { var: actor }
+                          trait: Relocatable
+                          field: location
+              - relation:
+                  id: CarriedBy
+                  args:
+                    - { var: actor }
+                    - { var: target }
+              - relation:
+                  id: Aboard
+                  args:
+                    - { var: actor }
+                    - field:
+                        entity: { var: target }
+                        trait: Relocatable
+                        field: location
+
+        - id: CanSee
+          params:
+            - id: actor
+              type: ref<Actor>
+            - id: target
+              type: ref<Relocatable>
+          get:
+            relation:
+              id: CanTouch
+              args:
+                - { var: actor }
+                - { var: target }
+
+    - id: Container
+      relations:
+        - id: Contains
+          params:
+            - id: container
+              type: ref<Container>
+            - id: item
+              type: ref<Relocatable>
+          get:
+            relation:
+              id: At
+              args:
+                - { var: item }
+                - { var: container }
+          set:
+            - assert:
+                relation: At
+                args:
+                  - { var: item }
+                  - { var: container }
+
+    - id: Portable
+      actions:
+        - id: Take
+          params:
+            - id: actor
+              type: ref<Actor>
+            - id: item
+              type: ref<Portable>
+          requires:
+            relation:
+              id: CanTouch
+              args:
+                - { var: actor }
+                - { var: item }
+          default:
+            - assert:
+                relation: CarriedBy
+                args:
+                  - { var: actor }
+                  - { var: item }
+
+        - id: Drop
+          params:
+            - id: actor
+              type: ref<Actor>
+            - id: item
+              type: ref<Portable>
+            - id: destination
+              type: ref<Location>
+          requires: true
+          default:
+            - assert:
+                relation: At
+                args:
+                  - { var: item }
+                  - { var: destination }
+
+    - id: Usable
+      actions:
+        - id: Use
+          params:
+            - id: actor
+              type: ref<Actor>
+            - id: source
+              type: ref<Usable>
+            - id: target
+              type: ref?
+              default: null
+          requires:
+            relation:
+              id: CarriedBy
+              args:
+                - { var: actor }
+                - { var: source }
+          default:
+            - emit:
+                text: "Nothing happens."
+
+    - id: Equipment
+      fields:
+        - id: slot
+          type: str
+          default: ""
+        - id: equipped_by
+          type: ref<Actor>?
+          default: null
+      relations:
+        - id: Equipped
+          params:
+            - id: actor
+              type: ref<Actor>
+            - id: item
+              type: ref<Equipment>
+          get:
+            eq:
+              - field:
+                  entity: { var: item }
+                  trait: Equipment
+                  field: equipped_by
+              - { var: actor }
+          set:
+            - set_field:
+                entity: { var: item }
+                trait: Equipment
+                field: equipped_by
+                value: { var: actor }
+      actions:
+        - id: Equip
+          params:
+            - id: actor
+              type: ref<Actor>
+            - id: item
+              type: ref<Equipment>
+          requires: true
+          default:
+            - assert:
+                relation: Equipped
+                args:
+                  - { var: actor }
+                  - { var: item }
+
+        - id: Unequip
+          params:
+            - id: actor
+              type: ref<Actor>
+            - id: item
+              type: ref<Equipment>
+          requires: true
+          default:
+            - set_field:
+                entity: { var: item }
+                trait: Equipment
+                field: equipped_by
+                value: null
+
+    - id: Ownable
+      fields:
+        - id: owner
+          type: ref<Actor>?
+          default: null
+      relations:
+        - id: OwnedBy
+          params:
+            - id: item
+              type: ref<Ownable>
+            - id: actor
+              type: ref<Actor>
+          get:
+            eq:
+              - field:
+                  entity: { var: item }
+                  trait: Ownable
+                  field: owner
+              - { var: actor }
+          set:
+            - set_field:
+                entity: { var: item }
+                trait: Ownable
+                field: owner
+                value: { var: actor }
+
+  relations:
+    - id: CarriedBy
+      params:
+        - id: actor
+          type: ref<Actor>
+        - id: item
+          type: ref<Relocatable>
+      get:
+        relation:
+          id: At
+          args:
+            - { var: item }
+            - { var: actor }
+      set:
+        - assert:
+            relation: At
+            args:
+              - { var: item }
+              - { var: actor }
+
+    - id: Named
+      params:
+        - id: entity
+          type: ref<Presentable>
+        - id: name
+          type: str
+      get:
+        eq:
+          - field:
+              entity: { var: entity }
+              trait: Presentable
+              field: name
+          - { var: name }
+
+    - id: Visible
+      params:
+        - id: entity
+          type: ref
+      get: true
+
+    - id: Visited
+      persistence: remembered
+      params:
+        - id: actor
+          type: ref<Actor>
+        - id: location
+          type: ref<Location>
+
+    # New: gives the engine a universal "who is the player" entry point.
+    # Stories assert IsPlayer(<actor-id>) at start; the player view and any
+    # player-anchored rules read from this.
+    - id: IsPlayer
+      persistence: current
+      params:
+        - id: actor
+          type: ref<Actor>
+
+  actions:
+    - id: Name
+      params:
+        - id: actor
+          type: ref<Actor>?
+          default: null
+        - id: target
+          type: ref<Presentable>
+      requires: true
+      default:
+        - emit:
+            text:
+              field:
+                entity: { var: target }
+                trait: Presentable
+                field: name
+
+    - id: Examine
+      params:
+        - id: actor
+          type: ref<Actor>?
+          default: null
+        - id: target
+          type: ref<Presentable>
+      requires:
+        any:
+          - eq:
+              - { var: actor }
+              - null
+          - relation:
+              id: CanSee
+              args:
+                - { var: actor }
+                - { var: target }
+      default:
+        - emit:
+            text:
+              field:
+                entity: { var: target }
+                trait: Presentable
+                field: description
+
+    - id: Enter
+      params:
+        - id: actor
+          type: ref<Actor>
+        - id: destination
+          type: ref<Location>
+      requires: true
+      default:
+        - assert:
+            relation: At
+            args:
+              - { var: actor }
+              - { var: destination }
+
+  rulebooks:
+    - id: core-memory
+      rules:
+        - id: remember-visited-location
+          phase: after
+          match:
+            action: Enter
+            args:
+              actor: { bind: actor }
+              destination: { bind: destination }
+          effects:
+            - assert:
+                relation: Visited
+                args:
+                  - { var: actor }
+                  - { var: destination }
+
+  kinds:
+    - id: Thing
+      traits:
+        - id: Presentable
+
+    - id: Place
+      traits:
+        - id: Presentable
+        - id: Location
+        - id: Container
+
+    - id: Person
+      traits:
+        - id: Presentable
+        - id: Actor
+        - id: Location
+        - id: Container
+        - id: Relocatable
+
+    # New: Item kind (Presentable + Relocatable). Was a frequent boilerplate
+    # gap in the legacy prelude — every story authored its own equivalent.
+    - id: Item
+      traits:
+        - id: Presentable
+        - id: Relocatable
