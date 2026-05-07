@@ -39,3 +39,12 @@ export {
 export type { PathOptions } from "./builders.js";
 export type { Binding, QueryContext, QueryResult } from "./eval.js";
 export { evaluate, makeContext, runQuery } from "./eval.js";
+export type { Statement } from "./parser.js";
+export {
+  ParseError,
+  parseExpression,
+  parseNamedPredicate,
+  parseQuery,
+  parseStatement,
+  tokenize,
+} from "./parser.js";
