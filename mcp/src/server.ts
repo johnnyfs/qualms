@@ -107,16 +107,19 @@ export function buildServer(options: BuildServerOptions = {}): {
     "query",
     {
       description:
-        "Run a query against the loaded definition+state. Accepts the DSL surface " +
-        "syntax (comprehension `{ x : T | φ }`, predicate query `?- φ`, ...). " +
-        "Returns projected variable bindings.",
+        "Run one or more read-only DSL statements against the loaded definition+state. " +
+        "Accepts `query { vars | φ };`, `exists { φ };` (yes/no), `show <kind> <name>;`, " +
+        "and named-predicate definitions `name(p1, p2) :- φ;`. Multi-statement input " +
+        "(separated by `;`) returns one response per statement. Rejects `def`/`undef` " +
+        "(use `mutate`).",
       inputSchema: {
         sessionId: z.string(),
         expr: z
           .string()
           .describe(
-            "Query expression. Examples: `{ k : Kind | uses(k, \"Presentable\") }`, " +
-              "`?- exists r : Relation. r.id = \"IsPlayer\"`",
+            "DSL statement(s). Examples: `query { k | k : Kind & uses(k, \"Presentable\") };`, " +
+              "`exists { ∃ r : Relation. r.id = \"IsPlayer\" };`, `show trait Presentable;`. " +
+              "Legacy bare forms `?- φ` and `{ x | φ }` are auto-wrapped for backward compatibility.",
           ),
       },
     },
@@ -183,18 +186,21 @@ export function buildServer(options: BuildServerOptions = {}): {
     "mutate",
     {
       description:
-        "Apply a single mutation statement (assert/retract/:= / def / undef) " +
-        "to the open transaction. Errors surface with category=parse for " +
-        "syntax issues, mutation-error categories for semantic ones.",
+        "Apply one or more mutation statements (def / undef / assert / retract / `:=`) " +
+        "to the open transaction. Multi-statement input (separated by `;`) applies in " +
+        "order and returns one ack per statement. Errors surface with category=parse for " +
+        "syntax issues, mutation-error categories for semantic ones. Rejects " +
+        "`query`/`exists`/`show` (use `query`).",
       inputSchema: {
         sessionId: z.string(),
         transactionId: z.string(),
         expr: z
           .string()
           .describe(
-            "Mutation statement. Examples: `def trait Combatant { fields: { hp: { default: 10 } } }`, " +
-              "`def entity grunt : Foe {}`, `assert IsPlayer(\"grunt\")`, " +
-              "`grunt.hp := 5`, `undef trait Combatant`.",
+            "Mutation statement(s). Examples: `def trait Combatant { hp: int = 10 };`, " +
+              "`def kind Foe: Combatant, Presentable;`, " +
+              "`def entity grunt: Foe { Presentable.name = \"Grunt\" };`, " +
+              "`assert IsPlayer(\"grunt\");`, `grunt.hp := 5;`, `undef trait Combatant;`.",
           ),
       },
     },

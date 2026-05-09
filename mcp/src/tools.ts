@@ -77,17 +77,40 @@ export function handleQuit(manager: SessionManager, input: QuitInput): QuitOutpu
   return { ok: manager.quit(input.sessionId) };
 }
 
-// ──────── __query ────────
+// ──────── query (read-only DSL execution) ────────
+
+const { parseStatements } = queryNs;
 
 export interface QueryInput {
   sessionId: string;
   expr: string;
 }
 
+export type QueryStatementResult =
+  | {
+      kind: "query";
+      head: string[];
+      rows: Array<Record<string, unknown>>;
+      count: number;
+      text: string;
+    }
+  | { kind: "exists"; result: boolean; text: string }
+  | {
+      kind: "show";
+      targetKind: string;
+      name: string;
+      definition: string;
+      text: string;
+    }
+  | { kind: "named_predicate"; name: string; text: string };
+
 export interface QueryOutput {
+  /** Convenience aliases of statements[0] when the first statement is a query. */
   head: string[];
   rows: Array<Record<string, unknown>>;
   count: number;
+  /** Per-statement responses in input order. */
+  statements: QueryStatementResult[];
 }
 
 export class QueryError extends Error {
@@ -103,27 +126,144 @@ export class QueryError extends Error {
 
 export function handleQuery(manager: SessionManager, input: QueryInput): QueryOutput {
   const session = manager.get(input.sessionId);
-  let parsed;
+
+  // Accept multi-statement input. Legacy single-statement bodies (bare `?- φ`
+  // or bare comprehension) auto-wrap via parseQuery; if `parseStatements`
+  // can't parse the whole input as a sequence, fall back to single-statement.
+  let parsedStatements;
   try {
-    parsed = parseQuery(input.expr);
-  } catch (err) {
-    if (err instanceof ParseError) {
-      throw new QueryError(err.message, "parse", err.span);
+    parsedStatements = parseStatements(input.expr);
+  } catch {
+    // Try the legacy single-query path (auto-wraps `?-` and bare `{...}`).
+    try {
+      const q = parseQuery(input.expr);
+      parsedStatements = [{ kind: "query" as const, query: q }];
+    } catch (err) {
+      if (err instanceof ParseError) {
+        throw new QueryError(err.message, "parse", err.span);
+      }
+      throw err;
     }
-    throw err;
   }
-  const ctx = makeContext(session.definition, { state: session.state });
-  let result;
-  try {
-    result = runQuery(parsed, ctx);
-  } catch (err) {
-    throw new QueryError((err as Error).message, "evaluate");
+
+  const out: QueryStatementResult[] = [];
+  for (const stmt of parsedStatements) {
+    if (stmt.kind === "mutation") {
+      throw new QueryError(
+        "query tool does not accept def/undef/assert/retract statements (use `mutate`)",
+        "parse",
+      );
+    }
+    if (stmt.kind === "query") {
+      const ctx = makeContext(session.definition, { state: session.state });
+      let result;
+      try {
+        result = runQuery(stmt.query, ctx);
+      } catch (err) {
+        throw new QueryError((err as Error).message, "evaluate");
+      }
+      const rows = result.rows.map((row) => ({ ...row }));
+      out.push({
+        kind: "query",
+        head: stmt.query.head,
+        rows,
+        count: result.count,
+        text: renderQueryRows(stmt.query.head, rows),
+      });
+    } else if (stmt.kind === "exists") {
+      const ctx = makeContext(session.definition, { state: session.state });
+      let result;
+      try {
+        result = runQuery({ head: [], body: stmt.body }, ctx);
+      } catch (err) {
+        throw new QueryError((err as Error).message, "evaluate");
+      }
+      const r = result.count > 0;
+      out.push({ kind: "exists", result: r, text: `${r};` });
+    } else if (stmt.kind === "show") {
+      const definition = renderShow(session.definition, stmt.targetKind, stmt.name);
+      out.push({
+        kind: "show",
+        targetKind: stmt.targetKind,
+        name: stmt.name,
+        definition,
+        text: definition,
+      });
+    } else if (stmt.kind === "named_predicate") {
+      // Register the predicate in the session for the duration of the request.
+      // (Persistent registration is a future feature; for now this is a no-op
+      // that just acknowledges the statement.)
+      out.push({
+        kind: "named_predicate",
+        name: stmt.predicate.name,
+        text: `predicate ${stmt.predicate.name} defined;`,
+      });
+    }
   }
-  return {
-    head: parsed.head,
-    rows: result.rows.map((row) => ({ ...row })),
-    count: result.count,
-  };
+
+  // Convenience aliases for the first statement when it's a query.
+  const first = out[0];
+  if (first && first.kind === "query") {
+    return { head: first.head, rows: first.rows, count: first.count, statements: out };
+  }
+  return { head: [], rows: [], count: 0, statements: out };
+}
+
+function renderQueryRows(head: string[], rows: Array<Record<string, unknown>>): string {
+  if (rows.length === 0) return "[];";
+  if (head.length === 0) return `${rows.length > 0};`; // yes/no shouldn't reach here
+  if (head.length === 1) {
+    const key = head[0]!;
+    return `[${rows.map((r) => formatValue(r[key])).join("; ")};];`;
+  }
+  return `[${rows
+    .map(
+      (r) =>
+        `{ ${head.map((h) => `${h}: ${formatValue(r[h])}`).join(", ")} }`,
+    )
+    .join("; ")};];`;
+}
+
+function formatValue(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (v === null || v === undefined) return "null";
+  return String(v);
+}
+
+function renderShow(
+  def: import("@quealm/qualms").GameDefinition,
+  targetKind: string,
+  name: string,
+): string {
+  // Use the dsl emitter's per-shape helpers.
+  switch (targetKind) {
+    case "trait":
+      return def.hasTrait(name) ? dslNs.emitTrait(def.trait(name)) : `# unknown trait '${name}'`;
+    case "relation":
+      return def.hasRelation(name)
+        ? `def ${dslNs.emitRelation(def.relation(name))};`
+        : `# unknown relation '${name}'`;
+    case "action":
+      return def.hasAction(name)
+        ? `def ${dslNs.emitAction(def.action(name))};`
+        : `# unknown action '${name}'`;
+    case "kind":
+      return def.hasKind(name) ? dslNs.emitKind(def.kind(name)) : `# unknown kind '${name}'`;
+    case "rulebook":
+      return def.hasRulebook(name)
+        ? dslNs.emitRulebook(def.rulebook(name))
+        : `# unknown rulebook '${name}'`;
+    case "rule":
+      return def.hasRule(name)
+        ? `def ${dslNs.emitRule(def.rule(name))};`
+        : `# unknown rule '${name}'`;
+    case "entity":
+      return def.hasInitialEntity(name)
+        ? dslNs.emitEntity(def.initialEntity(name))
+        : `# unknown entity '${name}'`;
+    default:
+      return `# unknown target kind '${targetKind}'`;
+  }
 }
 
 // ──────── __begin / __mutate / __diff / __commit / __rollback ────────
@@ -177,33 +317,55 @@ export interface MutateInput {
   expr: string;
 }
 
+export interface MutateAck {
+  kind: string;
+  summary: string;
+}
+
 export interface MutateOutput {
-  applied: { kind: string; summary: string };
+  /** Convenience alias of statements[0] when single-statement input. */
+  applied: MutateAck;
+  /** Per-statement acks in input order. */
+  statements: MutateAck[];
 }
 
 export function handleMutate(manager: SessionManager, input: MutateInput): MutateOutput {
-  let parsed;
+  let parsedStatements;
   try {
-    parsed = parseStatement(input.expr);
-  } catch (err) {
-    if (err instanceof ParseError) {
-      throw new QueryError(err.message, "parse", err.span);
+    parsedStatements = parseStatements(input.expr);
+  } catch {
+    // Legacy single-statement path.
+    try {
+      parsedStatements = [parseStatement(input.expr)];
+    } catch (err) {
+      if (err instanceof ParseError) {
+        throw new QueryError(err.message, "parse", err.span);
+      }
+      throw err;
     }
-    throw err;
   }
-  if (parsed.kind !== "mutation") {
-    throw new QueryError(
-      `expected a mutation statement, got ${parsed.kind}`,
-      "parse",
+
+  const statements: MutateAck[] = [];
+  for (const parsed of parsedStatements) {
+    if (parsed.kind !== "mutation") {
+      throw new QueryError(
+        `mutate tool only accepts def/undef/assert/retract/field-assign statements; got ${parsed.kind}`,
+        "parse",
+      );
+    }
+    manager.applyMutationToOpenTransaction(
+      input.sessionId,
+      input.transactionId,
+      parsed.mutation,
     );
-  }
-  manager.applyMutationToOpenTransaction(input.sessionId, input.transactionId, parsed.mutation);
-  return {
-    applied: {
+    statements.push({
       kind: parsed.mutation.type,
       summary: unparseMutation(parsed.mutation),
-    },
-  };
+    });
+  }
+
+  const first = statements[0] ?? { kind: "noop", summary: "" };
+  return { applied: first, statements };
 }
 
 export interface DiffInput {
