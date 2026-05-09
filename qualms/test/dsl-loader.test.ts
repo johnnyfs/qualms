@@ -139,4 +139,35 @@ describe("dsl loader: file load to GameDefinition", () => {
     expect(def.hasTrait("Presentable")).toBe(true);
     expect(def.trait("Presentable").fields.map((f) => f.id)).toEqual(["name"]);
   });
+
+  it("body-bearing defs do not require trailing `;`", () => {
+    const def = new GameDefinition();
+    loadDslText(
+      def,
+      `
+        def trait A {}
+        def trait B { name: str = "" }
+        def trait C {}
+      `,
+      { module: "prelude" },
+    );
+    expect(def.hasTrait("A")).toBe(true);
+    expect(def.hasTrait("B")).toBe(true);
+    expect(def.hasTrait("C")).toBe(true);
+  });
+
+  it("body-less defs still require `;`", () => {
+    const def = new GameDefinition();
+    loadDslText(def, "def trait Presentable {}", { module: "prelude" });
+    // `def kind X: T1, T2;` and `undef trait Foo;` — these need `;` since no `}`.
+    loadDslText(def, "def kind Thing: Presentable;", { module: "prelude" });
+    expect(def.hasKind("Thing")).toBe(true);
+  });
+
+  it("trailing `;` after a body-bearing def is still legal (back-compat)", () => {
+    const def = new GameDefinition();
+    loadDslText(def, "def trait Foo {}; def trait Bar {};", { module: "prelude" });
+    expect(def.hasTrait("Foo")).toBe(true);
+    expect(def.hasTrait("Bar")).toBe(true);
+  });
 });

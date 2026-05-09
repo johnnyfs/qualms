@@ -1726,9 +1726,13 @@ export function parseExpression(input: string): Expression {
 }
 
 /**
- * Parse a sequence of statements separated by `;` (top-level only — depth
- * tracking ignores `;` inside braces/brackets/parens). Empty/whitespace
- * chunks and `#` line comments are skipped. Trailing `;` is optional.
+ * Parse a sequence of statements. Two boundaries are recognized:
+ *   - top-level `;` — required after body-less statements (def kind X: T1;,
+ *     undef trait Foo;, query …;, exists …;, show …;, assert/retract/:= top-level)
+ *   - top-level `}` — closes a body-bearing def; the next statement starts after it
+ *
+ * Depth tracking ignores `;` and `}` inside nested braces/brackets/parens.
+ * `#` line comments and string literals are skipped.
  */
 export function parseStatements(input: string): Statement[] {
   const chunks: string[] = [];
@@ -1736,6 +1740,11 @@ export function parseStatements(input: string): Statement[] {
   let inString = false;
   let inLineComment = false;
   let buf = "";
+  const flush = (): void => {
+    const piece = buf.trim();
+    if (piece.length > 0) chunks.push(piece);
+    buf = "";
+  };
   for (let i = 0; i < input.length; i++) {
     const ch = input[i]!;
     if (inLineComment) {
@@ -1763,17 +1772,54 @@ export function parseStatements(input: string): Statement[] {
       buf += ch;
       continue;
     }
-    if (ch === "{" || ch === "[" || ch === "(") depth++;
-    else if (ch === "}" || ch === "]" || ch === ")") depth--;
+    if (ch === "{" || ch === "[" || ch === "(") {
+      depth++;
+      buf += ch;
+      continue;
+    }
+    if (ch === "}" || ch === "]" || ch === ")") {
+      depth--;
+      buf += ch;
+      // After closing a top-level `}`, the body-bearing statement is complete.
+      // The trailing `;` (if any) is optional and consumed by the `;` branch
+      // below; otherwise we flush here when the next non-whitespace looks like
+      // the start of a new statement.
+      if (depth === 0 && ch === "}") {
+        // Look ahead past whitespace and `#` line comments for the next
+        // non-trivial char. If it's `;`, leave the chunk open (the `;`
+        // branch will flush). Otherwise flush now.
+        let j = i + 1;
+        let inTrailingComment = false;
+        while (j < input.length) {
+          const nc = input[j]!;
+          if (inTrailingComment) {
+            if (nc === "\n") inTrailingComment = false;
+            j++;
+            continue;
+          }
+          if (nc === " " || nc === "\t" || nc === "\n" || nc === "\r") {
+            j++;
+            continue;
+          }
+          if (nc === "#") {
+            inTrailingComment = true;
+            j++;
+            continue;
+          }
+          break;
+        }
+        if (j >= input.length || input[j] !== ";") {
+          flush();
+        }
+      }
+      continue;
+    }
     if (ch === ";" && depth === 0) {
-      const piece = buf.trim();
-      if (piece.length > 0) chunks.push(piece);
-      buf = "";
+      flush();
       continue;
     }
     buf += ch;
   }
-  const tail = buf.trim();
-  if (tail.length > 0) chunks.push(tail);
+  flush();
   return chunks.map(parseStatement);
 }
