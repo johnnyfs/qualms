@@ -63,5 +63,6 @@ export {
   parseNamedPredicate,
   parseQuery,
   parseStatement,
+  parseStatements,
   tokenize,
 } from "./parser.js";

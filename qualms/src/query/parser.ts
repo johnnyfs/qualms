@@ -1685,3 +1685,56 @@ export function parseExpression(input: string): Expression {
   if (stmt.kind !== "exists") throw new ParseError("expected exists statement");
   return stmt.body;
 }
+
+/**
+ * Parse a sequence of statements separated by `;` (top-level only — depth
+ * tracking ignores `;` inside braces/brackets/parens). Empty/whitespace
+ * chunks and `#` line comments are skipped. Trailing `;` is optional.
+ */
+export function parseStatements(input: string): Statement[] {
+  const chunks: string[] = [];
+  let depth = 0;
+  let inString = false;
+  let inLineComment = false;
+  let buf = "";
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i]!;
+    if (inLineComment) {
+      if (ch === "\n") inLineComment = false;
+      buf += ch;
+      continue;
+    }
+    if (inString) {
+      buf += ch;
+      if (ch === "\\" && i + 1 < input.length) {
+        buf += input[i + 1];
+        i++;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === "#") {
+      inLineComment = true;
+      buf += ch;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      buf += ch;
+      continue;
+    }
+    if (ch === "{" || ch === "[" || ch === "(") depth++;
+    else if (ch === "}" || ch === "]" || ch === ")") depth--;
+    if (ch === ";" && depth === 0) {
+      const piece = buf.trim();
+      if (piece.length > 0) chunks.push(piece);
+      buf = "";
+      continue;
+    }
+    buf += ch;
+  }
+  const tail = buf.trim();
+  if (tail.length > 0) chunks.push(tail);
+  return chunks.map(parseStatement);
+}
