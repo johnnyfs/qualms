@@ -1,5 +1,4 @@
 export * from "./core/index.js";
 export * as query from "./query/index.js";
-export * as yaml from "./yaml/index.js";
 export * as dsl from "./dsl/index.js";
 export * as mutation from "./mutation/index.js";
