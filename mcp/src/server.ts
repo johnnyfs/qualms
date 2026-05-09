@@ -54,7 +54,7 @@ export function buildServer(options: BuildServerOptions = {}): {
       inputSchema: {
         corePath: z
           .string()
-          .describe("Filesystem path to the prelude YAML (e.g. qualms/prelude/core.qualms.yaml)."),
+          .describe("Filesystem path to the prelude YAML (e.g. qualms/prelude/core.qualms)."),
         storyPaths: z
           .array(z.string())
           .optional()

@@ -319,6 +319,7 @@ export function emitTerm(t: Term): string {
 function emitEffectSpec(spec: EffectSpec): string {
   const e = spec as Record<string, unknown>;
   const type = e["type"];
+  // v2 typed shapes (produced by the mutation parser).
   if (type === "assert" && typeof e["relation"] === "string") {
     const args = (e["args"] as Term[]).map(emitTerm).join(", ");
     return `assert ${e["relation"]}(${args})`;
@@ -336,9 +337,64 @@ function emitEffectSpec(spec: EffectSpec): string {
       .map(([k, v]) => `${k}: ${emitTerm(v)}`)
       .join(", ")} }`;
   }
-  // Legacy YAML effect shapes (assert_relation, set_field, emit) — emit a
-  // pseudo-comment so commits don't corrupt; flagged as TODO.
+  // Legacy YAML shapes (single-key dispatch on `assert` / `retract` /
+  // `set_field` / `emit`) — rewrite into v2 DSL form.
+  if (e["assert"] && typeof e["assert"] === "object") {
+    const a = e["assert"] as Record<string, unknown>;
+    const rel = a["relation"] as string;
+    const args = ((a["args"] as unknown[]) ?? []).map(emitYamlTerm).join(", ");
+    return `assert ${rel}(${args})`;
+  }
+  if (e["retract"] && typeof e["retract"] === "object") {
+    const r = e["retract"] as Record<string, unknown>;
+    const rel = r["relation"] as string;
+    const args = ((r["args"] as unknown[]) ?? []).map(emitYamlTerm).join(", ");
+    return `retract ${rel}(${args})`;
+  }
+  if (e["set_field"] && typeof e["set_field"] === "object") {
+    const s = e["set_field"] as Record<string, unknown>;
+    const ent = emitYamlTerm(s["entity"]);
+    const traitId = s["trait"] as string;
+    const fieldId = s["field"] as string;
+    const v = emitYamlTerm(s["value"]);
+    return `${ent}.${traitId}.${fieldId} := ${v}`;
+  }
+  if (e["emit"] && typeof e["emit"] === "object") {
+    const p = e["emit"] as Record<string, unknown>;
+    const entries = Object.entries(p)
+      .map(([k, v]) => `${k}: ${emitYamlTerm(v)}`)
+      .join(", ");
+    return `emit { ${entries} }`;
+  }
   return `# unsupported effect: ${JSON.stringify(spec)}`;
+}
+
+/**
+ * Emit a term-like value from the legacy YAML shape:
+ *   - `{ var: "x" }` → `x`
+ *   - `{ bind: "x" }` → `x` (rule pattern binding)
+ *   - `{ field: { entity, trait?, field } }` → `entity.trait.field`
+ *   - bare scalar → JSON literal
+ */
+function emitYamlTerm(v: unknown): string {
+  if (v === null || v === undefined) return "null";
+  if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+    return JSON.stringify(v);
+  }
+  if (typeof v === "object") {
+    const obj = v as Record<string, unknown>;
+    if (typeof obj["var"] === "string") return obj["var"];
+    if (typeof obj["bind"] === "string") return obj["bind"];
+    if (obj["field"] && typeof obj["field"] === "object") {
+      const f = obj["field"] as Record<string, unknown>;
+      const ent = emitYamlTerm(f["entity"]);
+      return typeof f["trait"] === "string"
+        ? `${ent}.${f["trait"]}.${f["field"]}`
+        : `${ent}.${f["field"]}`;
+    }
+    if ("value" in obj) return emitYamlTerm(obj["value"]);
+  }
+  return JSON.stringify(v);
 }
 
 // ──────── Helpers ────────

@@ -17,11 +17,11 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { GameDefinition, yaml as yamlNs } from "@quealm/qualms";
+import { GameDefinition, dsl as dslNs } from "@quealm/qualms";
 
 const __filename = fileURLToPath(import.meta.url);
 const REPO_ROOT = resolve(__filename, "../../../..");
-const PRELUDE_PATH = resolve(REPO_ROOT, "qualms/prelude/core.qualms.yaml");
+const PRELUDE_PATH = resolve(REPO_ROOT, "qualms/prelude/core.qualms");
 const CLI_PATH = resolve(REPO_ROOT, "mcp/src/cli.ts");
 const TSX = resolve(REPO_ROOT, "mcp/node_modules/.bin/tsx");
 
@@ -123,7 +123,7 @@ describe("acceptance: commit path (story scope, disk write)", () => {
   let close: () => Promise<void>;
   let sessionId: string;
   const tmpDir = mkdtempSync(join(tmpdir(), "qualms-acceptance-"));
-  const targetPath = join(tmpDir, "scratch.qualms.yaml");
+  const targetPath = join(tmpDir, "scratch.qualms");
 
   beforeAll(async () => {
     ({ client, close } = await startClient());
@@ -166,8 +166,8 @@ describe("acceptance: commit path (story scope, disk write)", () => {
     // Independently re-load the YAML on top of a fresh prelude — the structural
     // additions must round-trip cleanly through the file.
     const fresh = new GameDefinition();
-    yamlNs.loadFileIntoDefinition(fresh, PRELUDE_PATH, "prelude");
-    yamlNs.loadFileIntoDefinition(fresh, targetPath, "game");
+    dslNs.loadDslFile(fresh, PRELUDE_PATH, "prelude");
+    dslNs.loadDslFile(fresh, targetPath, "game");
     expect(fresh.hasTrait("Combatant")).toBe(true);
     expect(fresh.hasKind("Foe")).toBe(true);
     expect(fresh.initialEntities.find((e) => e.id === "grunt")?.kind).toBe("Foe");

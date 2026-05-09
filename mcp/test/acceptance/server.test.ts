@@ -14,7 +14,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 const __filename = fileURLToPath(import.meta.url);
 const REPO_ROOT = resolve(__filename, "../../../..");
-const PRELUDE_PATH = resolve(REPO_ROOT, "qualms/prelude/core.qualms.yaml");
+const PRELUDE_PATH = resolve(REPO_ROOT, "qualms/prelude/core.qualms");
 const CLI_PATH = resolve(REPO_ROOT, "mcp/src/cli.ts");
 const TSX = resolve(REPO_ROOT, "mcp/node_modules/.bin/tsx");
 

@@ -2,10 +2,10 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { GameDefinition, yaml as yamlNs } from "@quealm/qualms";
+import { GameDefinition, dsl as dslNs } from "@quealm/qualms";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
-const { loadYamlIntoDefinition } = yamlNs;
+const { loadDslText, loadDslFile } = dslNs;
 import {
   MutationError,
   QueryError,
@@ -26,7 +26,7 @@ import {
 } from "../src/session.js";
 
 const __filename = fileURLToPath(import.meta.url);
-const PRELUDE_PATH = resolve(__filename, "../../../qualms/prelude/core.qualms.yaml");
+const PRELUDE_PATH = resolve(__filename, "../../../qualms/prelude/core.qualms");
 
 describe("tool handler: __start", () => {
   let mgr: SessionManager;
@@ -258,8 +258,8 @@ describe("tool handler: __begin / __mutate / __diff / __commit / __rollback", ()
     expect(mgr.get(sessionId).transaction).toBe(null);
   });
 
-  it("__commit story-scope writes a YAML file the loader can re-read", () => {
-    const targetPath = join(tmpDir, "scratch.qualms.yaml");
+  it("commit game-module writes a .qualms file the loader can re-read", () => {
+    const targetPath = join(tmpDir, "scratch.qualms");
     tmpFiles.push(targetPath);
     const tx = handleBegin(mgr, { sessionId, module: "game", targetPath });
     handleMutate(mgr, {
@@ -282,12 +282,12 @@ describe("tool handler: __begin / __mutate / __diff / __commit / __rollback", ()
     expect(out.targetPath).toBe(targetPath);
     expect(out.committed).toBe(3);
 
-    // Read the file back and confirm the structure round-trips through the loader.
-    const yamlText = readFileSync(targetPath, "utf-8");
+    // Read the file back and confirm the structure round-trips through the DSL loader.
+    const text = readFileSync(targetPath, "utf-8");
     const reloaded = new GameDefinition();
     // Pre-load the prelude so trait references on the kind resolve.
-    yamlNs.loadFileIntoDefinition(reloaded, PRELUDE_PATH, "prelude");
-    loadYamlIntoDefinition(reloaded, yamlText, { module: "game" });
+    loadDslFile(reloaded, PRELUDE_PATH, "prelude");
+    loadDslText(reloaded, text, { module: "game" });
     expect(reloaded.hasTrait("Combatant")).toBe(true);
     expect(reloaded.hasKind("Foe")).toBe(true);
     expect(reloaded.initialEntities.find((e) => e.id === "grunt")?.kind).toBe("Foe");

@@ -15,15 +15,15 @@ import {
   GameDefinition,
   type Module,
   WorldState,
+  dsl as dslNs,
   instantiate,
   mutation as mutationNs,
   query as queryNs,
-  yaml as yamlNs,
 } from "@quealm/qualms";
 
 type MutationStatement = queryNs.MutationStatement;
 
-const { loadFileIntoDefinition } = yamlNs;
+const { loadDslFile } = dslNs;
 const { Transaction, applyMutation } = mutationNs;
 type Transaction = ReturnType<typeof Transaction.begin>;
 type WritableModule = Transaction["module"];
@@ -75,9 +75,9 @@ export class SessionManager {
 
   start(options: SessionStartOptions): Session {
     const def = new GameDefinition();
-    loadFileIntoDefinition(def, options.corePath, "prelude" satisfies Module);
+    loadDslFile(def, options.corePath, "prelude" satisfies Module);
     for (const storyPath of options.storyPaths ?? []) {
-      loadFileIntoDefinition(def, storyPath, "game" satisfies Module);
+      loadDslFile(def, storyPath, "game" satisfies Module);
     }
     const state = instantiate(def);
     const session: Session = {

@@ -6,15 +6,15 @@
 
 import { writeFileSync } from "node:fs";
 import {
+  dsl as dslNs,
   mutation as mutationNs,
   query as queryNs,
-  yaml as yamlNs,
 } from "@quealm/qualms";
 import type { SessionManager } from "./session.js";
 
 const { makeContext, parseQuery, parseStatement, runQuery, ParseError } = queryNs;
 const { MutationError, unparseMutation } = mutationNs;
-const { emitDefinition } = yamlNs;
+const { emitDsl } = dslNs;
 
 // ──────── __start ────────
 
@@ -299,8 +299,8 @@ export function handleCommit(manager: SessionManager, input: CommitInput): Commi
         "scope_error",
       );
     }
-    const yamlText = emitDefinition(session.definition, "game");
-    writeFileSync(transaction.targetPath, yamlText, "utf-8");
+    const dslText = emitDsl(session.definition, "game");
+    writeFileSync(transaction.targetPath, dslText, "utf-8");
     const result = manager.commit(input.sessionId, input.transactionId);
     return {
       committed: result.committed,

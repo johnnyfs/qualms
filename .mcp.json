@@ -6,7 +6,7 @@
       "args": [
         "mcp/src/cli.ts",
         "--core",
-        "qualms/prelude/core.qualms.yaml"
+        "qualms/prelude/core.qualms"
       ],
       "env": {}
     }

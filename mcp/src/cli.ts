@@ -3,7 +3,7 @@
  * CLI entry point for the qualms MCP server.
  *
  * Usage:
- *   qualms-mcp --core <path/to/core.qualms.yaml> [--story <path>]...
+ *   qualms-mcp --core <path/to/core.qualms> [--story <path>]...
  *
  * The server reads/writes MCP messages on stdio. `--core` is required and
  * declares the protected prelude path (defaults to the migrated prelude when
@@ -43,9 +43,9 @@ function defaultCorePath(): string | undefined {
   // this file's directory and walk up to find prelude.
   const here = dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    resolve(here, "../prelude/core.qualms.yaml"),
-    resolve(here, "../../qualms/prelude/core.qualms.yaml"),
-    resolve(here, "../../../qualms/prelude/core.qualms.yaml"),
+    resolve(here, "../prelude/core.qualms"),
+    resolve(here, "../../qualms/prelude/core.qualms"),
+    resolve(here, "../../../qualms/prelude/core.qualms"),
   ];
   return candidates.find((p) => existsSync(p));
 }
@@ -54,7 +54,7 @@ function printHelp(): void {
   process.stdout.write(
     `qualms-mcp — MCP server for the Qualms engine\n\n` +
       `Usage:\n` +
-      `  qualms-mcp --core <prelude.yaml> [--story <story.yaml>]...\n\n` +
+      `  qualms-mcp --core <prelude.qualms> [--story <story.qualms>]...\n\n` +
       `Options:\n` +
       `  --core   PATH   Path to the prelude (required if not auto-discoverable).\n` +
       `  --story  PATH   Path to a story file. Repeatable.\n` +

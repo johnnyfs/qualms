@@ -780,6 +780,12 @@ class QualmsParser extends EmbeddedActionsParser {
       },
       {
         ALT: () => {
+          this.CONSUME(Null);
+          return { type: "value", value: null } as Term;
+        },
+      },
+      {
+        ALT: () => {
           const ident = this.CONSUME(Identifier).image;
           return { type: "var", name: ident } as Term;
         },
@@ -1134,6 +1140,29 @@ class QualmsParser extends EmbeddedActionsParser {
         },
       },
       {
+        // emit { key: term, … }
+        GATE: () =>
+          this.LA(1).tokenType === Identifier &&
+          this.LA(1).image === "emit" &&
+          this.LA(2).tokenType === LBrace,
+        ALT: () => {
+          this.CONSUME(Identifier); // 'emit'
+          this.CONSUME(LBrace);
+          const payload: Record<string, Term> = {};
+          this.OPTION(() => {
+            const first = this.SUBRULE(this.emitPayloadEntry);
+            if (first) payload[first.key] = first.value;
+            this.MANY(() => {
+              this.CONSUME(Comma);
+              const next = this.SUBRULE2(this.emitPayloadEntry);
+              if (next) payload[next.key] = next.value;
+            });
+          });
+          this.CONSUME(RBrace);
+          return { type: "emit", payload } as Effect;
+        },
+      },
+      {
         GATE: () => {
           if (this.LA(1).tokenType !== Identifier) return false;
           let i = 2;
@@ -1149,6 +1178,16 @@ class QualmsParser extends EmbeddedActionsParser {
       },
     ]);
   });
+
+  private emitPayloadEntry = this.RULE(
+    "emitPayloadEntry",
+    (): { key: string; value: Term } => {
+      const key = this.CONSUME(Identifier).image;
+      this.CONSUME(Colon);
+      const value = this.SUBRULE(this.term);
+      return { key, value };
+    },
+  );
 
   // ──────── Per-def-kind body parsers (DSL v2) ────────
 
