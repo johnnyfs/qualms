@@ -79,9 +79,9 @@ describe("acceptance: rollback path (session scope)", () => {
 
     // Apply a few structural mutations.
     for (const expr of [
-      "def trait Combatant { fields: { hp: { default: 10 } } }",
-      "def kind Foe { traits: [Combatant, Presentable] }",
-      'def entity grunt : Foe { fields: { Presentable: { name: "Grunt" } } }',
+      "def trait Combatant { hp: int = 10 }",
+      "def kind Foe: Combatant, Presentable",
+      'def entity grunt: Foe { Presentable.name = "Grunt" }',
     ]) {
       const r = await call(client, "mutate", { sessionId, transactionId, expr });
       expect(r.isError).not.toBe(true);
@@ -144,9 +144,9 @@ describe("acceptance: commit path (story scope, disk write)", () => {
     const transactionId = (begin.structuredContent as { transactionId: string }).transactionId;
 
     for (const expr of [
-      "def trait Combatant { fields: { hp: { default: 10 } } }",
-      "def kind Foe { traits: [Combatant, Presentable] }",
-      'def entity grunt : Foe { fields: { Presentable: { name: "Grunt" } } }',
+      "def trait Combatant { hp: int = 10 }",
+      "def kind Foe: Combatant, Presentable",
+      'def entity grunt: Foe { Presentable.name = "Grunt" }',
     ]) {
       const r = await call(client, "mutate", { sessionId, transactionId, expr });
       expect(r.isError).not.toBe(true);

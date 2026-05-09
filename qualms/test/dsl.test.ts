@@ -217,20 +217,14 @@ describe("dsl v2: def kind", () => {
       },
     });
     if (stmt.kind === "mutation" && stmt.mutation.type === "defKind") {
-      expect(stmt.mutation.spec.traits.map((t) => t.id)).toEqual([
-        "Presentable",
-        "Relocatable",
-      ]);
+      expect(stmt.mutation.spec.traits).toEqual(["Presentable", "Relocatable"]);
     }
   });
 
   it("with empty body", () => {
     const stmt = parseStatement("def kind Item: Presentable, Relocatable {}");
     if (stmt.kind !== "mutation" || stmt.mutation.type !== "defKind") throw new Error("wrong shape");
-    expect(stmt.mutation.spec.traits.map((t) => t.id)).toEqual([
-      "Presentable",
-      "Relocatable",
-    ]);
+    expect(stmt.mutation.spec.traits).toEqual(["Presentable", "Relocatable"]);
   });
 
   it("with kind-level field overrides", () => {

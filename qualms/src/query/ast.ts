@@ -209,7 +209,8 @@ export interface ActionDefSpec {
 
 export interface KindDefSpec {
   id: string;
-  traits: TraitAttachmentSpec[];
+  /** v2: kinds reference traits by id only; per-attachment overrides moved to entity bodies. */
+  traits: string[];
   fields?: Record<string, Record<string, unknown>>;
   rules?: RuleDefSpec[];
 }
@@ -218,9 +219,6 @@ export interface KindDefSpec {
  * Trait grant on an entity (v2): attach a trait beyond what the kind provides,
  * with optional field overrides. v1's `parameters` are dropped — entity-level
  * trait params were unused in practice and complicate the v2 grammar.
- *
- * Defined in 3a; wired through in 3b together with the parser rewrite that
- * narrows `EntityDefSpec.traits` and `KindDefSpec.traits` to the v2 shapes.
  */
 export interface TraitGrantSpec {
   id: string;
@@ -251,7 +249,9 @@ export interface RulebookDefSpec {
 export interface EntityDefSpec {
   id: string;
   kind?: string;
-  traits?: TraitAttachmentSpec[];
+  /** v2: explicit trait grants beyond what the kind provides. */
+  traits?: TraitGrantSpec[];
+  /** Trait.field = value overrides (top-level shorthand). */
   fields?: Record<string, Record<string, unknown>>;
   rules?: RuleDefSpec[];
   metadata?: Record<string, unknown>;

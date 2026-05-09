@@ -265,17 +265,17 @@ describe("tool handler: __begin / __mutate / __diff / __commit / __rollback", ()
     handleMutate(mgr, {
       sessionId,
       transactionId: tx.transactionId,
-      expr: 'def trait Combatant { fields: { hp: { default: 10 } } }',
+      expr: 'def trait Combatant { hp: int = 10 }',
     });
     handleMutate(mgr, {
       sessionId,
       transactionId: tx.transactionId,
-      expr: "def kind Foe { traits: [Combatant, Presentable] }",
+      expr: "def kind Foe: Combatant, Presentable",
     });
     handleMutate(mgr, {
       sessionId,
       transactionId: tx.transactionId,
-      expr: 'def entity grunt : Foe { fields: { Presentable: { name: "Grunt" } } }',
+      expr: 'def entity grunt: Foe { Presentable.name = "Grunt" }',
     });
     const out = handleCommit(mgr, { sessionId, transactionId: tx.transactionId });
     expect(out.persisted).toBe(true);

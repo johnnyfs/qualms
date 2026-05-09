@@ -101,7 +101,7 @@ describe("mutation executor: def trait / relation / action / kind", () => {
   it("def trait adds a trait at the tx module", () => {
     const { def, state, tx } = freshTx("game", buildBaseDef());
     applyMutation(
-      parseMutation('def trait NewTrait { fields: { x: { default: 0 } } }'),
+      parseMutation("def trait NewTrait { x: int = 0 }"),
       tx,
       def,
       state,
@@ -129,7 +129,7 @@ describe("mutation executor: def trait / relation / action / kind", () => {
     const { def, state, tx } = freshTx("session", buildBaseDef());
     expect(() =>
       applyMutation(
-        parseMutation("def kind Bad { traits: [DoesNotExist] }"),
+        parseMutation("def kind Bad: DoesNotExist"),
         tx,
         def,
         state,
@@ -140,7 +140,7 @@ describe("mutation executor: def trait / relation / action / kind", () => {
   it("def kind succeeds with known traits", () => {
     const { def, state, tx } = freshTx("game", buildBaseDef());
     applyMutation(
-      parseMutation("def kind Mob { traits: [Presentable, Combatant] }"),
+      parseMutation("def kind Mob: Presentable, Combatant"),
       tx,
       def,
       state,
@@ -161,7 +161,7 @@ describe("mutation executor: def rule / rulebook", () => {
   it("def rule succeeds when rulebook exists", () => {
     const { def, state, tx } = freshTx("game", buildBaseDef());
     applyMutation(
-      parseMutation("def rule Tick in EveryTurn { phase: after, match: Move(a: x) }"),
+      parseMutation("def rule Tick in EveryTurn { phase: after; match: Move(a: x) }"),
       tx,
       def,
       state,
@@ -177,7 +177,7 @@ describe("mutation executor: def rule / rulebook", () => {
     expect(() =>
       applyMutation(
         parseMutation(
-          "def rule Orphan in NoSuchBook { phase: before, match: Move(a: x) }",
+          "def rule Orphan in NoSuchBook { phase: before; match: Move(a: x) }",
         ),
         tx,
         def,
@@ -191,7 +191,7 @@ describe("mutation executor: def entity", () => {
   it("def entity materializes immediately into WorldState", () => {
     const { def, state, tx } = freshTx("session", buildBaseDef());
     applyMutation(
-      parseMutation('def entity grunt : Foe { fields: { Presentable: { name: "Grunt" } } }'),
+      parseMutation('def entity grunt: Foe { Presentable.name = "Grunt" }'),
       tx,
       def,
       state,
@@ -206,7 +206,7 @@ describe("mutation executor: def entity", () => {
   it("def entity without kind, with traits", () => {
     const { def, state, tx } = freshTx("session", buildBaseDef());
     applyMutation(
-      parseMutation("def entity ghost { traits: [Presentable] }"),
+      parseMutation("def entity ghost { trait Presentable }"),
       tx,
       def,
       state,
@@ -216,9 +216,9 @@ describe("mutation executor: def entity", () => {
 
   it("rejects duplicate entity id", () => {
     const { def, state, tx } = freshTx("game", buildBaseDef());
-    applyMutation(parseMutation("def entity x : Foe {}"), tx, def, state);
+    applyMutation(parseMutation("def entity x: Foe"), tx, def, state);
     expect(() =>
-      applyMutation(parseMutation("def entity x : Foe {}"), tx, def, state),
+      applyMutation(parseMutation("def entity x: Foe"), tx, def, state),
     ).toThrowError(MutationError);
   });
 });
@@ -226,21 +226,21 @@ describe("mutation executor: def entity", () => {
 describe("mutation executor: field assign", () => {
   it("assigns a field on an entity", () => {
     const { def, state, tx } = freshTx("game", buildBaseDef());
-    applyMutation(parseMutation("def entity x : Foe {}"), tx, def, state);
+    applyMutation(parseMutation("def entity x: Foe"), tx, def, state);
     applyMutation(parseMutation('x.Presentable.name := "Renamed"'), tx, def, state);
     expect(state.entity("x").traits["Presentable"]?.fields["name"]).toBe("Renamed");
   });
 
   it("auto-resolves trait when unambiguous", () => {
     const { def, state, tx } = freshTx("session", buildBaseDef());
-    applyMutation(parseMutation("def entity x : Foe {}"), tx, def, state);
+    applyMutation(parseMutation("def entity x: Foe"), tx, def, state);
     applyMutation(parseMutation("x.hp := 7"), tx, def, state);
     expect(state.entity("x").traits["Combatant"]?.fields["hp"]).toBe(7);
   });
 
   it("rejects when trait/field unknown", () => {
     const { def, state, tx } = freshTx("session", buildBaseDef());
-    applyMutation(parseMutation("def entity x : Foe {}"), tx, def, state);
+    applyMutation(parseMutation("def entity x: Foe"), tx, def, state);
     expect(() =>
       applyMutation(parseMutation("x.Combatant.bogus := 1"), tx, def, state),
     ).toThrowError(MutationError);
@@ -265,7 +265,7 @@ describe("mutation executor: undef", () => {
   it("undef rejects when something references the target", () => {
     const { def, state, tx } = freshTx("game", buildBaseDef());
     applyMutation(parseMutation("def trait NewTrait {}"), tx, def, state);
-    applyMutation(parseMutation("def kind UsesIt { traits: [NewTrait] }"), tx, def, state);
+    applyMutation(parseMutation("def kind UsesIt: NewTrait"), tx, def, state);
     expect(() =>
       applyMutation(parseMutation("undef trait NewTrait"), tx, def, state),
     ).toThrowError(MutationError);
@@ -273,7 +273,7 @@ describe("mutation executor: undef", () => {
 
   it("undef entity removes from def and state", () => {
     const { def, state, tx } = freshTx("session", buildBaseDef());
-    applyMutation(parseMutation("def entity x : Foe {}"), tx, def, state);
+    applyMutation(parseMutation("def entity x: Foe"), tx, def, state);
     applyMutation(parseMutation("undef entity x"), tx, def, state);
     expect(def.hasInitialEntity("x")).toBe(false);
     expect(state.hasEntity("x")).toBe(false);
@@ -283,7 +283,7 @@ describe("mutation executor: undef", () => {
     const { def, state, tx } = freshTx("session", buildBaseDef());
     applyMutation(parseMutation("def rulebook RB {}"), tx, def, state);
     applyMutation(
-      parseMutation("def rule R in RB { phase: after, match: Move(a: x) }"),
+      parseMutation("def rule R in RB { phase: after; match: Move(a: x) }"),
       tx,
       def,
       state,
@@ -305,7 +305,7 @@ describe("mutation executor: snapshots and rollback", () => {
   it("rollback restores both def and state", () => {
     const { def, state, tx } = freshTx("session", buildBaseDef());
     applyMutation(parseMutation("def trait X {}"), tx, def, state);
-    applyMutation(parseMutation('def entity e1 : Foe { fields: { Presentable: { name: "x" } } }'), tx, def, state);
+    applyMutation(parseMutation('def entity e1: Foe { Presentable.name = "x" }'), tx, def, state);
     const restored = Transaction.rollback(tx);
     expect(restored.def.hasTrait("X")).toBe(false);
     expect(restored.state.hasEntity("e1")).toBe(false);

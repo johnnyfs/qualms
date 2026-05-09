@@ -46,7 +46,6 @@ import type {
   RelationDefSpec,
   RuleDefSpec,
   Term,
-  TraitAttachmentSpec,
   TraitDefSpec,
 } from "../query/ast.js";
 import { MutationError } from "./errors.js";
@@ -232,10 +231,10 @@ function execDefKind(spec: KindDefSpec, tx: Transaction, def: GameDefinition): v
     throw new MutationError(`kind '${spec.id}' already exists`, "duplicate");
   }
   // Pre-check trait references (validate() will catch but we want a cleaner error).
-  for (const att of spec.traits) {
-    if (!def.hasTrait(att.id)) {
+  for (const traitId of spec.traits) {
+    if (!def.hasTrait(traitId)) {
       throw new MutationError(
-        `kind '${spec.id}' references unknown trait '${att.id}'`,
+        `kind '${spec.id}' references unknown trait '${traitId}'`,
         "validation",
       );
     }
@@ -291,7 +290,10 @@ function execDefEntity(
   if (def.hasInitialEntity(spec.id) || state.hasEntity(spec.id)) {
     throw new MutationError(`entity '${spec.id}' already exists`, "duplicate");
   }
-  const traits: TraitAttachment[] = (spec.traits ?? []).map(toAttachment);
+  // v2: TraitGrantSpec[] (id + optional fields, no parameters).
+  const traits: TraitAttachment[] = (spec.traits ?? []).map((g) =>
+    buildAttachment(g.id, g.fields !== undefined ? { fields: g.fields } : {}),
+  );
   // Validate trait + kind references up front.
   if (spec.kind !== undefined && !def.hasKind(spec.kind)) {
     throw new MutationError(`entity '${spec.id}' references unknown kind '${spec.kind}'`, "validation");
@@ -487,13 +489,6 @@ function fieldFromSpec(f: FieldDefSpec): FieldDefinition {
   });
 }
 
-function toAttachment(att: TraitAttachmentSpec): TraitAttachment {
-  return buildAttachment(att.id, {
-    ...(att.parameters !== undefined ? { parameters: att.parameters } : {}),
-    ...(att.fields !== undefined ? { fields: att.fields } : {}),
-  });
-}
-
 function effectsToSpecs(effects: Effect[] | undefined): EffectSpec[] {
   if (!effects) return [];
   // Effects are stored as opaque records. Spread the typed Effect into a record.
@@ -529,8 +524,14 @@ function actionFromSpec(spec: ActionDefSpec, tx: Transaction): ActionDefinition 
 }
 
 function kindFromSpec(spec: KindDefSpec, tx: Transaction): KindDefinition {
+  // v2: KindDefSpec.traits is string[] (per-attachment overrides moved to entity bodies).
+  // Field overrides on the kind apply at instantiation via the same TraitAttachment shape.
   return buildKind(spec.id, tx.module, {
-    traits: spec.traits.map(toAttachment),
+    traits: spec.traits.map((traitId) =>
+      buildAttachment(traitId, {
+        ...(spec.fields?.[traitId] !== undefined ? { fields: spec.fields[traitId] } : {}),
+      }),
+    ),
     ...(spec.fields !== undefined ? { fields: spec.fields } : {}),
     ...(spec.rules !== undefined ? { rules: spec.rules.map((r) => ruleFromSpec(r, tx)) } : {}),
   });
