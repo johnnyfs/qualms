@@ -55,7 +55,10 @@ There is no CLI in this milestone. The agent-facing surface is a stateful MCP se
 
 ## What's preserved
 
-- **Story YAML format**, with two deliberate prelude additions: an `IsPlayer(actor)` top-level relation and an `Item` kind (Presentable + Relocatable). Existing stories remain semantically loadable.
+- **Story YAML format**, with deliberate prelude additions and removals:
+  - **Added**: `IsPlayer(actor)` top-level relation (universal "who is the player" entry point) and the `Item` kind (Presentable + Relocatable).
+  - **Removed**: `Visited` relation and the `core-memory` rulebook — story-level memory is a story concern, not a universal primitive. `Aboard` relation absorbed into `At` + `CarriedBy` in `CanTouch`'s derivation. `SequenceComplete` removed as orphaned.
+  - **Collapsed**: `persistence: current | remembered | both` is gone. A relation is **stored** (no `get` body) or **derived** (has `get`). The single `WorldState.relations` Map replaces the prior `currentRelations` / `rememberedRelations` split.
 - **Prelude semantics for traits, relations, actions, rules, kinds.** The grammar is new; the model is the same.
 - **Coauthor concept.** Deferred to Tier 2; not implemented in this milestone.
 - **`stories/`.** Untouched in this milestone. Story content migration follows once the engine and MCP surface stabilize.
@@ -65,7 +68,8 @@ There is no CLI in this milestone. The agent-facing surface is a stateful MCP se
 - **Engine reimplemented in TypeScript** (Node 20+, ESM, strict mode).
 - **Repo layout:** `deprecated/qualms/`, `deprecated/curses/` for reference; new `qualms/` (TypeScript engine + prelude) and `mcp/` (MCP server) at the repo root. `godot/` ignored.
 - **Query/mutation surface:** new DSL with FOL + Cypher path patterns + Datalog-style named rules; structural meta-types in the same query namespace; ASCII/unicode parity.
-- **Four-scope structural model** with `__begin`/`__commit`/`__rollback`/`__mutate`/`__diff` transactions (shipped in milestone 2); `__save` writes player progress separately from structural commits (deferred). Story-scope `__commit` writes the `game`-layer slice back to a YAML file on disk; session-scope `__commit` finalizes in memory until `__save` lands.
+- **Four-scope structural model** with `begin`/`commit`/`rollback`/`mutate`/`diff` transactions (shipped in milestone 2); `save` writes player progress separately from structural commits (deferred). Story-scope `commit` writes the `game`-layer slice back to a YAML file on disk; session-scope `commit` finalizes in memory until `save` lands.
+- **Storage class collapse.** Relations have no `persistence` field; they are stored by default and derived when a `get` body is present. `WorldState` keeps a single relations Map. Story-level memory patterns (e.g. tracking visited locations) belong in story files, not the prelude.
 - **No CLI** in this milestone. Future frontend will be Ink/JS, not curses.
 - **No NOVA-specific surface anywhere.** The prelude is genuinely universal; story-specific vocabulary lives in story files.
 
@@ -80,7 +84,8 @@ There is no CLI in this milestone. The agent-facing surface is a stateful MCP se
 - Concurrent transactions across scopes; for now, one active transaction per session.
 - Migration of stellar / wave_collapse story content.
 - NOVA prelude port. The current milestone ships only a clean core prelude.
-- Functional amend layer for transactions. Snapshot-based rollback (deep-clone of `GameDefinition` + `WorldState` at `__begin`) is provisional; the intended endpoint is a base-ref + delta merged on read so cost scales with transaction size and parallel transactions across scopes become possible.
+- Functional amend layer for transactions. Snapshot-based rollback (deep-clone of `GameDefinition` + `WorldState` at `begin`) is provisional; the intended endpoint is a base-ref + delta merged on read so cost scales with transaction size and parallel transactions across scopes become possible.
+- **`was P` operator** for demand-driven memory tracking. Until then, story-level memory is expressed as ordinary stored relations asserted by story rules (the same shape `Visited` had in the old prelude, but story-authored).
 
 ## Goals statement: definition of "first milestone done"
 

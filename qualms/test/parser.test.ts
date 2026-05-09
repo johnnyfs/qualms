@@ -320,9 +320,7 @@ function buildSmallWorld() {
   def.addTrait(
     trait("Location", "prelude", {
       relations: [
-        relation("Path", "prelude", [parameter("source"), parameter("target")], {
-          persistence: "current",
-        }),
+        relation("Path", "prelude", [parameter("source"), parameter("target")]),
       ],
     }),
   );
@@ -330,9 +328,7 @@ function buildSmallWorld() {
     trait("Relocatable", "prelude", {
       fields: [field("location", { type: "ref", default: null })],
       relations: [
-        relation("At", "prelude", [parameter("subject"), parameter("location")], {
-          persistence: "current",
-        }),
+        relation("At", "prelude", [parameter("subject"), parameter("location")]),
       ],
     }),
   );
@@ -563,9 +559,9 @@ describe("mutation parser: def trait", () => {
 });
 
 describe("mutation parser: def relation", () => {
-  it("with persistence current", () => {
+  it("stored relation (no body) parses to a spec with no get", () => {
     const stmt = parseStatement(
-      "def relation Owns(owner, owned) { persistence: current }",
+      "def relation Owns(owner, owned) {}",
     );
     expect(stmt).toEqual({
       kind: "mutation",
@@ -574,23 +570,14 @@ describe("mutation parser: def relation", () => {
         spec: {
           id: "Owns",
           parameters: [{ id: "owner" }, { id: "owned" }],
-          persistence: "current",
         },
       },
     });
   });
 
-  it("with each persistence value", () => {
-    for (const p of ["current", "remembered", "both"]) {
-      const stmt = parseStatement(`def relation R(a, b) { persistence: ${p} }`);
-      if (stmt.kind !== "mutation" || stmt.mutation.type !== "defRelation") throw new Error("wrong shape");
-      expect(stmt.mutation.spec.persistence).toBe(p);
-    }
-  });
-
-  it("with derived `get` predicate", () => {
+  it("derived relation with `get` predicate", () => {
     const stmt = parseStatement(
-      "def relation Reachable(a, b) { persistence: current, get: ?- a -[Path]->+ b }",
+      "def relation Reachable(a, b) { get: ?- a -[Path]->+ b }",
     );
     if (stmt.kind !== "mutation" || stmt.mutation.type !== "defRelation") throw new Error("wrong shape");
     expect(stmt.mutation.spec.get).toBeDefined();
@@ -599,7 +586,7 @@ describe("mutation parser: def relation", () => {
 
   it("with set effects", () => {
     const stmt = parseStatement(
-      'def relation R(a, b) { persistence: current, set: [ assert Visited(a) ] }',
+      'def relation R(a, b) { set: [ assert Visited(a) ] }',
     );
     if (stmt.kind !== "mutation" || stmt.mutation.type !== "defRelation") throw new Error("wrong shape");
     expect(stmt.mutation.spec.setEffects).toEqual([
@@ -608,7 +595,7 @@ describe("mutation parser: def relation", () => {
   });
 
   it("typed parameter", () => {
-    const stmt = parseStatement("def relation R(a: ent, b: loc) { persistence: current }");
+    const stmt = parseStatement("def relation R(a: ent, b: loc) {}");
     if (stmt.kind !== "mutation" || stmt.mutation.type !== "defRelation") throw new Error("wrong shape");
     expect(stmt.mutation.spec.parameters).toEqual([
       { id: "a", type: "ent" },

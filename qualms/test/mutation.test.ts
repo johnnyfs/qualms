@@ -29,7 +29,7 @@ function buildBaseDef(): GameDefinition {
     trait("Combatant", "prelude", { fields: [field("hp", { default: 10 })] }),
   );
   def.addRelation(
-    relation("Owns", "prelude", [parameter("a"), parameter("b")], { persistence: "current" }),
+    relation("Owns", "prelude", [parameter("a"), parameter("b")]),
   );
   def.addRelation(
     relation(
@@ -119,14 +119,10 @@ describe("mutation executor: def trait / relation / action / kind", () => {
 
   it("def relation lands at the tx layer (session)", () => {
     const { def, state, tx } = freshTx("session", buildBaseDef());
-    applyMutation(
-      parseMutation("def relation Owes(a, b) { persistence: current }"),
-      tx,
-      def,
-      state,
-    );
+    applyMutation(parseMutation("def relation Owes(a, b) {}"), tx, def, state);
     expect(def.relation("Owes").layer).toBe("session");
-    expect(def.relation("Owes").persistence).toBe("current");
+    // Stored: no `get` body present.
+    expect(def.relation("Owes").get).toBeUndefined();
   });
 
   it("def action lands at tx layer", () => {

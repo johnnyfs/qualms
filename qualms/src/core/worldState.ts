@@ -1,10 +1,12 @@
 /**
- * WorldState — the live runtime state. Entities, trait fields, relation stores,
- * legacy facts, events, and allocators all live here.
+ * WorldState — the live runtime state. Entities, trait fields, the unified
+ * stored-relations Map, legacy facts, events, and allocators all live here.
  *
- * For step 1, predicate evaluation (for derived relations) is NOT implemented.
- * `test()` against a derived relation throws; only stored / remembered relations
- * are queryable. Step 2 introduces the AST + evaluator and lifts that restriction.
+ * Relations are either stored (no `get` body on the RelationDefinition) or
+ * derived (have a `get`). `test()` consults the predicate evaluator when called
+ * on a derived relation; until that path is wired through this module, derived
+ * relations throw from `test()`. Stored relations live in a single
+ * `relations` Map keyed by `relationKey(relationId, args)`.
  */
 
 import { GameDefinition } from "./definition.js";
@@ -14,7 +16,6 @@ import type {
   Entity,
   EntitySpec,
   Layer,
-  RelationDefinition,
   TraitAttachment,
   TraitInstance,
 } from "./types.js";
@@ -31,9 +32,8 @@ function factKey(id: string, args: readonly unknown[]): string {
 export class WorldState {
   readonly definition: GameDefinition;
   readonly entities: Map<string, Entity> = new Map();
-  /** Per-relation persistence tagging — bookkept for layer filtering of asserted relations. */
-  private readonly currentRelations: Map<string, Layer | "runtime"> = new Map();
-  private readonly rememberedRelations: Map<string, Layer | "runtime"> = new Map();
+  /** Unified stored-relations Map (post-persistence-collapse). Tagged by source layer. */
+  private readonly relations: Map<string, Layer | "runtime"> = new Map();
   /** Legacy untyped facts. */
   private readonly facts: Map<string, Layer | "runtime"> = new Map();
   readonly events: Record<string, unknown>[] = [];
@@ -87,15 +87,18 @@ export class WorldState {
 
   // ──────── Relations ────────
 
-  /** Tests for a stored / remembered relation. Derived relations throw in step 1. */
+  /**
+   * Tests a stored relation. Throws on derived relations (those with a `get`
+   * body) — derived evaluation goes through the query evaluator, not `test()`.
+   */
   test(relationId: string, args: readonly unknown[]): boolean {
     const rel = this.definition.relation(relationId);
-    if (!rel.persistence) {
+    if (rel.get !== undefined) {
       throw new Error(
-        `relation '${relationId}' is derived; predicate evaluation not implemented in step 1`,
+        `relation '${relationId}' is derived; evaluate via runQuery, not state.test()`,
       );
     }
-    return this.relationStore(rel.persistence, "read").has(relationKey(relationId, args));
+    return this.relations.has(relationKey(relationId, args));
   }
 
   assertRelation(
@@ -104,36 +107,29 @@ export class WorldState {
     sourceLayer: Layer | "runtime" = "runtime",
   ): void {
     const rel = this.definition.relation(relationId);
-    if (!rel.persistence) {
+    if (rel.get !== undefined) {
       throw new Error(
-        `relation '${relationId}' is not stored; assertion through effects not implemented in step 1`,
+        `relation '${relationId}' is derived; cannot assert directly`,
       );
     }
-    const key = relationKey(relationId, args);
-    for (const store of this.relationStoresForWrite(rel.persistence)) {
-      store.set(key, sourceLayer);
-    }
+    this.relations.set(relationKey(relationId, args), sourceLayer);
   }
 
   retractRelation(relationId: string, args: readonly unknown[]): void {
     const rel = this.definition.relation(relationId);
-    if (!rel.persistence) {
-      throw new Error(`relation '${relationId}' is not stored; cannot retract`);
+    if (rel.get !== undefined) {
+      throw new Error(`relation '${relationId}' is derived; cannot retract`);
     }
-    const key = relationKey(relationId, args);
-    for (const store of this.relationStoresForWrite(rel.persistence)) {
-      store.delete(key);
-    }
+    this.relations.delete(relationKey(relationId, args));
   }
 
   /** Enumerate stored relations matching a relation id. Returns serialized arg arrays. */
   storedTuples(relationId: string): { args: unknown[]; layer: Layer | "runtime" }[] {
     const rel = this.definition.relation(relationId);
-    if (!rel.persistence) return [];
-    const store = this.relationStore(rel.persistence, "read");
+    if (rel.get !== undefined) return [];
     const prefix = `${relationId}|`;
     const out: { args: unknown[]; layer: Layer | "runtime" }[] = [];
-    for (const [key, layer] of store.entries()) {
+    for (const [key, layer] of this.relations.entries()) {
       if (!key.startsWith(prefix)) continue;
       const argsJson = key.slice(prefix.length);
       out.push({ args: JSON.parse(argsJson) as unknown[], layer });
@@ -180,39 +176,13 @@ export class WorldState {
     for (const [id, e] of this.entities) {
       out.entities.set(id, structuredClone(e));
     }
-    for (const [k, v] of this.currentRelations) out.currentRelations.set(k, v);
-    for (const [k, v] of this.rememberedRelations) out.rememberedRelations.set(k, v);
+    for (const [k, v] of this.relations) out.relations.set(k, v);
     for (const [k, v] of this.facts) out.facts.set(k, v);
     out.events.push(...this.events.map((e) => structuredClone(e)));
     for (const [k, v] of this.allocators) out.allocators.set(k, v);
     return out;
   }
 
-  // ──────── Internal ────────
-
-  private relationStore(
-    persistence: RelationDefinition["persistence"],
-    mode: "read",
-  ): Map<string, Layer | "runtime"> {
-    if (persistence === "current") return this.currentRelations;
-    if (persistence === "remembered") return this.rememberedRelations;
-    if (persistence === "both") {
-      // For reads: union of both.
-      const merged = new Map(this.currentRelations);
-      for (const [k, v] of this.rememberedRelations) merged.set(k, v);
-      return merged;
-    }
-    throw new Error(`unknown persistence '${String(persistence)}' (mode=${mode})`);
-  }
-
-  private relationStoresForWrite(
-    persistence: RelationDefinition["persistence"],
-  ): Map<string, Layer | "runtime">[] {
-    if (persistence === "current") return [this.currentRelations];
-    if (persistence === "remembered") return [this.rememberedRelations];
-    if (persistence === "both") return [this.currentRelations, this.rememberedRelations];
-    throw new Error(`unknown persistence '${String(persistence)}'`);
-  }
 }
 
 /**

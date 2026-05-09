@@ -136,7 +136,6 @@ function emitTrait(t: TraitDefinition): Record<string, unknown> {
 function emitRelation(r: RelationDefinition): Record<string, unknown> {
   const out: Record<string, unknown> = { id: r.id };
   if (r.parameters.length > 0) out["params"] = r.parameters.map(emitParameter);
-  if (r.persistence !== undefined) out["persistence"] = r.persistence;
   if (r.get !== undefined) out["get"] = emitPredicate(r.get as Expression);
   if (r.setEffects !== undefined && r.setEffects.length > 0) {
     out["set"] = r.setEffects.map((e) => structuredClone(e) as unknown);

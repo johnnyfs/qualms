@@ -333,7 +333,7 @@ describe("tool handler: __begin / __mutate / __diff / __commit / __rollback", ()
       expect.unreachable("expected MutationError");
     } catch (err) {
       expect(err).toBeInstanceOf(MutationError);
-      expect((err as MutationError).category).toBe("prelude_protected");
+      expect((err as InstanceType<typeof MutationError>).category).toBe("prelude_protected");
     }
   });
 

@@ -192,7 +192,10 @@ export interface TraitDefSpec {
 export interface RelationDefSpec {
   id: string;
   parameters: ParameterDefSpec[];
-  persistence?: "current" | "remembered" | "both";
+  /**
+   * Predicate body for derived relations. Presence is the sole "is this
+   * derived" signal — the prior `persistence` field has been collapsed.
+   */
   get?: Expression;
   setEffects?: Effect[];
 }

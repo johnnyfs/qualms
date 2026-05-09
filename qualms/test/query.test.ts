@@ -84,7 +84,6 @@ function buildWorld(): { def: GameDefinition; state: ReturnType<typeof instantia
           "Path",
           "prelude",
           [parameter("source"), parameter("target")],
-          { persistence: "current" },
         ),
       ],
     }),
@@ -97,7 +96,6 @@ function buildWorld(): { def: GameDefinition; state: ReturnType<typeof instantia
           "At",
           "prelude",
           [parameter("subject"), parameter("location")],
-          { persistence: "current" },
         ),
       ],
     }),
@@ -106,7 +104,7 @@ function buildWorld(): { def: GameDefinition; state: ReturnType<typeof instantia
 
   // Top-level relations
   def.addRelation(
-    relation("IsPlayer", "prelude", [parameter("actor")], { persistence: "current" }),
+    relation("IsPlayer", "prelude", [parameter("actor")]),
   );
   // Derived: CarriedBy(actor, item) :- At(item, actor)
   def.addRelation(

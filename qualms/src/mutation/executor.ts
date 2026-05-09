@@ -109,7 +109,7 @@ function execAssert(
     throw new MutationError(`unknown relation '${m.relation}'`, "unknown_target");
   }
   const rel = def.relation(m.relation);
-  if (!rel.persistence) {
+  if (rel.get !== undefined) {
     throw new MutationError(
       `relation '${m.relation}' is derived; cannot assert directly`,
       "derived_relation",
@@ -130,7 +130,7 @@ function execRetract(
     throw new MutationError(`unknown relation '${m.relation}'`, "unknown_target");
   }
   const rel = def.relation(m.relation);
-  if (!rel.persistence) {
+  if (rel.get !== undefined) {
     throw new MutationError(
       `relation '${m.relation}' is derived; cannot retract`,
       "derived_relation",
@@ -511,7 +511,6 @@ function traitFromSpec(spec: TraitDefSpec, tx: Transaction): TraitDefinition {
 
 function relationFromSpec(spec: RelationDefSpec, tx: Transaction): RelationDefinition {
   return buildRelation(spec.id, tx.layer, spec.parameters.map(paramFromSpec), {
-    ...(spec.persistence !== undefined ? { persistence: spec.persistence } : {}),
     ...(spec.get !== undefined ? { get: spec.get } : {}),
     ...(spec.setEffects !== undefined
       ? { setEffects: effectsToSpecs(spec.setEffects) }

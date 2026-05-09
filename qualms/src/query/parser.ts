@@ -1022,8 +1022,8 @@ class QualmsParser extends EmbeddedActionsParser {
       },
       { ALT: () => this.SUBRULE(this.jsonObject) },
       { ALT: () => this.SUBRULE(this.jsonArray) },
-      // Bare identifier — treated as a string. Lets `persistence: current` and
-      // `traits: [Presentable, Container]` work without quoting.
+      // Bare identifier — treated as a string. Lets `traits: [Presentable, Container]`
+      // and other identifier-valued options work without quoting.
       {
         ALT: () => this.CONSUME(Identifier).image,
       },
@@ -1171,10 +1171,6 @@ class QualmsParser extends EmbeddedActionsParser {
     (): Omit<RelationDefSpec, "id" | "parameters"> => {
       const clauses = this.SUBRULE(this.defBody);
       const out: Omit<RelationDefSpec, "id" | "parameters"> = {};
-      if (clauses["persistence"] !== undefined) {
-        // Validation deferred to post-parse to survive Chevrotain's recording phase.
-        out.persistence = clauses["persistence"] as RelationDefSpec["persistence"];
-      }
       if (clauses["get"] !== undefined) out.get = clauses["get"] as Expression;
       if (clauses["set"] !== undefined) out.setEffects = clauses["set"] as Effect[];
       return out;
@@ -1315,13 +1311,10 @@ function validateMutationSpec(stmt: Statement): void {
       }
       return;
     }
-    case "defRelation": {
-      const p = m.spec.persistence;
-      if (p !== undefined && p !== "current" && p !== "remembered" && p !== "both") {
-        throw new ParseError(`unknown persistence '${String(p)}'`);
-      }
+    case "defRelation":
+      // No relation-spec validation needed post-parse; `get` is opaque, `setEffects`
+      // already typed by the parser path.
       return;
-    }
     case "defRule": {
       const phase = m.spec.phase as unknown;
       if (phase !== "before" && phase !== "during" && phase !== "after" && phase !== "instead") {

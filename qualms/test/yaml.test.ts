@@ -148,13 +148,13 @@ definitions:
     - id: Location
       relations:
         - id: Path
-          persistence: current
           params:
             - id: source
             - id: target
 `);
     expect(def.hasRelation("Path")).toBe(true);
-    expect(def.relation("Path").persistence).toBe("current");
+    // Stored: no `get` body present.
+    expect(def.relation("Path").get).toBeUndefined();
   });
 
   it("loads a derived relation with predicate body", () => {
@@ -182,7 +182,6 @@ definitions:
           - { var: name }
 `);
     const r = def.relation("Named");
-    expect(r.persistence).toBeUndefined();
     expect(r.get).toBeDefined();
     // The body is a query AST equality node.
     expect((r.get as { type: string }).type).toBe("equal");
@@ -218,12 +217,11 @@ definitions:
         - id: destination
   relations:
     - id: Visited
-      persistence: remembered
       params:
         - id: actor
         - id: location
   rulebooks:
-    - id: core-memory
+    - id: story-memory
       rules:
         - id: remember-visited-location
           phase: after
@@ -261,7 +259,6 @@ definitions:
         - id: Presentable
   relations:
     - id: At
-      persistence: current
       params:
         - id: subject
         - id: location
@@ -289,7 +286,7 @@ story:
     ).toThrowError(/root must be a mapping/);
   });
 
-  it("rejects unknown persistence value", () => {
+  it("rejects any persistence key (the field has been collapsed)", () => {
     expect(() =>
       loadYamlIntoDefinition(
         new GameDefinition(),
@@ -298,7 +295,7 @@ id: t
 definitions:
   relations:
     - id: Bad
-      persistence: never
+      persistence: current
       params: []`,
         { layer: "prelude" },
       ),
@@ -382,18 +379,17 @@ describe("migrated core prelude (qualms/prelude/core.qualms.yaml)", () => {
     expect(rs).toEqual(new Set(["CanTouch", "CanSee"]));
   });
 
-  it("core-memory rule remember-visited-location loaded correctly", () => {
+  it("post-scrub: no Visited / Aboard / core-memory in the prelude", () => {
     const { def } = loaded();
-    expect(def.rules.some((r) => r.id === "remember-visited-location")).toBe(true);
-    const rule = def.rules.find((r) => r.id === "remember-visited-location")!;
-    expect(rule.phase).toBe("after");
-    expect(rule.pattern.action).toBe("Enter");
+    expect(def.hasRelation("Visited")).toBe(false);
+    expect(def.hasRelation("Aboard")).toBe(false);
+    expect(def.hasRulebook("core-memory")).toBe(false);
+    expect(def.rules).toHaveLength(0);
   });
 
   it("CarriedBy derived relation has a translated body", () => {
     const { def } = loaded();
     const cb = def.relation("CarriedBy");
-    expect(cb.persistence).toBeUndefined();
     expect(cb.get).toBeDefined();
     expect((cb.get as { type: string }).type).toBe("relation"); // it derives from At
   });
@@ -419,9 +415,7 @@ describe("yaml emitter: round-trip of game-layer slice", () => {
       }),
     );
     def.addRelation(
-      relation("Owns", "game", [parameter("owner"), parameter("owned")], {
-        persistence: "current",
-      }),
+      relation("Owns", "game", [parameter("owner"), parameter("owned")]),
     );
     def.addAction(action("Inspect", "game", [parameter("actor"), parameter("target")]));
     def.addRulebook(rulebook("EveryTurn", "game"));
@@ -465,7 +459,8 @@ describe("yaml emitter: round-trip of game-layer slice", () => {
     expect(reloaded.trait("Combatant").fields.map((f) => f.id)).toEqual(["hp", "dmg"]);
 
     // Relation, action, rulebook.
-    expect(reloaded.relation("Owns").persistence).toBe("current");
+    expect(reloaded.hasRelation("Owns")).toBe(true);
+    expect(reloaded.relation("Owns").get).toBeUndefined(); // stored
     expect(reloaded.action("Inspect").parameters.map((p) => p.id)).toEqual(["actor", "target"]);
     expect(reloaded.hasRulebook("EveryTurn")).toBe(true);
 

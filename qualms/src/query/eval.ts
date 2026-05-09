@@ -368,23 +368,19 @@ function* evaluateRelation(
     throw new Error(`unknown relation '${relationName}'`);
   }
   const rel = ctx.definition.relation(relationName);
-  if (rel.persistence) {
-    // Stored — scan tuples.
-    if (!ctx.state) {
-      throw new Error(`stored relation '${relationName}' requires a WorldState`);
-    }
-    const tuples = ctx.state.storedTuples(relationName);
-    for (const tuple of tuples) {
-      yield* unifyArgsWithTuple(args, tuple.args, env, ctx);
-    }
-    return;
-  }
   if (rel.get !== undefined) {
     // Derived — inline body with parameter bindings.
     yield* evaluateDerivedRelation(rel.get, rel.parameters, args, ctx, env);
     return;
   }
-  throw new Error(`relation '${relationName}' has no storage and no derivation`);
+  // Stored — scan tuples from the unified relations Map.
+  if (!ctx.state) {
+    throw new Error(`stored relation '${relationName}' requires a WorldState`);
+  }
+  const tuples = ctx.state.storedTuples(relationName);
+  for (const tuple of tuples) {
+    yield* unifyArgsWithTuple(args, tuple.args, env, ctx);
+  }
 }
 
 function* unifyArgsWithTuple(
@@ -560,7 +556,7 @@ function* evaluatePath(
       throw new Error(`path references unknown relation '${relId}'`);
     }
     const rel = ctx.definition.relation(relId);
-    if (!rel.persistence) {
+    if (rel.get !== undefined) {
       throw new Error(`path relation '${relId}' must be stored (not derived)`);
     }
     if (rel.parameters.length !== 2) {

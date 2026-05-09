@@ -15,7 +15,6 @@ import type {
   ParameterDefinition,
   PredicateSpec,
   RelationDefinition,
-  RelationPersistence,
   Rule,
   RuleControl,
   RulePhase,
@@ -81,7 +80,6 @@ export function relation(
   options: {
     get?: PredicateSpec;
     setEffects?: readonly EffectSpec[];
-    persistence?: RelationPersistence;
   } = {},
 ): RelationDefinition {
   return {
@@ -90,7 +88,6 @@ export function relation(
     parameters,
     get: options.get,
     setEffects: options.setEffects,
-    persistence: options.persistence,
   };
 }
 

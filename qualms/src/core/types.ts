@@ -52,18 +52,18 @@ export interface TraitDefinition {
   readonly constraints: readonly PredicateSpec[];
 }
 
-export type RelationPersistence = "current" | "remembered" | "both";
-
 export interface RelationDefinition {
   readonly id: string;
   readonly layer: Layer;
   readonly parameters: readonly ParameterDefinition[];
-  /** Predicate body for derived relations; undefined means "stored only". */
+  /**
+   * Predicate body for derived relations. Presence is the sole "is this
+   * derived" signal: `undefined` ⇒ stored, defined ⇒ derived. The previous
+   * `persistence` field collapsed to this — see MIGRATION.md.
+   */
   readonly get?: PredicateSpec;
   /** Effects fired on assertion; undefined means "not assertable via effects". */
   readonly setEffects?: readonly EffectSpec[];
-  /** Storage persistence; undefined means "fully derived (no storage)". */
-  readonly persistence?: RelationPersistence;
 }
 
 export interface ActionDefinition {

@@ -1,13 +1,18 @@
 qualms: "0.1"
 id: core-prelude
 
-# Migrated core prelude for the JS engine. Differences from the legacy
+# Core prelude for the JS engine. Differences from the legacy
 # stories/prelude/core.qualms.yaml are recorded in qualms/MIGRATION.md:
 #   + IsPlayer(actor) top-level relation — gives the engine a generic
 #     entry point for "who is the player".
 #   + Item kind (Presentable + Relocatable) — was missing in the legacy
 #     prelude despite being a near-universal authoring need.
 #   - SequenceComplete relation removed — orphaned legacy memory mechanic.
+#   - Aboard relation removed; CanTouch derives from At + CarriedBy alone.
+#   - Visited relation + core-memory rulebook removed; story-level memory
+#     belongs in story files, not the universal prelude.
+#   - persistence: current/remembered/both collapsed; relations are stored
+#     by default and derived when a `get` body is present.
 
 definitions:
   traits:
@@ -28,7 +33,6 @@ definitions:
     - id: Location
       relations:
         - id: Path
-          persistence: current
           params:
             - id: source
               type: ref<Location>
@@ -80,14 +84,6 @@ definitions:
 
     - id: Scope
       relations:
-        - id: Aboard
-          persistence: current
-          params:
-            - id: actor
-              type: ref<Actor>
-            - id: location
-              type: ref<Location>
-
         - id: CanTouch
           params:
             - id: actor
@@ -114,14 +110,6 @@ definitions:
                   args:
                     - { var: actor }
                     - { var: target }
-              - relation:
-                  id: Aboard
-                  args:
-                    - { var: actor }
-                    - field:
-                        entity: { var: target }
-                        trait: Relocatable
-                        field: location
 
         - id: CanSee
           params:
@@ -338,19 +326,10 @@ definitions:
           type: ref
       get: true
 
-    - id: Visited
-      persistence: remembered
-      params:
-        - id: actor
-          type: ref<Actor>
-        - id: location
-          type: ref<Location>
-
-    # New: gives the engine a universal "who is the player" entry point.
-    # Stories assert IsPlayer(<actor-id>) at start; the player view and any
-    # player-anchored rules read from this.
+    # Universal "who is the player" entry point. Stories assert
+    # IsPlayer(<actor-id>) at start; the player view and any player-anchored
+    # rules read from this. Stored (no get body).
     - id: IsPlayer
-      persistence: current
       params:
         - id: actor
           type: ref<Actor>
@@ -410,23 +389,6 @@ definitions:
             args:
               - { var: actor }
               - { var: destination }
-
-  rulebooks:
-    - id: core-memory
-      rules:
-        - id: remember-visited-location
-          phase: after
-          match:
-            action: Enter
-            args:
-              actor: { bind: actor }
-              destination: { bind: destination }
-          effects:
-            - assert:
-                relation: Visited
-                args:
-                  - { var: actor }
-                  - { var: destination }
 
   kinds:
     - id: Thing

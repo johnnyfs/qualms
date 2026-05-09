@@ -99,7 +99,7 @@ export function metaFieldValue(ctx: MetaContext, id: string, field: string): unk
     const r = ctx.definition.relation(id);
     if (field === "id") return r.id;
     if (field === "layer") return r.layer;
-    if (field === "persistence") return r.persistence ?? null;
+    if (field === "derived") return r.get !== undefined;
     throw new Error(`unknown virtual field 'Relation.${field}' on '${id}'`);
   }
   const rule = ctx.definition.rules.find((r) => r.id === id);

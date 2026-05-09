@@ -46,9 +46,7 @@ describe("core builders", () => {
 describe("GameDefinition (layered)", () => {
   it("registers traits and lifts contributed relations/actions/rules", () => {
     const def = new GameDefinition();
-    const at = relation("At", "prelude", [parameter("subject"), parameter("location")], {
-      persistence: "current",
-    });
+    const at = relation("At", "prelude", [parameter("subject"), parameter("location")]);
     const move = action("Move", "prelude", [parameter("subject"), parameter("destination")]);
     const lifted = trait("Relocatable", "prelude", {
       relations: [at],
@@ -80,7 +78,7 @@ describe("GameDefinition (layered)", () => {
     const def = new GameDefinition();
     def.addTrait(trait("Presentable", "prelude", { fields: [field("name", { type: "str", default: "" })] }));
     def.addTrait(trait("Bonus", "game"));
-    def.addRelation(relation("Custom", "session", [parameter("a")], { persistence: "current" }));
+    def.addRelation(relation("Custom", "session", [parameter("a")]));
 
     expect(def.traitsByLayer("prelude").map((t) => t.id)).toEqual(["Presentable"]);
     expect(def.traitsByLayer("game").map((t) => t.id)).toEqual(["Bonus"]);
@@ -91,7 +89,7 @@ describe("GameDefinition (layered)", () => {
   it("preserves layer attribution on lifted relations from cross-layer traits", () => {
     const def = new GameDefinition();
     // A game-layer trait that contributes a session-layer relation explicitly.
-    const r = relation("R", "session", [parameter("x")], { persistence: "current" });
+    const r = relation("R", "session", [parameter("x")]);
     def.addTrait(trait("OddOne", "game", { relations: [r] }));
     // Trait is game; relation keeps its declared layer.
     expect(def.trait("OddOne").layer).toBe("game");
@@ -203,7 +201,7 @@ describe("instantiate + WorldState", () => {
             "At",
             "prelude",
             [parameter("subject"), parameter("location")],
-            { persistence: "current" },
+            {},
           ),
         ],
       }),
@@ -319,7 +317,7 @@ describe("layer attribution survives merge", () => {
     const def = new GameDefinition();
     def.addTrait(trait("Presentable", "prelude", { fields: [field("name", { type: "str", default: "" })] }));
     def.addTrait(trait("StoryTag", "game"));
-    def.addRelation(relation("PlayerSpawn", "session", [parameter("a")], { persistence: "current" }));
+    def.addRelation(relation("PlayerSpawn", "session", [parameter("a")]));
 
     expect(def.traitsByLayer("prelude").map((t) => t.id)).toEqual(["Presentable"]);
     expect(def.traitsByLayer("game").map((t) => t.id)).toEqual(["StoryTag"]);
@@ -389,7 +387,7 @@ describe("GameDefinition removers", () => {
     const def = new GameDefinition();
     def.addTrait(
       trait("Relocatable", "prelude", {
-        relations: [relation("At", "prelude", [parameter("a")], { persistence: "current" })],
+        relations: [relation("At", "prelude", [parameter("a")])],
         actions: [action("Move", "prelude", [parameter("a")])],
       }),
     );
@@ -402,7 +400,7 @@ describe("GameDefinition removers", () => {
 
   it("removeRelation / removeAction / removeKind", () => {
     const def = new GameDefinition();
-    def.addRelation(relation("R", "prelude", [], { persistence: "current" }));
+    def.addRelation(relation("R", "prelude", []));
     def.addAction(action("A", "prelude", []));
     def.addKind(kind("K", "prelude"));
     def.removeRelation("R");
@@ -447,7 +445,7 @@ describe("GameDefinition.clone()", () => {
   it("produces a deep copy with no shared Map refs", () => {
     const def = new GameDefinition();
     def.addTrait(trait("Presentable", "prelude", { fields: [field("name", { default: "" })] }));
-    def.addRelation(relation("R", "prelude", [], { persistence: "current" }));
+    def.addRelation(relation("R", "prelude", []));
     def.addInitialEntity(entitySpec("e1", "game"));
 
     const copy = def.clone();

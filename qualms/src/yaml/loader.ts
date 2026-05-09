@@ -32,7 +32,6 @@ import type {
   Layer,
   ParameterDefinition,
   RelationDefinition,
-  RelationPersistence,
   Rule,
   RuleControl,
   RulePhase,
@@ -234,18 +233,16 @@ function translateRelation(
   const params = (obj["params"] as unknown[] | undefined)?.map((p, i) =>
     translateParameter(p, `${path}.${id}.params[${i}]`),
   ) ?? [];
-  const persistence = obj["persistence"];
+  if (Object.prototype.hasOwnProperty.call(obj, "persistence")) {
+    throw new YamlLoadError(
+      "`persistence` is no longer supported; relations are stored by default and derived when a `get` body is present",
+      path,
+    );
+  }
   const options: {
-    persistence?: RelationPersistence;
     get?: unknown;
     setEffects?: readonly EffectSpec[];
   } = {};
-  if (typeof persistence === "string") {
-    if (persistence !== "current" && persistence !== "remembered" && persistence !== "both") {
-      throw new YamlLoadError(`unknown persistence '${persistence}'`, path);
-    }
-    options.persistence = persistence;
-  }
   if (obj["get"] !== undefined) {
     options.get = translatePredicate(obj["get"], `${path}.${id}.get`);
   }
