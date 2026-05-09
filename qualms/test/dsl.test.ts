@@ -411,3 +411,57 @@ describe("dsl v2: negatives", () => {
     expect(() => parseStatement("def trait Foo@game {}")).toThrowError(ParseError);
   });
 });
+
+// ──────── set<T>: type, literal, in, +=/-= ────────
+
+describe("dsl v2: set<T>", () => {
+  it("set<T> type in a field declaration parses", () => {
+    const stmt = parseStatement("def trait Bag { contents: set<Item> = {} }");
+    if (stmt.kind !== "mutation" || stmt.mutation.type !== "defTrait") throw new Error("wrong shape");
+    expect(stmt.mutation.spec.fields![0]?.type).toBe("set<Item>");
+    expect(stmt.mutation.spec.fields![0]?.default).toBeInstanceOf(Set);
+    expect((stmt.mutation.spec.fields![0]?.default as Set<unknown>).size).toBe(0);
+  });
+
+  it("populated set literal parses as a JS Set", () => {
+    const stmt = parseStatement('def trait Bag { contents: set<Item> = {a, b, "c"} }');
+    if (stmt.kind !== "mutation" || stmt.mutation.type !== "defTrait") throw new Error("wrong shape");
+    const def = stmt.mutation.spec.fields![0]?.default as Set<unknown>;
+    expect(def).toBeInstanceOf(Set);
+    expect(def.size).toBe(3);
+    expect(def.has("a")).toBe(true);
+    expect(def.has("c")).toBe(true);
+  });
+
+  it("`in` operator parses inside a get clause", () => {
+    const stmt = parseStatement(
+      "def relation Contains(c, i) { get: i in c.contents }",
+    );
+    if (stmt.kind !== "mutation" || stmt.mutation.type !== "defRelation") throw new Error("wrong shape");
+    expect(stmt.mutation.spec.get?.type).toBe("in");
+  });
+
+  it("`+=` effect parses inside a set clause", () => {
+    const stmt = parseStatement(
+      "def relation Contains(c, i) { set: [ c.contents += i ] }",
+    );
+    if (stmt.kind !== "mutation" || stmt.mutation.type !== "defRelation") throw new Error("wrong shape");
+    const eff = stmt.mutation.spec.setEffects?.[0];
+    expect(eff?.type).toBe("setAdd");
+  });
+
+  it("`-=` effect parses inside an effects clause", () => {
+    const stmt = parseStatement(
+      "def action Remove(c, i) { effects: [ c.contents -= i ] }",
+    );
+    if (stmt.kind !== "mutation" || stmt.mutation.type !== "defAction") throw new Error("wrong shape");
+    const eff = stmt.mutation.spec.effects?.[0];
+    expect(eff?.type).toBe("setRemove");
+  });
+
+  it("object literal `{k: v}` still parses (disambiguated from set)", () => {
+    const stmt = parseStatement("def entity grunt { metadata.note = { source: \"test\" } }");
+    if (stmt.kind !== "mutation" || stmt.mutation.type !== "defEntity") throw new Error("wrong shape");
+    expect(stmt.mutation.spec.metadata?.note).toEqual({ source: "test" });
+  });
+});

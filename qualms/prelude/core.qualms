@@ -50,9 +50,10 @@ def trait Scope {
 }
 
 def trait Container {
+  contents: set<Relocatable> = {};
   def relation Contains(container: Container, item: Relocatable) {
-    get: At(item, container);
-    set: [ assert At(item, container); ];
+    get: item in container.contents;
+    set: [ container.contents += item; ];
   };
 }
 

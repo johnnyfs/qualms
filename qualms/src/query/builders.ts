@@ -102,6 +102,12 @@ export const path = (
   quantifier: options.quantifier ?? "1",
 });
 
+export const inSet = (element: Term, set: Term): Expression => ({
+  type: "in",
+  element,
+  set,
+});
+
 // ──────── Query head builders ────────
 
 export const query = (head: string[], body: Expression): Query => ({ head, body });

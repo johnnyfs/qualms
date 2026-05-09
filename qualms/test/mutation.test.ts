@@ -247,6 +247,49 @@ describe("mutation executor: field assign", () => {
   });
 });
 
+describe("mutation executor: set add / remove", () => {
+  function bagDef(): GameDefinition {
+    const def = buildBaseDef();
+    def.addTrait(
+      trait("Bag", "prelude", {
+        fields: [
+          field("contents", { type: "set<Item>", default: new Set<unknown>(), hasDefault: true }),
+        ],
+      }),
+    );
+    def.addKind(kind("Sack", "prelude", { traits: [attachment("Bag")] }));
+    return def;
+  }
+
+  it("`+=` adds an element to a set field", () => {
+    const { def, state, tx } = freshTx("session", bagDef());
+    applyMutation(parseMutation("def entity sack: Sack"), tx, def, state);
+    applyMutation(parseMutation('sack.contents += "rock"'), tx, def, state);
+    const contents = state.entity("sack").traits["Bag"]?.fields["contents"];
+    expect(contents).toBeInstanceOf(Set);
+    expect((contents as Set<unknown>).has("rock")).toBe(true);
+  });
+
+  it("`-=` removes an element from a set field", () => {
+    const { def, state, tx } = freshTx("session", bagDef());
+    applyMutation(parseMutation("def entity sack: Sack"), tx, def, state);
+    applyMutation(parseMutation('sack.contents += "rock"'), tx, def, state);
+    applyMutation(parseMutation('sack.contents += "gem"'), tx, def, state);
+    applyMutation(parseMutation('sack.contents -= "rock"'), tx, def, state);
+    const contents = state.entity("sack").traits["Bag"]?.fields["contents"] as Set<unknown>;
+    expect(contents.has("rock")).toBe(false);
+    expect(contents.has("gem")).toBe(true);
+  });
+
+  it("rejects `+=` when the field is not a set", () => {
+    const { def, state, tx } = freshTx("session", buildBaseDef());
+    applyMutation(parseMutation("def entity x: Foe"), tx, def, state);
+    expect(() =>
+      applyMutation(parseMutation('x.Combatant.hp += "5"'), tx, def, state),
+    ).toThrowError(/not a set/);
+  });
+});
+
 describe("mutation executor: undef", () => {
   it("undef trait at session layer succeeds when nothing references it", () => {
     const { def, state, tx } = freshTx("session", buildBaseDef());

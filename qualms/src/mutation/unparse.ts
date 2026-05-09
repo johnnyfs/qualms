@@ -16,6 +16,10 @@ export function unparseMutation(m: MutationStatement): string {
       return `retract ${m.relation}(${m.args.map(unparseTerm).join(", ")})`;
     case "fieldAssign":
       return `${unparseTerm(m.target)} := ${unparseTerm(m.value)}`;
+    case "setAdd":
+      return `${unparseTerm(m.target)} += ${unparseTerm(m.element)}`;
+    case "setRemove":
+      return `${unparseTerm(m.target)} -= ${unparseTerm(m.element)}`;
     case "defTrait":
       return `def trait ${m.spec.id} ${unparseSpec(m.spec)}`;
     case "defRelation":
@@ -63,6 +67,10 @@ function unparseEffect(e: Effect): string {
       return `retract ${e.relation}(${e.args.map(unparseTerm).join(", ")})`;
     case "fieldAssign":
       return `${unparseTerm(e.target)} := ${unparseTerm(e.value)}`;
+    case "setAdd":
+      return `${unparseTerm(e.target)} += ${unparseTerm(e.element)}`;
+    case "setRemove":
+      return `${unparseTerm(e.target)} -= ${unparseTerm(e.element)}`;
     case "emit":
       return `emit { ${Object.entries(e.payload)
         .map(([k, v]) => `${k}: ${unparseTerm(v)}`)
@@ -105,7 +113,14 @@ function unparseValue(v: unknown): string {
 function isEffect(v: unknown): boolean {
   if (typeof v !== "object" || v === null) return false;
   const t = (v as { type?: string }).type;
-  return t === "assert" || t === "retract" || t === "fieldAssign" || t === "emit";
+  return (
+    t === "assert" ||
+    t === "retract" ||
+    t === "fieldAssign" ||
+    t === "setAdd" ||
+    t === "setRemove" ||
+    t === "emit"
+  );
 }
 
 function isTermLike(v: unknown): boolean {

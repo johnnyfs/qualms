@@ -67,7 +67,9 @@ export type Expression =
       direction: "forward" | "backward" | "symmetric";
       /** "1" = single hop, "*" = zero or more, "+" = one or more. */
       quantifier: "1" | "*" | "+";
-    };
+    }
+  /** Set membership: `element in set`. */
+  | { type: "in"; element: Term; set: Term };
 
 /**
  * Trait or meta-type filter on a quantifier or atom. The `name` is either a
@@ -148,6 +150,8 @@ export type Effect =
   | { type: "assert"; relation: string; args: Term[] }
   | { type: "retract"; relation: string; args: Term[] }
   | { type: "fieldAssign"; target: Term; value: Term }
+  | { type: "setAdd"; target: Term; element: Term }
+  | { type: "setRemove"; target: Term; element: Term }
   | { type: "emit"; payload: Record<string, Term> };
 
 // ──────── Mutation specs (layer-stripped definition shapes) ────────
@@ -286,6 +290,8 @@ export type MutationStatement =
   | { type: "assert"; relation: string; args: Term[] }
   | { type: "retract"; relation: string; args: Term[] }
   | { type: "fieldAssign"; target: Term; value: Term }
+  | { type: "setAdd"; target: Term; element: Term }
+  | { type: "setRemove"; target: Term; element: Term }
   | { type: "defTrait"; spec: TraitDefSpec }
   | { type: "defRelation"; spec: RelationDefSpec }
   | { type: "defAction"; spec: ActionDefSpec }

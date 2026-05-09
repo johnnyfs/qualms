@@ -104,6 +104,8 @@ const In = keyword("In", "in");
 const Query = keyword("Query", "query");
 const Show = keyword("Show", "show");
 const Null = keyword("Null", "null");
+// First-class set type.
+const Set = keyword("Set", "set");
 
 // Unicode operator shortcuts (single-char, no longer_alt needed).
 const ExistsU = createToken({ name: "ExistsU", pattern: /∃/ });
@@ -119,6 +121,8 @@ const Walrus = createToken({ name: "Walrus", pattern: /:=/ });
 const QueryQ = createToken({ name: "QueryQ", pattern: /\?-/ });
 const RegexEq = createToken({ name: "RegexEq", pattern: /=~/ });
 const NotEq = createToken({ name: "NotEq", pattern: /!=/ });
+const PlusEq = createToken({ name: "PlusEq", pattern: /\+=/ });
+const MinusEq = createToken({ name: "MinusEq", pattern: /-=/ });
 const PathFwdOpen = createToken({ name: "PathFwdOpen", pattern: /-\[/ });
 const PathBwdOpen = createToken({ name: "PathBwdOpen", pattern: /<-\[/ });
 const PathClose = createToken({ name: "PathClose", pattern: /\]-(?:>)?/ });
@@ -179,6 +183,8 @@ const allTokens = [
   QueryQ,
   RegexEq,
   NotEq,
+  PlusEq,
+  MinusEq,
   PathBwdOpen,
   PathFwdOpen,
   PathClose,
@@ -213,6 +219,7 @@ const allTokens = [
   Query,
   Show,
   Null,
+  Set,
   Identifier,
   // single-char
   Eq,
@@ -409,6 +416,42 @@ class QualmsParser extends EmbeddedActionsParser {
           return {
             kind: "mutation",
             mutation: { type: "fieldAssign", target, value },
+          };
+        },
+      },
+      // Set add: target += element
+      {
+        GATE: () => {
+          if (this.LA(1).tokenType !== Identifier) return false;
+          let i = 2;
+          while (i <= 6 && this.LA(i).tokenType === Dot) i += 2;
+          return this.LA(i).tokenType === PlusEq;
+        },
+        ALT: () => {
+          const target = this.SUBRULE3(this.term);
+          this.CONSUME(PlusEq);
+          const element = this.SUBRULE4(this.term);
+          return {
+            kind: "mutation",
+            mutation: { type: "setAdd", target, element },
+          };
+        },
+      },
+      // Set remove: target -= element
+      {
+        GATE: () => {
+          if (this.LA(1).tokenType !== Identifier) return false;
+          let i = 2;
+          while (i <= 6 && this.LA(i).tokenType === Dot) i += 2;
+          return this.LA(i).tokenType === MinusEq;
+        },
+        ALT: () => {
+          const target = this.SUBRULE5(this.term);
+          this.CONSUME(MinusEq);
+          const element = this.SUBRULE6(this.term);
+          return {
+            kind: "mutation",
+            mutation: { type: "setRemove", target, element },
           };
         },
       },
@@ -716,6 +759,14 @@ class QualmsParser extends EmbeddedActionsParser {
           } as Expression;
         },
       },
+      // Set membership: term `in` term
+      {
+        ALT: () => {
+          this.CONSUME(In);
+          const right = this.SUBRULE6(this.term);
+          return { type: "in", element: left, set: right } as Expression;
+        },
+      },
     ]);
   });
 
@@ -996,11 +1047,14 @@ class QualmsParser extends EmbeddedActionsParser {
   });
 
   // ──────── Type reference parsing ────────
-  // typeRef := Identifier ("<" typeRef ">")? "?"?
-  // Stored as a single string (e.g. "ref<Location>?").
+  // typeRef := (Identifier | "set") ("<" typeRef ">")? "?"?
+  // Stored as a single string (e.g. "ref<Location>?", "set<Relocatable>").
 
   private typeRef = this.RULE("typeRef", (): string => {
-    let out = this.CONSUME(Identifier).image;
+    let out = this.OR([
+      { ALT: () => this.CONSUME(Identifier).image },
+      { ALT: () => this.CONSUME(Set).image },
+    ]);
     this.OPTION(() => {
       this.CONSUME(LessThan);
       out += "<" + this.SUBRULE(this.typeRef) + ">";
@@ -1037,7 +1091,17 @@ class QualmsParser extends EmbeddedActionsParser {
           return null;
         },
       },
-      { ALT: () => this.SUBRULE(this.valueObject) },
+      // `{ key: value, ... }` — object literal (peek for `:` after first key).
+      {
+        GATE: () =>
+          this.LA(1).tokenType === LBrace &&
+          (this.LA(2).tokenType === Identifier ||
+            this.LA(2).tokenType === StringLiteral) &&
+          this.LA(3).tokenType === Colon,
+        ALT: () => this.SUBRULE(this.valueObject),
+      },
+      // `{}` or `{ value, value, ... }` — set literal.
+      { ALT: () => this.SUBRULE(this.valueSet) },
       { ALT: () => this.SUBRULE(this.valueArray) },
       // Bare identifier — treated as a string (for symbolic refs).
       { ALT: () => this.CONSUME(Identifier).image },
@@ -1084,6 +1148,21 @@ class QualmsParser extends EmbeddedActionsParser {
       });
     });
     this.CONSUME(RBracket);
+    return out;
+  });
+
+  // Set literal: `{}` or `{ v, v, ... }`. Stored as a JS Set.
+  private valueSet = this.RULE("valueSet", (): Set<unknown> => {
+    this.CONSUME(LBrace);
+    const out = new globalThis.Set<unknown>();
+    this.OPTION(() => {
+      out.add(this.SUBRULE(this.value));
+      this.MANY(() => {
+        this.CONSUME(Comma);
+        out.add(this.SUBRULE2(this.value));
+      });
+    });
+    this.CONSUME(RBrace);
     return out;
   });
 
@@ -1184,6 +1263,36 @@ class QualmsParser extends EmbeddedActionsParser {
           this.CONSUME(Walrus);
           const value = this.SUBRULE2(this.term);
           return { type: "fieldAssign", target, value } as Effect;
+        },
+      },
+      // Set add: target += element
+      {
+        GATE: () => {
+          if (this.LA(1).tokenType !== Identifier) return false;
+          let i = 2;
+          while (i <= 6 && this.LA(i).tokenType === Dot) i += 2;
+          return this.LA(i).tokenType === PlusEq;
+        },
+        ALT: () => {
+          const target = this.SUBRULE3(this.term);
+          this.CONSUME(PlusEq);
+          const element = this.SUBRULE4(this.term);
+          return { type: "setAdd", target, element } as Effect;
+        },
+      },
+      // Set remove: target -= element
+      {
+        GATE: () => {
+          if (this.LA(1).tokenType !== Identifier) return false;
+          let i = 2;
+          while (i <= 6 && this.LA(i).tokenType === Dot) i += 2;
+          return this.LA(i).tokenType === MinusEq;
+        },
+        ALT: () => {
+          const target = this.SUBRULE5(this.term);
+          this.CONSUME(MinusEq);
+          const element = this.SUBRULE6(this.term);
+          return { type: "setRemove", target, element } as Effect;
         },
       },
     ]);
@@ -1314,7 +1423,12 @@ class QualmsParser extends EmbeddedActionsParser {
   private relationClause = this.RULE(
     "relationClause",
     (out: { get?: Expression; setEffects?: Effect[] }): void => {
-      const key = this.CONSUME(Identifier).image;
+      // `set` is a hard-reserved keyword (set<T> type); accept either an
+      // Identifier (for "get") or the Set keyword (for "set") as a clause key.
+      const key = this.OR([
+        { ALT: () => this.CONSUME(Identifier).image },
+        { ALT: () => this.CONSUME(Set).image },
+      ]);
       this.CONSUME(Colon);
       if (key === "get") {
         const expr = this.SUBRULE(this.expression);

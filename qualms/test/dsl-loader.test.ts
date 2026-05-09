@@ -170,4 +170,18 @@ describe("dsl loader: file load to GameDefinition", () => {
     expect(def.hasTrait("Foo")).toBe(true);
     expect(def.hasTrait("Bar")).toBe(true);
   });
+
+  it("loads a trait with a set<T> field and an empty default", () => {
+    const def = new GameDefinition();
+    loadDslText(
+      def,
+      "def trait Bag { contents: set<Item> = {} }",
+      { module: "prelude" },
+    );
+    const t = def.trait("Bag");
+    const f = t.fields[0]!;
+    expect(f.type).toBe("set<Item>");
+    expect(f.default).toBeInstanceOf(Set);
+    expect((f.default as Set<unknown>).size).toBe(0);
+  });
 });

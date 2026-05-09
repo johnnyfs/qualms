@@ -46,6 +46,7 @@ export {
   regex,
   like,
   path,
+  inSet,
   query,
   yesNo,
   namedPredicate,

@@ -238,6 +238,10 @@ export function emitValue(v: unknown): string {
   if (v === null) return "null";
   if (typeof v === "string") return JSON.stringify(v);
   if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (v instanceof Set) {
+    if (v.size === 0) return "{}";
+    return `{ ${[...v].map(emitValue).join(", ")} }`;
+  }
   if (Array.isArray(v)) return `[${v.map(emitValue).join(", ")}]`;
   if (typeof v === "object") {
     const entries = Object.entries(v as Record<string, unknown>);
@@ -291,6 +295,8 @@ export function emitExpression(expr: Expression): string {
       const close = expr.direction === "backward" ? "]-" : expr.direction === "symmetric" ? "]-" : "]->";
       return `${emitTerm(expr.from)} ${open}${rels}${close}${quant} ${emitTerm(expr.to)}`;
     }
+    case "in":
+      return `${emitTerm(expr.element)} in ${emitTerm(expr.set)}`;
   }
 }
 
@@ -330,6 +336,12 @@ function emitEffectSpec(spec: EffectSpec): string {
   }
   if (type === "fieldAssign") {
     return `${emitTerm(e["target"] as Term)} := ${emitTerm(e["value"] as Term)}`;
+  }
+  if (type === "setAdd") {
+    return `${emitTerm(e["target"] as Term)} += ${emitTerm(e["element"] as Term)}`;
+  }
+  if (type === "setRemove") {
+    return `${emitTerm(e["target"] as Term)} -= ${emitTerm(e["element"] as Term)}`;
   }
   if (type === "emit") {
     const payload = e["payload"] as Record<string, Term>;

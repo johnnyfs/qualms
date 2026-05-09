@@ -50,12 +50,25 @@ DSL examples:
 ```
 # Trait with field declarations and a nested derived relation
 def trait Relocatable {
-  location: ref<Location>? = null;
-  def relation At(subject: ref<Relocatable>, location: ref<Location>) {
-    get: ?- subject.Relocatable.location = location;
-    set: [ subject.Relocatable.location := location; ];
-  };
-};
+  location: Location? = null;
+  def relation At(subject: Relocatable, location: Location) {
+    get: subject.location = location;
+    set: [ subject.location := location; ];
+  }
+  def action Move(actor: Actor? = null, subject: Relocatable, destination: Location) {
+    requires: true;
+    effects: [ assert At(subject, destination) ];
+  }
+}
+
+# Container with a set-valued field and a stored derived relation
+def trait Container {
+  contents: set<Relocatable> = {};
+  def relation Contains(container: Container, item: Relocatable) {
+    get: item in container.contents;
+    set: [ container.contents += item; ];
+  }
+}
 
 # Kind with colon-separated trait list and field overrides
 def kind Foe: Combatant, Presentable {
@@ -105,6 +118,15 @@ There is no CLI in this milestone. The agent-facing surface is a stateful MCP se
 - **No CLI** in this milestone. Future frontend will be Ink/JS, not curses.
 - **No NOVA-specific surface anywhere.** The prelude is genuinely universal; story-specific vocabulary lives in story files.
 
+### DSL polish (M4)
+
+- **Optional trailing `;`** after body-bearing defs. `def trait Foo { … }` is legal; body-less statements (`def kind X: T1, T2;`) still require `;`.
+- **Casing-based type discrimination.** Lowercase identifiers (`str`, `int`, `bool`, `set<T>`) are primitives; PascalCase identifiers (`Location`, `Actor`, `Item`) are entity references. The `ref<>` wrapper is gone.
+- **Auto-resolved `param.field`** inside relation/action bodies — the parameter's declared trait type owns the field. Use the qualified `param.Trait.field` form for cross-trait reads. Kind/entity field overrides still require `Trait.field = value` qualifiers.
+- **`?-` markers dropped** from clause bodies (`get:`, `requires:`, `guard:`). Body type is declared by the clause keyword. An optional `: <typeRef>` return-type annotation on relation/action heads parses but is documentation-only.
+- **`default` → `effects`** on actions. The clause matches rules' `effects:`.
+- **`set<T>` first-class collection type** with the operators `in` (membership), `+=` (add), `-=` (remove). Set literals are `{}` (empty) or `{a, b, c}` (populated). `Container.contents: set<Relocatable>` in the prelude exercises the model.
+
 ## What's deferred (not in this milestone)
 
 - `def view` rendering and the `__render` tool. View rules may also be relocated outside the rule space later — they are player-POV ergonomic concerns, not gameplay rules.
@@ -148,6 +170,8 @@ When all eight hold, the milestone is done. Subsequent milestones add story-file
 - **Tier 1 / Tier 2 / Tier 3.** Tool layering. Tier 1 = deterministic primitives; Tier 2 = LLM-mediated wrappers (`play`, `coauthor`); Tier 3 = real frontend (Ink) and concurrent autonomous agents.
 - **Meta-type.** A reflective type for a structural object: `Trait`, `Kind`, `Action`, `Relation`, `Rule`, `Rulebook`, `Entity`. Queryable in the same namespace as world entities.
 - **Introspection relation.** A relation exposed by the engine that talks about structure rather than state: `uses(kind, trait)`, `defines(trait, field)`, `instance_of(entity, kind)`, etc.
+- **`set<T>`.** First-class collection type for trait fields. Stored as a JS `Set`. Mutated with `target += element` / `target -= element`; tested with `element in target`. Empty default is `{}`; populated literal is `{a, b, c}`.
+- **Casing convention.** Lowercase identifier in a type position = primitive (`str`, `int`, `bool`, `set<…>`); PascalCase identifier = entity reference (`Location`, `Actor`, `Item`). Trailing `?` marks an optional entity ref.
 
 ## Locked decisions
 

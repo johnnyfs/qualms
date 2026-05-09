@@ -282,6 +282,25 @@ export function* evaluate(expr: Expression, ctx: QueryContext, env: Binding = {}
       yield* evaluatePath(expr, ctx, env);
       return;
     }
+
+    case "in": {
+      const setVal = resolveTerm(expr.set, env, ctx);
+      if (setVal === UNBOUND) throw new Error("`in` requires a bound set on the right");
+      if (!(setVal instanceof Set)) {
+        throw new Error(`\`in\` right-hand side must be a Set, got ${typeof setVal}`);
+      }
+      const elem = resolveTerm(expr.element, env, ctx);
+      if (elem === UNBOUND) {
+        // Enumerate elements of the set, binding the variable.
+        for (const v of setVal) {
+          const ext = unify(expr.element, v as Value, env, ctx);
+          if (ext) yield ext;
+        }
+        return;
+      }
+      if (setVal.has(elem)) yield env;
+      return;
+    }
   }
 }
 

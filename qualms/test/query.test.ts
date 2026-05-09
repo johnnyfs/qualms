@@ -22,6 +22,7 @@ import {
   exists,
   f,
   forall,
+  inSet,
   like,
   makeContext,
   namedPredicate,
@@ -431,6 +432,44 @@ describe("evaluator: equality, regex, like, negation", () => {
     expect(new Set(runQuery(q, ctx).rows.map((r) => r["x"]))).toEqual(
       new Set(["gem", "keystone"]),
     );
+  });
+});
+
+describe("evaluator: set membership (`in`)", () => {
+  function bagWorld() {
+    const def = new GameDefinition();
+    def.addTrait(
+      trait("Bag", "prelude", {
+        fields: [
+          field("contents", { type: "set<Item>", default: new Set<unknown>(), hasDefault: true }),
+        ],
+      }),
+    );
+    def.addKind(kind("Sack", "prelude", { traits: [attachment("Bag")] }));
+    def.addInitialEntity(
+      entitySpec("sack", "prelude", {
+        kind: "Sack",
+        fields: { Bag: { contents: new Set(["rock", "gem"]) } },
+      }),
+    );
+    return { def, state: instantiate(def) };
+  }
+
+  it("enumerates set members when the element term is unbound", () => {
+    const { def, state } = bagWorld();
+    const ctx = makeContext(def, { state });
+    const q = query(["x"], inSet(v("x"), f(c("sack"), "contents", "Bag")));
+    const xs = new Set(runQuery(q, ctx).rows.map((r) => r["x"]));
+    expect(xs).toEqual(new Set(["rock", "gem"]));
+  });
+
+  it("succeeds when bound element is in the set", () => {
+    const { def, state } = bagWorld();
+    const ctx = makeContext(def, { state });
+    const yes = runQuery(yesNo(inSet(c("rock"), f(c("sack"), "contents", "Bag"))), ctx);
+    expect(yes.count).toBe(1);
+    const no = runQuery(yesNo(inSet(c("missing"), f(c("sack"), "contents", "Bag"))), ctx);
+    expect(no.count).toBe(0);
   });
 });
 

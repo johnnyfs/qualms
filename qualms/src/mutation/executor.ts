@@ -67,6 +67,10 @@ export function applyMutation(
     case "fieldAssign":
       execFieldAssign(m, tx, def, state);
       break;
+    case "setAdd":
+    case "setRemove":
+      execSetMutate(m, tx, def, state);
+      break;
     case "defTrait":
       execDefTrait(m.spec, tx, def);
       break;
@@ -192,6 +196,64 @@ function execFieldAssign(
       // Persist on the EntitySpec so the YAML emit captures it (game-module
       // commits write back to disk; session-module changes ride on save).
       persistEntityFieldOverride(def, entityId, resolved.traitId, resolved.fieldId, value);
+    }
+  } catch (e) {
+    state.setField(entityId, resolved.traitId, resolved.fieldId, prev);
+    throw wrapValidationError(e);
+  }
+}
+
+function execSetMutate(
+  m: Extract<MutationStatement, { type: "setAdd" | "setRemove" }>,
+  tx: Transaction,
+  def: GameDefinition,
+  state: WorldState,
+): void {
+  const target = m.target;
+  if (target.type !== "field") {
+    throw new MutationError("set-mutation target must be `<entity>.[Trait.]field`", "type_mismatch");
+  }
+  if (target.entity.type !== "var" && target.entity.type !== "value") {
+    throw new MutationError("set-mutation entity must be a literal id", "type_mismatch");
+  }
+  const entityId = target.entity.type === "var" ? target.entity.name : String(target.entity.value);
+  const element = groundTerm(m.element, "set-mutation");
+
+  if (!state.hasEntity(entityId)) {
+    throw new MutationError(`unknown entity '${entityId}'`, "unknown_target");
+  }
+  let resolved;
+  try {
+    resolved = resolveFieldTarget(state, entityId, target.field, target.trait);
+  } catch (e) {
+    throw new MutationError(
+      e instanceof Error ? e.message : String(e),
+      "type_mismatch",
+    );
+  }
+  if (!resolved) {
+    throw new MutationError(
+      `entity '${entityId}' has no field '${target.field}'`,
+      "unknown_target",
+    );
+  }
+
+  const prev = state.getField(entityId, resolved.traitId, resolved.fieldId);
+  if (!(prev instanceof Set)) {
+    throw new MutationError(
+      `field '${resolved.traitId}.${resolved.fieldId}' is not a set`,
+      "type_mismatch",
+    );
+  }
+  // Clone-then-mutate so rollback is possible.
+  const next = new Set(prev);
+  if (m.type === "setAdd") next.add(element);
+  else next.delete(element);
+
+  try {
+    state.setField(entityId, resolved.traitId, resolved.fieldId, next);
+    if (tx.module === "game") {
+      persistEntityFieldOverride(def, entityId, resolved.traitId, resolved.fieldId, next);
     }
   } catch (e) {
     state.setField(entityId, resolved.traitId, resolved.fieldId, prev);
