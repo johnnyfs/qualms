@@ -130,38 +130,43 @@ export function handleQuery(manager: SessionManager, input: QueryInput): QueryOu
 
 export interface BeginInput {
   sessionId: string;
-  scope: "story" | "session";
-  /** Story-scope only: target YAML file path for `__commit`. Defaults to the single loaded story when unambiguous. */
+  /** Target module for the transaction. `prelude` is read-only and rejected. */
+  module: "game" | "session";
+  /** Game-module only: target YAML file path for `commit`. Defaults to the single loaded story when unambiguous. */
   targetPath?: string;
 }
 
 export interface BeginOutput {
   transactionId: string;
-  scope: "story" | "session";
-  layer: "game" | "session";
+  module: "game" | "session";
   targetPath?: string;
 }
 
 export function handleBegin(manager: SessionManager, input: BeginInput): BeginOutput {
   const session = manager.get(input.sessionId);
+  if ((input.module as string) === "prelude") {
+    throw new MutationError(
+      "prelude module is read-only via MCP; edit the prelude file directly",
+      "prelude_protected",
+    );
+  }
   let targetPath = input.targetPath;
-  if (input.scope === "story" && targetPath === undefined) {
+  if (input.module === "game" && targetPath === undefined) {
     if (session.storyPaths.length === 1) {
       targetPath = session.storyPaths[0];
     } else {
       throw new MutationError(
         session.storyPaths.length === 0
-          ? "story-scope __begin requires `targetPath` (no story files loaded)"
-          : "story-scope __begin requires explicit `targetPath` (multiple story files loaded)",
+          ? "game-module begin requires `targetPath` (no story files loaded)"
+          : "game-module begin requires explicit `targetPath` (multiple story files loaded)",
         "scope_error",
       );
     }
   }
-  const tx = manager.beginTransaction(input.sessionId, input.scope, targetPath);
+  const tx = manager.beginTransaction(input.sessionId, input.module, targetPath);
   return {
     transactionId: tx.id,
-    scope: tx.scope,
-    layer: tx.layer as "game" | "session",
+    module: tx.module,
     ...(tx.targetPath !== undefined ? { targetPath: tx.targetPath } : {}),
   };
 }
@@ -207,8 +212,7 @@ export interface DiffInput {
 }
 
 export interface DiffOutput {
-  scope: "story" | "session";
-  layer: "game" | "session";
+  module: "game" | "session";
   applied: Array<{ expr: string; kind: string }>;
   summary: {
     traits: { added: number; removed: number };
@@ -248,8 +252,7 @@ export function handleDiff(manager: SessionManager, input: DiffInput): DiffOutpu
     fieldAssigns: transaction.applied.filter((m) => m.type === "fieldAssign").length,
   };
   return {
-    scope: transaction.scope,
-    layer: transaction.layer as "game" | "session",
+    module: transaction.module,
     applied: transaction.applied.map((m) => ({
       kind: m.type,
       expr: unparseMutation(m),
@@ -287,12 +290,12 @@ export function handleCommit(manager: SessionManager, input: CommitInput): Commi
     input.sessionId,
     input.transactionId,
   );
-  // For story scope, write the game-layer slice to disk. For session scope,
-  // commit lands in-memory only — disk persistence rides on gameplay __save.
-  if (transaction.scope === "story") {
+  // For game-module commits, write the game slice to disk. For session-module,
+  // commit lands in-memory only — disk persistence rides on gameplay save.
+  if (transaction.module === "game") {
     if (transaction.targetPath === undefined) {
       throw new MutationError(
-        "story-scope commit requires a targetPath set at __begin",
+        "game-module commit requires a targetPath set at begin",
         "scope_error",
       );
     }

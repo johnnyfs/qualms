@@ -109,7 +109,7 @@ describe("parser → AST literal", () => {
       left: {
         type: "traitOf",
         entity: { type: "var", name: "k" },
-        filter: { name: "Kind", layer: "prelude" },
+        filter: { name: "Kind", module: "prelude" },
       },
       right: { type: "literal", value: true },
     });
@@ -347,8 +347,8 @@ function buildSmallWorld() {
   def.addInitialEntity(entitySpec("here", "game", { kind: "Place" }));
   def.addInitialEntity(entitySpec("there", "game", { kind: "Place" }));
   def.addInitialEntity(entitySpec("rock", "game", { kind: "ItemKind" }));
-  def.addInitialAssertion({ relation: "Path", args: ["here", "there"], layer: "game" });
-  def.addInitialAssertion({ relation: "At", args: ["rock", "here"], layer: "game" });
+  def.addInitialAssertion({ relation: "Path", args: ["here", "there"], module: "game" });
+  def.addInitialAssertion({ relation: "At", args: ["rock", "here"], module: "game" });
   return { def, state: instantiate(def) };
 }
 

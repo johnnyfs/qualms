@@ -15,7 +15,7 @@ import type {
   ActionResult,
   Entity,
   EntitySpec,
-  Layer,
+  Module,
   TraitAttachment,
   TraitInstance,
 } from "./types.js";
@@ -33,9 +33,9 @@ export class WorldState {
   readonly definition: GameDefinition;
   readonly entities: Map<string, Entity> = new Map();
   /** Unified stored-relations Map (post-persistence-collapse). Tagged by source layer. */
-  private readonly relations: Map<string, Layer | "runtime"> = new Map();
+  private readonly relations: Map<string, Module | "runtime"> = new Map();
   /** Legacy untyped facts. */
-  private readonly facts: Map<string, Layer | "runtime"> = new Map();
+  private readonly facts: Map<string, Module | "runtime"> = new Map();
   readonly events: Record<string, unknown>[] = [];
   readonly allocators: Map<string, number> = new Map();
 
@@ -104,7 +104,7 @@ export class WorldState {
   assertRelation(
     relationId: string,
     args: readonly unknown[],
-    sourceLayer: Layer | "runtime" = "runtime",
+    sourceModule: Module | "runtime" = "runtime",
   ): void {
     const rel = this.definition.relation(relationId);
     if (rel.get !== undefined) {
@@ -112,7 +112,7 @@ export class WorldState {
         `relation '${relationId}' is derived; cannot assert directly`,
       );
     }
-    this.relations.set(relationKey(relationId, args), sourceLayer);
+    this.relations.set(relationKey(relationId, args), sourceModule);
   }
 
   retractRelation(relationId: string, args: readonly unknown[]): void {
@@ -124,15 +124,15 @@ export class WorldState {
   }
 
   /** Enumerate stored relations matching a relation id. Returns serialized arg arrays. */
-  storedTuples(relationId: string): { args: unknown[]; layer: Layer | "runtime" }[] {
+  storedTuples(relationId: string): { args: unknown[]; module: Module | "runtime" }[] {
     const rel = this.definition.relation(relationId);
     if (rel.get !== undefined) return [];
     const prefix = `${relationId}|`;
-    const out: { args: unknown[]; layer: Layer | "runtime" }[] = [];
-    for (const [key, layer] of this.relations.entries()) {
+    const out: { args: unknown[]; module: Module | "runtime" }[] = [];
+    for (const [key, module] of this.relations.entries()) {
       if (!key.startsWith(prefix)) continue;
       const argsJson = key.slice(prefix.length);
-      out.push({ args: JSON.parse(argsJson) as unknown[], layer });
+      out.push({ args: JSON.parse(argsJson) as unknown[], module });
     }
     return out;
   }
@@ -143,8 +143,8 @@ export class WorldState {
     return this.facts.has(factKey(id, args));
   }
 
-  setFact(id: string, args: readonly unknown[] = [], sourceLayer: Layer | "runtime" = "runtime"): void {
-    this.facts.set(factKey(id, args), sourceLayer);
+  setFact(id: string, args: readonly unknown[] = [], sourceModule: Module | "runtime" = "runtime"): void {
+    this.facts.set(factKey(id, args), sourceModule);
   }
 
   clearFact(id: string, args: readonly unknown[] = []): void {
@@ -279,7 +279,7 @@ export function buildEntity(definition: GameDefinition, spec: EntitySpec): Entit
 
   const entity: Entity = {
     id: spec.id,
-    layer: spec.layer,
+    module: spec.module,
     traits: {},
     metadata: { ...spec.metadata },
   };
@@ -308,10 +308,10 @@ export function instantiate(definition: GameDefinition): WorldState {
     state.entities.set(spec.id, buildEntity(definition, spec));
   }
   for (const fact of definition.initialFacts) {
-    state.setFact(fact.id, fact.args, fact.layer);
+    state.setFact(fact.id, fact.args, fact.module);
   }
   for (const assertion of definition.initialAssertions) {
-    state.assertRelation(assertion.relation, assertion.args, assertion.layer);
+    state.assertRelation(assertion.relation, assertion.args, assertion.module);
   }
   return state;
 }

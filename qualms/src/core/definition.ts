@@ -17,7 +17,7 @@ import type {
   InitialAssertion,
   InitialFact,
   KindDefinition,
-  Layer,
+  Module,
   RelationDefinition,
   Rule,
   RulebookDefinition,
@@ -25,9 +25,9 @@ import type {
 } from "./types.js";
 
 export class DuplicateDefinitionError extends Error {
-  constructor(kind: string, id: string, existingLayer: Layer, incomingLayer: Layer) {
+  constructor(kind: string, id: string, existingModule: Module, incomingModule: Module) {
     super(
-      `duplicate ${kind} '${id}' (existing layer=${existingLayer}, incoming layer=${incomingLayer})`,
+      `duplicate ${kind} '${id}' (existing layer=${existingModule}, incoming layer=${incomingModule})`,
     );
     this.name = "DuplicateDefinitionError";
   }
@@ -50,7 +50,7 @@ export class GameDefinition {
   private _initialEntities: EntitySpec[] = [];
   private _initialAssertions: InitialAssertion[] = [];
   private _initialFacts: InitialFact[] = [];
-  private _metadata: Record<Layer, Record<string, unknown>> = {
+  private _metadata: Record<Module, Record<string, unknown>> = {
     prelude: {},
     game: {},
     session: {},
@@ -61,7 +61,7 @@ export class GameDefinition {
   addTrait(definition: TraitDefinition): void {
     const existing = this._traits.get(definition.id);
     if (existing) {
-      throw new DuplicateDefinitionError("trait", definition.id, existing.layer, definition.layer);
+      throw new DuplicateDefinitionError("trait", definition.id, existing.module, definition.module);
     }
     this._traits.set(definition.id, definition);
     // Lift trait-owned relations / actions / rules into the merged tables.
@@ -82,8 +82,8 @@ export class GameDefinition {
       throw new DuplicateDefinitionError(
         "relation",
         definition.id,
-        existing.layer,
-        definition.layer,
+        existing.module,
+        definition.module,
       );
     }
     this._relations.set(definition.id, definition);
@@ -95,8 +95,8 @@ export class GameDefinition {
       throw new DuplicateDefinitionError(
         "action",
         definition.id,
-        existing.layer,
-        definition.layer,
+        existing.module,
+        definition.module,
       );
     }
     this._actions.set(definition.id, definition);
@@ -105,7 +105,7 @@ export class GameDefinition {
   addKind(definition: KindDefinition): void {
     const existing = this._kinds.get(definition.id);
     if (existing) {
-      throw new DuplicateDefinitionError("kind", definition.id, existing.layer, definition.layer);
+      throw new DuplicateDefinitionError("kind", definition.id, existing.module, definition.module);
     }
     this._kinds.set(definition.id, definition);
   }
@@ -124,8 +124,8 @@ export class GameDefinition {
       throw new DuplicateDefinitionError(
         "rulebook",
         definition.id,
-        existing.layer,
-        definition.layer,
+        existing.module,
+        definition.module,
       );
     }
     this._rulebooks.set(definition.id, definition);
@@ -136,8 +136,8 @@ export class GameDefinition {
       throw new DuplicateDefinitionError(
         "initial entity",
         spec.id,
-        this._initialEntities.find((e) => e.id === spec.id)!.layer,
-        spec.layer,
+        this._initialEntities.find((e) => e.id === spec.id)!.module,
+        spec.module,
       );
     }
     this._initialEntities.push(spec);
@@ -151,8 +151,8 @@ export class GameDefinition {
     this._initialFacts.push(fact);
   }
 
-  setMetadata(layer: Layer, key: string, value: unknown): void {
-    this._metadata[layer][key] = value;
+  setMetadata(module: Module, key: string, value: unknown): void {
+    this._metadata[module][key] = value;
   }
 
   // ──────── Lookups (merged) ────────
@@ -248,38 +248,38 @@ export class GameDefinition {
   get initialFacts(): readonly InitialFact[] {
     return this._initialFacts;
   }
-  metadataFor(layer: Layer): Readonly<Record<string, unknown>> {
-    return this._metadata[layer];
+  metadataFor(module: Module): Readonly<Record<string, unknown>> {
+    return this._metadata[module];
   }
 
-  // ──────── Layer-filtered views ────────
+  // ──────── Module-filtered views ────────
 
-  traitsByLayer(layer: Layer): TraitDefinition[] {
-    return [...this._traits.values()].filter((t) => t.layer === layer);
+  traitsByModule(module: Module): TraitDefinition[] {
+    return [...this._traits.values()].filter((t) => t.module === module);
   }
-  relationsByLayer(layer: Layer): RelationDefinition[] {
-    return [...this._relations.values()].filter((r) => r.layer === layer);
+  relationsByModule(module: Module): RelationDefinition[] {
+    return [...this._relations.values()].filter((r) => r.module === module);
   }
-  actionsByLayer(layer: Layer): ActionDefinition[] {
-    return [...this._actions.values()].filter((a) => a.layer === layer);
+  actionsByModule(module: Module): ActionDefinition[] {
+    return [...this._actions.values()].filter((a) => a.module === module);
   }
-  kindsByLayer(layer: Layer): KindDefinition[] {
-    return [...this._kinds.values()].filter((k) => k.layer === layer);
+  kindsByModule(module: Module): KindDefinition[] {
+    return [...this._kinds.values()].filter((k) => k.module === module);
   }
-  rulebooksByLayer(layer: Layer): RulebookDefinition[] {
-    return [...this._rulebooks.values()].filter((rb) => rb.layer === layer);
+  rulebooksByModule(module: Module): RulebookDefinition[] {
+    return [...this._rulebooks.values()].filter((rb) => rb.module === module);
   }
-  rulesByLayer(layer: Layer): Rule[] {
-    return this._rules.filter((r) => r.layer === layer);
+  rulesByModule(module: Module): Rule[] {
+    return this._rules.filter((r) => r.module === module);
   }
-  initialEntitiesByLayer(layer: Layer): EntitySpec[] {
-    return this._initialEntities.filter((e) => e.layer === layer);
+  initialEntitiesByModule(module: Module): EntitySpec[] {
+    return this._initialEntities.filter((e) => e.module === module);
   }
-  initialAssertionsByLayer(layer: Layer): InitialAssertion[] {
-    return this._initialAssertions.filter((a) => a.layer === layer);
+  initialAssertionsByModule(module: Module): InitialAssertion[] {
+    return this._initialAssertions.filter((a) => a.module === module);
   }
-  initialFactsByLayer(layer: Layer): InitialFact[] {
-    return this._initialFacts.filter((f) => f.layer === layer);
+  initialFactsByModule(module: Module): InitialFact[] {
+    return this._initialFacts.filter((f) => f.module === module);
   }
 
   // ──────── Removers (for `undef` mutations) ────────

@@ -8,7 +8,7 @@
  * engine consumes them in a later step.
  */
 
-import type { Layer } from "../core/types.js";
+import type { Module } from "../core/types.js";
 import type { Expression, Term } from "../query/ast.js";
 
 export class PredicateTranslateError extends Error {
@@ -98,7 +98,7 @@ export function translatePredicate(node: unknown, path = "predicate"): Expressio
         entity: translateTerm(r["entity"], `${path}.has_trait.entity`),
         filter: {
           name: r["trait"],
-          ...(typeof r["layer"] === "string" ? { layer: r["layer"] as Layer } : {}),
+          ...(typeof r["layer"] === "string" ? { layer: r["layer"] as Module } : {}),
         },
       };
     }

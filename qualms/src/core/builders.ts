@@ -11,7 +11,7 @@ import type {
   EntitySpec,
   FieldDefinition,
   KindDefinition,
-  Layer,
+  Module,
   ParameterDefinition,
   PredicateSpec,
   RelationDefinition,
@@ -51,7 +51,7 @@ export function field(
 
 export function trait(
   id: string,
-  layer: Layer,
+  module: Module,
   options: {
     parameters?: readonly ParameterDefinition[];
     fields?: readonly FieldDefinition[];
@@ -63,7 +63,7 @@ export function trait(
 ): TraitDefinition {
   return {
     id,
-    layer,
+    module,
     parameters: options.parameters ?? [],
     fields: options.fields ?? [],
     relations: options.relations ?? [],
@@ -75,7 +75,7 @@ export function trait(
 
 export function relation(
   id: string,
-  layer: Layer,
+  module: Module,
   parameters: readonly ParameterDefinition[],
   options: {
     get?: PredicateSpec;
@@ -84,7 +84,7 @@ export function relation(
 ): RelationDefinition {
   return {
     id,
-    layer,
+    module,
     parameters,
     get: options.get,
     setEffects: options.setEffects,
@@ -93,7 +93,7 @@ export function relation(
 
 export function action(
   id: string,
-  layer: Layer,
+  module: Module,
   parameters: readonly ParameterDefinition[],
   options: {
     requires?: PredicateSpec;
@@ -102,7 +102,7 @@ export function action(
 ): ActionDefinition {
   return {
     id,
-    layer,
+    module,
     parameters,
     requires: options.requires ?? true,
     defaultEffects: options.defaultEffects ?? [],
@@ -118,7 +118,7 @@ export function pattern(
 
 export function rule(
   id: string,
-  layer: Layer,
+  module: Module,
   phase: RulePhase,
   options: {
     pattern: ActionPattern;
@@ -132,7 +132,7 @@ export function rule(
 ): Rule {
   return {
     id,
-    layer,
+    module,
     phase,
     pattern: options.pattern,
     effects: options.effects ?? [],
@@ -144,8 +144,8 @@ export function rule(
   };
 }
 
-export function rulebook(id: string, layer: Layer): RulebookDefinition {
-  return { id, layer };
+export function rulebook(id: string, module: Module): RulebookDefinition {
+  return { id, module };
 }
 
 export function attachment(
@@ -164,7 +164,7 @@ export function attachment(
 
 export function kind(
   id: string,
-  layer: Layer,
+  module: Module,
   options: {
     traits?: readonly TraitAttachment[];
     fields?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
@@ -173,7 +173,7 @@ export function kind(
 ): KindDefinition {
   return {
     id,
-    layer,
+    module,
     traits: options.traits ?? [],
     fields: options.fields ?? {},
     rules: options.rules ?? [],
@@ -182,7 +182,7 @@ export function kind(
 
 export function entitySpec(
   id: string,
-  layer: Layer,
+  module: Module,
   options: {
     kind?: string;
     traits?: readonly TraitAttachment[];
@@ -193,7 +193,7 @@ export function entitySpec(
 ): EntitySpec {
   return {
     id,
-    layer,
+    module,
     ...(options.kind !== undefined ? { kind: options.kind } : {}),
     traits: options.traits ?? [],
     fields: options.fields ?? {},

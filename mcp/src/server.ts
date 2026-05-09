@@ -144,19 +144,20 @@ export function buildServer(options: BuildServerOptions = {}): {
         "`rollback` restores the snapshot. One open transaction per session.",
       inputSchema: {
         sessionId: z.string(),
-        scope: z
-          .enum(["story", "session"])
+        module: z
+          .enum(["game", "session"])
           .describe(
-            "story: mutations land at the `game` layer; `commit` writes the " +
-              "game-layer slice to `targetPath` on disk. " +
-              "session: mutations land at the `session` layer; `commit` is in-memory " +
-              "only this milestone (gameplay `save` lands later).",
+            "game: mutations land at the game module; `commit` writes the game " +
+              "slice to `targetPath` on disk. " +
+              "session: mutations land at the session module; `commit` is in-memory " +
+              "only this milestone (gameplay `save` lands later). " +
+              "prelude is read-only via MCP and rejected.",
           ),
         targetPath: z
           .string()
           .optional()
           .describe(
-            "Story-scope only: target YAML file path for `commit`. Defaults to " +
+            "Game-module only: target YAML file path for `commit`. Defaults to " +
               "the single loaded story file when unambiguous.",
           ),
       },
@@ -165,7 +166,7 @@ export function buildServer(options: BuildServerOptions = {}): {
       try {
         const out = handleBegin(manager, {
           sessionId: args.sessionId,
-          scope: args.scope,
+          module: args.module,
           ...(args.targetPath !== undefined ? { targetPath: args.targetPath } : {}),
         });
         return {
@@ -245,9 +246,9 @@ export function buildServer(options: BuildServerOptions = {}): {
     "commit",
     {
       description:
-        "Finalize the open transaction. Story-scope writes the game-layer slice " +
+        "Finalize the open transaction. Game-module writes the game slice " +
         "to the YAML file given at `begin` (response: persisted=true, targetPath). " +
-        "Session-scope finalizes in memory only; persistence rides on gameplay " +
+        "Session-module finalizes in memory only; persistence rides on gameplay " +
         "`save` (response: persisted=false, reason=\"session-save-deferred\").",
       inputSchema: {
         sessionId: z.string(),

@@ -116,8 +116,8 @@ function execAssert(
     );
   }
   const args = m.args.map((t) => groundTerm(t, m.relation));
-  state.assertRelation(m.relation, args, tx.layer);
-  def.addInitialAssertion({ relation: m.relation, args, layer: tx.layer });
+  state.assertRelation(m.relation, args, tx.module);
+  def.addInitialAssertion({ relation: m.relation, args, module: tx.module });
 }
 
 function execRetract(
@@ -189,8 +189,9 @@ function execFieldAssign(
   const prev = state.getField(entityId, resolved.traitId, resolved.fieldId);
   try {
     state.setField(entityId, resolved.traitId, resolved.fieldId, value);
-    if (tx.scope === "story") {
-      // Persist on the EntitySpec so the YAML emit captures it.
+    if (tx.module === "game") {
+      // Persist on the EntitySpec so the YAML emit captures it (game-module
+      // commits write back to disk; session-module changes ride on save).
       persistEntityFieldOverride(def, entityId, resolved.traitId, resolved.fieldId, value);
     }
   } catch (e) {
@@ -276,7 +277,7 @@ function execDefRulebook(
   if (def.hasRulebook(spec.id)) {
     throw new MutationError(`rulebook '${spec.id}' already exists`, "duplicate");
   }
-  const rb: RulebookDefinition = { id: spec.id, layer: tx.layer };
+  const rb: RulebookDefinition = { id: spec.id, module: tx.module };
   def.addRulebook(rb);
   validateOrRevert(def, () => def.removeRulebook(spec.id));
 }
@@ -303,7 +304,7 @@ function execDefEntity(
       );
     }
   }
-  const entitySpec: EntitySpec = buildEntitySpec(spec.id, tx.layer, {
+  const entitySpec: EntitySpec = buildEntitySpec(spec.id, tx.module, {
     ...(spec.kind !== undefined ? { kind: spec.kind } : {}),
     traits,
     fields: spec.fields ?? {},
@@ -327,7 +328,7 @@ function execUndef(
 ): void {
   const { targetKind, name } = m;
   // Look up the current layer of the target so we can refuse prelude removals.
-  const layerOf = layerOfTarget(targetKind, name, def);
+  const layerOf = moduleOfTarget(targetKind, name, def);
   if (layerOf === null) {
     throw new MutationError(`unknown ${targetKind} '${name}'`, "unknown_target");
   }
@@ -447,26 +448,26 @@ function wrapValidationError(e: unknown): MutationError {
   return new MutationError(msg, "validation");
 }
 
-function layerOfTarget(
+function moduleOfTarget(
   kind: "trait" | "relation" | "action" | "kind" | "rule" | "rulebook" | "entity",
   name: string,
   def: GameDefinition,
 ): "prelude" | "game" | "session" | null {
   switch (kind) {
     case "trait":
-      return def.hasTrait(name) ? def.trait(name).layer : null;
+      return def.hasTrait(name) ? def.trait(name).module : null;
     case "relation":
-      return def.hasRelation(name) ? def.relation(name).layer : null;
+      return def.hasRelation(name) ? def.relation(name).module : null;
     case "action":
-      return def.hasAction(name) ? def.action(name).layer : null;
+      return def.hasAction(name) ? def.action(name).module : null;
     case "kind":
-      return def.hasKind(name) ? def.kind(name).layer : null;
+      return def.hasKind(name) ? def.kind(name).module : null;
     case "rule":
-      return def.hasRule(name) ? def.rule(name).layer : null;
+      return def.hasRule(name) ? def.rule(name).module : null;
     case "rulebook":
-      return def.hasRulebook(name) ? def.rulebook(name).layer : null;
+      return def.hasRulebook(name) ? def.rulebook(name).module : null;
     case "entity":
-      return def.hasInitialEntity(name) ? def.initialEntity(name).layer : null;
+      return def.hasInitialEntity(name) ? def.initialEntity(name).module : null;
   }
 }
 
@@ -500,7 +501,7 @@ function effectsToSpecs(effects: Effect[] | undefined): EffectSpec[] {
 }
 
 function traitFromSpec(spec: TraitDefSpec, tx: Transaction): TraitDefinition {
-  return buildTrait(spec.id, tx.layer, {
+  return buildTrait(spec.id, tx.module, {
     ...(spec.parameters ? { parameters: spec.parameters.map(paramFromSpec) } : {}),
     ...(spec.fields ? { fields: spec.fields.map(fieldFromSpec) } : {}),
     ...(spec.relations ? { relations: spec.relations.map((r) => relationFromSpec(r, tx)) } : {}),
@@ -510,7 +511,7 @@ function traitFromSpec(spec: TraitDefSpec, tx: Transaction): TraitDefinition {
 }
 
 function relationFromSpec(spec: RelationDefSpec, tx: Transaction): RelationDefinition {
-  return buildRelation(spec.id, tx.layer, spec.parameters.map(paramFromSpec), {
+  return buildRelation(spec.id, tx.module, spec.parameters.map(paramFromSpec), {
     ...(spec.get !== undefined ? { get: spec.get } : {}),
     ...(spec.setEffects !== undefined
       ? { setEffects: effectsToSpecs(spec.setEffects) }
@@ -519,7 +520,7 @@ function relationFromSpec(spec: RelationDefSpec, tx: Transaction): RelationDefin
 }
 
 function actionFromSpec(spec: ActionDefSpec, tx: Transaction): ActionDefinition {
-  return buildAction(spec.id, tx.layer, spec.parameters.map(paramFromSpec), {
+  return buildAction(spec.id, tx.module, spec.parameters.map(paramFromSpec), {
     ...(spec.requires !== undefined ? { requires: spec.requires } : {}),
     ...(spec.defaultEffects !== undefined
       ? { defaultEffects: effectsToSpecs(spec.defaultEffects) }
@@ -528,7 +529,7 @@ function actionFromSpec(spec: ActionDefSpec, tx: Transaction): ActionDefinition 
 }
 
 function kindFromSpec(spec: KindDefSpec, tx: Transaction): KindDefinition {
-  return buildKind(spec.id, tx.layer, {
+  return buildKind(spec.id, tx.module, {
     traits: spec.traits.map(toAttachment),
     ...(spec.fields !== undefined ? { fields: spec.fields } : {}),
     ...(spec.rules !== undefined ? { rules: spec.rules.map((r) => ruleFromSpec(r, tx)) } : {}),
@@ -537,7 +538,7 @@ function kindFromSpec(spec: KindDefSpec, tx: Transaction): KindDefinition {
 
 function ruleFromSpec(spec: RuleDefSpec, tx: Transaction): Rule {
   const pat: ActionPattern = buildPattern(spec.pattern.action, spec.pattern.args);
-  return buildRule(spec.id, tx.layer, spec.phase, {
+  return buildRule(spec.id, tx.module, spec.phase, {
     pattern: pat,
     ...(spec.effects !== undefined ? { effects: effectsToSpecs(spec.effects) } : {}),
     ...(spec.guard !== undefined ? { guard: spec.guard } : {}),

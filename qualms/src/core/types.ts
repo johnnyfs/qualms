@@ -2,7 +2,7 @@
  * Core engine UML — TypeScript port of the Python `qualms/core.py` shape, with
  * explicit layer attribution. See qualms/MIGRATION.md for the four-layer model.
  *
- * Layer semantics:
+ * Module semantics:
  *   - "prelude": universal schema; file-edit only by the coding agent.
  *   - "game":    per-story schema additions, kinds, initial entities, story rules.
  *   - "session": per-run overlay (agent-spawned content) — persisted in the save file.
@@ -11,9 +11,9 @@
  * on `WorldState` and is untagged.
  */
 
-export type Layer = "prelude" | "game" | "session";
+export type Module = "prelude" | "game" | "session";
 
-export const ALL_LAYERS: readonly Layer[] = ["prelude", "game", "session"] as const;
+export const ALL_MODULES: readonly Module[] = ["prelude", "game", "session"] as const;
 
 /** Predicate / Effect / Expression spec — opaque AST shapes, defined in step 2. */
 export type PredicateSpec = unknown;
@@ -40,7 +40,7 @@ export interface FieldDefinition {
 
 export interface TraitDefinition {
   readonly id: string;
-  readonly layer: Layer;
+  readonly module: Module;
   readonly parameters: readonly ParameterDefinition[];
   readonly fields: readonly FieldDefinition[];
   /** Relations declared as part of the trait (lifted into the merged Definition). */
@@ -54,7 +54,7 @@ export interface TraitDefinition {
 
 export interface RelationDefinition {
   readonly id: string;
-  readonly layer: Layer;
+  readonly module: Module;
   readonly parameters: readonly ParameterDefinition[];
   /**
    * Predicate body for derived relations. Presence is the sole "is this
@@ -68,7 +68,7 @@ export interface RelationDefinition {
 
 export interface ActionDefinition {
   readonly id: string;
-  readonly layer: Layer;
+  readonly module: Module;
   readonly parameters: readonly ParameterDefinition[];
   readonly requires: PredicateSpec;
   readonly defaultEffects: readonly EffectSpec[];
@@ -84,7 +84,7 @@ export type RuleControl = "continue" | "stop";
 
 export interface Rule {
   readonly id: string;
-  readonly layer: Layer;
+  readonly module: Module;
   readonly phase: RulePhase;
   readonly pattern: ActionPattern;
   readonly effects: readonly EffectSpec[];
@@ -107,7 +107,7 @@ export interface Rule {
  */
 export interface RulebookDefinition {
   readonly id: string;
-  readonly layer: Layer;
+  readonly module: Module;
 }
 
 /** Spec for attaching a trait to an entity (kinds and entity specs both contain these). */
@@ -119,7 +119,7 @@ export interface TraitAttachment {
 
 export interface KindDefinition {
   readonly id: string;
-  readonly layer: Layer;
+  readonly module: Module;
   readonly traits: readonly TraitAttachment[];
   /** Per-trait field overrides applied at instantiation. */
   readonly fields: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
@@ -128,7 +128,7 @@ export interface KindDefinition {
 
 export interface EntitySpec {
   readonly id: string;
-  readonly layer: Layer;
+  readonly module: Module;
   readonly kind?: string;
   readonly traits: readonly TraitAttachment[];
   readonly fields: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
@@ -139,13 +139,13 @@ export interface EntitySpec {
 export interface InitialAssertion {
   readonly relation: string;
   readonly args: readonly unknown[];
-  readonly layer: Layer;
+  readonly module: Module;
 }
 
 export interface InitialFact {
   readonly id: string;
   readonly args: readonly unknown[];
-  readonly layer: Layer;
+  readonly module: Module;
 }
 
 // ──────── Runtime ────────
@@ -158,8 +158,8 @@ export interface TraitInstance {
 
 export interface Entity {
   id: string;
-  /** Layer the entity *spec* came from. Runtime-mutated trait fields stay tagged here. */
-  layer: Layer;
+  /** Module the entity *spec* came from. Runtime-mutated trait fields stay tagged here. */
+  module: Module;
   traits: Record<string, TraitInstance>;
   metadata: Record<string, unknown>;
 }

@@ -174,26 +174,31 @@ describe("tool handler: __begin / __mutate / __diff / __commit / __rollback", ()
     sessionId = handleStart(mgr, { corePath: PRELUDE_PATH }).sessionId;
   });
 
-  it("__begin opens a session-scope transaction", () => {
-    const out = handleBegin(mgr, { sessionId, scope: "session" });
-    expect(out.scope).toBe("session");
-    expect(out.layer).toBe("session");
+  it("begin opens a session-module transaction", () => {
+    const out = handleBegin(mgr, { sessionId, module: "session" });
+    expect(out.module).toBe("session");
     expect(out.transactionId).toMatch(/[0-9a-f-]{8,}/);
   });
 
+  it("begin rejects module: prelude with prelude_protected", () => {
+    expect(() =>
+      handleBegin(mgr, { sessionId, module: "prelude" as never }),
+    ).toThrowError(MutationError);
+  });
+
   it("__begin rejects a second open transaction in the same session", () => {
-    handleBegin(mgr, { sessionId, scope: "session" });
-    expect(() => handleBegin(mgr, { sessionId, scope: "session" })).toThrowError(
+    handleBegin(mgr, { sessionId, module: "session" });
+    expect(() => handleBegin(mgr, { sessionId, module: "session" })).toThrowError(
       TransactionAlreadyOpenError,
     );
   });
 
   it("__begin story scope without targetPath fails when no story files loaded", () => {
-    expect(() => handleBegin(mgr, { sessionId, scope: "story" })).toThrowError(MutationError);
+    expect(() => handleBegin(mgr, { sessionId, module: "game" })).toThrowError(MutationError);
   });
 
   it("__mutate inside a transaction lets __query see pending changes", () => {
-    const tx = handleBegin(mgr, { sessionId, scope: "session" });
+    const tx = handleBegin(mgr, { sessionId, module: "session" });
     handleMutate(mgr, {
       sessionId,
       transactionId: tx.transactionId,
@@ -207,7 +212,7 @@ describe("tool handler: __begin / __mutate / __diff / __commit / __rollback", ()
   });
 
   it("__diff reports applied mutations and summary counts", () => {
-    const tx = handleBegin(mgr, { sessionId, scope: "session" });
+    const tx = handleBegin(mgr, { sessionId, module: "session" });
     handleMutate(mgr, { sessionId, transactionId: tx.transactionId, expr: "def trait A {}" });
     handleMutate(mgr, { sessionId, transactionId: tx.transactionId, expr: "def trait B {}" });
     const diff = handleDiff(mgr, { sessionId, transactionId: tx.transactionId });
@@ -217,7 +222,7 @@ describe("tool handler: __begin / __mutate / __diff / __commit / __rollback", ()
   });
 
   it("__rollback discards pending changes and clears the transaction", () => {
-    const tx = handleBegin(mgr, { sessionId, scope: "session" });
+    const tx = handleBegin(mgr, { sessionId, module: "session" });
     handleMutate(mgr, {
       sessionId,
       transactionId: tx.transactionId,
@@ -233,11 +238,11 @@ describe("tool handler: __begin / __mutate / __diff / __commit / __rollback", ()
     ).toBe(0);
     expect(mgr.get(sessionId).transaction).toBe(null);
     // A fresh __begin works after rollback.
-    expect(handleBegin(mgr, { sessionId, scope: "session" }).transactionId).toBeDefined();
+    expect(handleBegin(mgr, { sessionId, module: "session" }).transactionId).toBeDefined();
   });
 
   it("__commit session-scope retains changes in memory only", () => {
-    const tx = handleBegin(mgr, { sessionId, scope: "session" });
+    const tx = handleBegin(mgr, { sessionId, module: "session" });
     handleMutate(mgr, {
       sessionId,
       transactionId: tx.transactionId,
@@ -256,7 +261,7 @@ describe("tool handler: __begin / __mutate / __diff / __commit / __rollback", ()
   it("__commit story-scope writes a YAML file the loader can re-read", () => {
     const targetPath = join(tmpDir, "scratch.qualms.yaml");
     tmpFiles.push(targetPath);
-    const tx = handleBegin(mgr, { sessionId, scope: "story", targetPath });
+    const tx = handleBegin(mgr, { sessionId, module: "game", targetPath });
     handleMutate(mgr, {
       sessionId,
       transactionId: tx.transactionId,
@@ -282,7 +287,7 @@ describe("tool handler: __begin / __mutate / __diff / __commit / __rollback", ()
     const reloaded = new GameDefinition();
     // Pre-load the prelude so trait references on the kind resolve.
     yamlNs.loadFileIntoDefinition(reloaded, PRELUDE_PATH, "prelude");
-    loadYamlIntoDefinition(reloaded, yamlText, { layer: "game" });
+    loadYamlIntoDefinition(reloaded, yamlText, { module: "game" });
     expect(reloaded.hasTrait("Combatant")).toBe(true);
     expect(reloaded.hasKind("Foe")).toBe(true);
     expect(reloaded.initialEntities.find((e) => e.id === "grunt")?.kind).toBe("Foe");
@@ -295,7 +300,7 @@ describe("tool handler: __begin / __mutate / __diff / __commit / __rollback", ()
   });
 
   it("__diff / __commit / __rollback with a wrong transaction id error", () => {
-    handleBegin(mgr, { sessionId, scope: "session" });
+    handleBegin(mgr, { sessionId, module: "session" });
     expect(() => handleDiff(mgr, { sessionId, transactionId: "wrong" })).toThrowError(
       TransactionNotFoundError,
     );
@@ -308,7 +313,7 @@ describe("tool handler: __begin / __mutate / __diff / __commit / __rollback", ()
   });
 
   it("__mutate parse error surfaces as QueryError(parse)", () => {
-    const tx = handleBegin(mgr, { sessionId, scope: "session" });
+    const tx = handleBegin(mgr, { sessionId, module: "session" });
     try {
       handleMutate(mgr, {
         sessionId,
@@ -323,7 +328,7 @@ describe("tool handler: __begin / __mutate / __diff / __commit / __rollback", ()
   });
 
   it("__mutate prelude-protected errors with category=prelude_protected", () => {
-    const tx = handleBegin(mgr, { sessionId, scope: "session" });
+    const tx = handleBegin(mgr, { sessionId, module: "session" });
     try {
       handleMutate(mgr, {
         sessionId,
@@ -339,7 +344,7 @@ describe("tool handler: __begin / __mutate / __diff / __commit / __rollback", ()
 
   it("cross-session isolation: mutating in one session does not affect another", () => {
     const sessionB = handleStart(mgr, { corePath: PRELUDE_PATH }).sessionId;
-    const txA = handleBegin(mgr, { sessionId, scope: "session" });
+    const txA = handleBegin(mgr, { sessionId, module: "session" });
     handleMutate(mgr, {
       sessionId,
       transactionId: txA.transactionId,
@@ -353,7 +358,7 @@ describe("tool handler: __begin / __mutate / __diff / __commit / __rollback", ()
   });
 
   it("__quit during an open transaction releases the session cleanly", () => {
-    const tx = handleBegin(mgr, { sessionId, scope: "session" });
+    const tx = handleBegin(mgr, { sessionId, module: "session" });
     handleMutate(mgr, { sessionId, transactionId: tx.transactionId, expr: "def trait T {}" });
     const out = handleQuit(mgr, { sessionId });
     expect(out.ok).toBe(true);

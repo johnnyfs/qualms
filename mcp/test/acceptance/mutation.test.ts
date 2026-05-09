@@ -73,7 +73,7 @@ describe("acceptance: rollback path (session scope)", () => {
 
   it("end-to-end: begin → mutate → query → diff → rollback → query", async () => {
     // Begin a session-scope transaction.
-    const begin = await call(client, "begin", { sessionId, scope: "session" });
+    const begin = await call(client, "begin", { sessionId, module: "session" });
     expect(begin.isError).not.toBe(true);
     const transactionId = (begin.structuredContent as { transactionId: string }).transactionId;
 
@@ -137,7 +137,7 @@ describe("acceptance: commit path (story scope, disk write)", () => {
   it("end-to-end: begin(story) → mutate → commit → re-load YAML proves persistence", async () => {
     const begin = await call(client, "begin", {
       sessionId,
-      scope: "story",
+      module: "game",
       targetPath,
     });
     expect(begin.isError).not.toBe(true);
@@ -197,9 +197,9 @@ describe("acceptance: error surfaces", () => {
   });
 
   it("__begin a second time on an open tx returns isError", async () => {
-    const begin1 = await call(client, "begin", { sessionId, scope: "session" });
+    const begin1 = await call(client, "begin", { sessionId, module: "session" });
     expect(begin1.isError).not.toBe(true);
-    const begin2 = await call(client, "begin", { sessionId, scope: "session" });
+    const begin2 = await call(client, "begin", { sessionId, module: "session" });
     expect(begin2.isError).toBe(true);
     expect(begin2.content?.[0]?.text).toMatch(/already has an open transaction/);
     // Clean up: rollback so other tests in this block can __begin.
@@ -208,7 +208,7 @@ describe("acceptance: error surfaces", () => {
   });
 
   it("undef of a prelude trait returns prelude_protected", async () => {
-    const begin = await call(client, "begin", { sessionId, scope: "session" });
+    const begin = await call(client, "begin", { sessionId, module: "session" });
     const tx = (begin.structuredContent as { transactionId: string }).transactionId;
     const r = await call(client, "mutate", {
       sessionId,
@@ -221,7 +221,7 @@ describe("acceptance: error surfaces", () => {
   });
 
   it("a parse error in __mutate returns category=parse", async () => {
-    const begin = await call(client, "begin", { sessionId, scope: "session" });
+    const begin = await call(client, "begin", { sessionId, module: "session" });
     const tx = (begin.structuredContent as { transactionId: string }).transactionId;
     const r = await call(client, "mutate", {
       sessionId,
@@ -234,7 +234,7 @@ describe("acceptance: error surfaces", () => {
   });
 
   it("story-scope __begin without targetPath errors when no story files loaded", async () => {
-    const r = await call(client, "begin", { sessionId, scope: "story" });
+    const r = await call(client, "begin", { sessionId, module: "game" });
     expect(r.isError).toBe(true);
     expect(r.content?.[0]?.text).toMatch(/targetPath/);
   });

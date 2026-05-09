@@ -7,7 +7,7 @@
  */
 
 import type { GameDefinition } from "../core/definition.js";
-import type { Layer } from "../core/types.js";
+import type { Module } from "../core/types.js";
 import type { WorldState } from "../core/worldState.js";
 import {
   isIntrospectionRelation,
@@ -25,7 +25,7 @@ import {
   enumerateInstanceOf,
   enumerateMetaIds,
   enumerateUses,
-  layerOfId,
+  moduleOfId,
   metaFieldValue,
   type MetaContext,
 } from "./meta.js";
@@ -82,7 +82,7 @@ function resolveFieldAccess(
   fieldId: string,
   ctx: QueryContext,
 ): Value {
-  // Meta-entity field access (Trait.id, Kind.layer, Relation.persistence, etc.)
+  // Meta-entity field access (Trait.id, Kind.module, Relation.persistence, etc.)
   const m = metaCtx(ctx);
   if (
     traitId === undefined &&
@@ -113,7 +113,7 @@ function resolveFieldAccess(
     if (traitDef.fields.some((f) => f.id === fieldId)) matches.push(tId);
   }
   if (matches.length === 0) {
-    // Fall back to meta field (e.g., entity.id, entity.layer).
+    // Fall back to meta field (e.g., entity.id, entity.module).
     return metaFieldValue(m, entityId, fieldId) as Value;
   }
   if (matches.length > 1) {
@@ -303,10 +303,10 @@ function projectAway(b: Binding, variable: string, baseEnv: Binding): Binding {
 
 function enumerateUniverse(filter: TraitFilter, ctx: QueryContext): Iterable<string> {
   if (isMetaType(filter.name)) {
-    return enumerateMetaIds(metaCtx(ctx), filter.name, filter.layer);
+    return enumerateMetaIds(metaCtx(ctx), filter.name, filter.module);
   }
-  if (filter.layer !== undefined) {
-    throw new Error(`layer filter '@${filter.layer}' only valid on meta-types, not trait '${filter.name}'`);
+  if (filter.module !== undefined) {
+    throw new Error(`layer filter '@${filter.module}' only valid on meta-types, not trait '${filter.name}'`);
   }
   if (!ctx.state) return [];
   const out: string[] = [];
@@ -334,12 +334,12 @@ function* evaluateTraitOf(
   // Bound — check membership.
   if (typeof resolved !== "string") return;
   if (isMetaType(filter.name)) {
-    const ids = new Set(enumerateMetaIds(metaCtx(ctx), filter.name, filter.layer));
+    const ids = new Set(enumerateMetaIds(metaCtx(ctx), filter.name, filter.module));
     if (ids.has(resolved)) yield env;
     return;
   }
-  if (filter.layer !== undefined) {
-    throw new Error(`layer filter '@${filter.layer}' only valid on meta-types`);
+  if (filter.module !== undefined) {
+    throw new Error(`layer filter '@${filter.module}' only valid on meta-types`);
   }
   if (ctx.state?.hasEntity(resolved) && ctx.state.hasTrait(resolved, filter.name)) {
     yield env;
@@ -529,9 +529,9 @@ function* evaluateIntrospection(
     return;
   }
   if (name === "in_layer") {
-    if (args.length !== 2) throw new Error("in_layer(id, layer) takes 2 args");
+    if (args.length !== 2) throw new Error("in_layer(id, module) takes 2 args");
     for (const tup of enumerateInLayer(m)) {
-      yield* unifyArgsWithTuple(args, [tup.id, tup.layer], env, ctx);
+      yield* unifyArgsWithTuple(args, [tup.id, tup.module], env, ctx);
     }
     return;
   }

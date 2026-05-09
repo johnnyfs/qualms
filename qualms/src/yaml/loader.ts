@@ -29,7 +29,7 @@ import type {
   EntitySpec,
   FieldDefinition,
   KindDefinition,
-  Layer,
+  Module,
   ParameterDefinition,
   RelationDefinition,
   Rule,
@@ -48,7 +48,7 @@ export class YamlLoadError extends Error {
 }
 
 interface LoadOptions {
-  layer: Layer;
+  module: Module;
   /** Optional file path used in error messages. */
   source?: string;
 }
@@ -68,10 +68,10 @@ export function loadYamlIntoDefinition(
 export function loadFileIntoDefinition(
   def: GameDefinition,
   filePath: string,
-  layer: Layer,
+  module: Module,
 ): void {
   const text = readFileSync(filePath, "utf-8");
-  loadYamlIntoDefinition(def, text, { layer, source: filePath });
+  loadYamlIntoDefinition(def, text, { module, source: filePath });
 }
 
 export function loadParsed(
@@ -115,7 +115,7 @@ export function loadParsed(
       throw new YamlLoadError("start must be a mapping", path);
     }
     for (const [k, v] of Object.entries(start as Record<string, unknown>)) {
-      def.setMetadata(options.layer, `start.${k}`, v);
+      def.setMetadata(options.module, `start.${k}`, v);
     }
   }
 }
@@ -129,19 +129,19 @@ function loadDefinitionsBlock(
   const traits = block["traits"];
   if (traits !== undefined) {
     for (const t of ensureArray(traits, `${path}.definitions.traits`)) {
-      def.addTrait(translateTrait(t, options.layer, path));
+      def.addTrait(translateTrait(t, options.module, path));
     }
   }
   const relations = block["relations"];
   if (relations !== undefined) {
     for (const r of ensureArray(relations, `${path}.definitions.relations`)) {
-      def.addRelation(translateRelation(r, options.layer, path));
+      def.addRelation(translateRelation(r, options.module, path));
     }
   }
   const actions = block["actions"];
   if (actions !== undefined) {
     for (const a of ensureArray(actions, `${path}.definitions.actions`)) {
-      def.addAction(translateAction(a, options.layer, path));
+      def.addAction(translateAction(a, options.module, path));
     }
   }
   const rulebooks = block["rulebooks"];
@@ -153,12 +153,12 @@ function loadDefinitionsBlock(
         // Register the rulebook itself so `def rule R in B` references resolve
         // and meta-queries see it.
         if (!def.hasRulebook(rulebookId)) {
-          def.addRulebook({ id: rulebookId, layer: options.layer });
+          def.addRulebook({ id: rulebookId, module: options.module });
         }
       }
       const rules = ensureArray(obj["rules"], `${path}.rulebooks.rules`);
       for (const r of rules) {
-        const rule = translateRule(r, options.layer, path, rulebookId);
+        const rule = translateRule(r, options.module, path, rulebookId);
         def.addRule(rule);
       }
     }
@@ -166,7 +166,7 @@ function loadDefinitionsBlock(
   const kinds = block["kinds"];
   if (kinds !== undefined) {
     for (const k of ensureArray(kinds, `${path}.definitions.kinds`)) {
-      def.addKind(translateKind(k, options.layer, path));
+      def.addKind(translateKind(k, options.module, path));
     }
   }
 }
@@ -189,14 +189,14 @@ function loadStoryBlock(
   if (story["start"] !== undefined) {
     const start = story["start"] as Record<string, unknown>;
     for (const [k, v] of Object.entries(start)) {
-      def.setMetadata(options.layer, `start.${k}`, v);
+      def.setMetadata(options.module, `start.${k}`, v);
     }
   }
 }
 
 // ──────── Node translators ────────
 
-function translateTrait(node: unknown, layer: Layer, path: string): TraitDefinition {
+function translateTrait(node: unknown, module: Module, path: string): TraitDefinition {
   const obj = ensureMapping(node, `${path} (trait)`);
   if (typeof obj["id"] !== "string") {
     throw new YamlLoadError("trait must have id", path);
@@ -209,20 +209,20 @@ function translateTrait(node: unknown, layer: Layer, path: string): TraitDefinit
     translateField(f, `${path}.${id}.fields[${i}]`),
   ) ?? [];
   const relations: RelationDefinition[] = (obj["relations"] as unknown[] | undefined)?.map((r, i) =>
-    translateRelation(r, layer, `${path}.${id}.relations[${i}]`),
+    translateRelation(r, module, `${path}.${id}.relations[${i}]`),
   ) ?? [];
   const actions: ActionDefinition[] = (obj["actions"] as unknown[] | undefined)?.map((a, i) =>
-    translateAction(a, layer, `${path}.${id}.actions[${i}]`),
+    translateAction(a, module, `${path}.${id}.actions[${i}]`),
   ) ?? [];
   const rules: Rule[] = (obj["rules"] as unknown[] | undefined)?.map((r, i) =>
-    translateRule(r, layer, `${path}.${id}.rules[${i}]`),
+    translateRule(r, module, `${path}.${id}.rules[${i}]`),
   ) ?? [];
-  return traitDef(id, layer, { parameters: params, fields, relations, actions, rules });
+  return traitDef(id, module, { parameters: params, fields, relations, actions, rules });
 }
 
 function translateRelation(
   node: unknown,
-  layer: Layer,
+  module: Module,
   path: string,
 ): RelationDefinition {
   const obj = ensureMapping(node, `${path} (relation)`);
@@ -251,10 +251,10 @@ function translateRelation(
       (e) => e as EffectSpec,
     );
   }
-  return relationDef(id, layer, params, options);
+  return relationDef(id, module, params, options);
 }
 
-function translateAction(node: unknown, layer: Layer, path: string): ActionDefinition {
+function translateAction(node: unknown, module: Module, path: string): ActionDefinition {
   const obj = ensureMapping(node, `${path} (action)`);
   if (typeof obj["id"] !== "string") {
     throw new YamlLoadError("action must have id", path);
@@ -270,12 +270,12 @@ function translateAction(node: unknown, layer: Layer, path: string): ActionDefin
   const defaultEffects = ((obj["default"] as unknown[] | undefined) ?? []).map(
     (e) => e as EffectSpec,
   );
-  return actionDef(id, layer, params, { requires, defaultEffects });
+  return actionDef(id, module, params, { requires, defaultEffects });
 }
 
 function translateRule(
   node: unknown,
-  layer: Layer,
+  module: Module,
   path: string,
   rulebookId?: string,
 ): Rule {
@@ -300,7 +300,7 @@ function translateRule(
   const effects = ((obj["effects"] as unknown[] | undefined) ?? []).map((e) => e as EffectSpec);
   const control = (obj["control"] as RuleControl | undefined) ?? "continue";
   const priority = (obj["priority"] as number | undefined) ?? 0;
-  return ruleDef(id, layer, phase, {
+  return ruleDef(id, module, phase, {
     pattern: patternHelper(match["action"] as string, args),
     effects,
     guard,
@@ -310,7 +310,7 @@ function translateRule(
   });
 }
 
-function translateKind(node: unknown, layer: Layer, path: string): KindDefinition {
+function translateKind(node: unknown, module: Module, path: string): KindDefinition {
   const obj = ensureMapping(node, `${path} (kind)`);
   if (typeof obj["id"] !== "string") {
     throw new YamlLoadError("kind must have id", path);
@@ -324,9 +324,9 @@ function translateKind(node: unknown, layer: Layer, path: string): KindDefinitio
     fields[k] = v as Record<string, unknown>;
   }
   const rules = (obj["rules"] as unknown[] | undefined)?.map((r, i) =>
-    translateRule(r, layer, `${path}.${id}.rules[${i}]`),
+    translateRule(r, module, `${path}.${id}.rules[${i}]`),
   ) ?? [];
-  return kindDef(id, layer, { traits, fields, rules });
+  return kindDef(id, module, { traits, fields, rules });
 }
 
 function translateAttachment(node: unknown, path: string): TraitAttachment {
@@ -388,10 +388,10 @@ function loadEntities(def: GameDefinition, list: unknown[], options: LoadOptions
       fields[k] = v as Record<string, unknown>;
     }
     const rules: Rule[] = (obj["rules"] as unknown[] | undefined)?.map((r, i) =>
-      translateRule(r, options.layer, `${path}.entities.${id}.rules[${i}]`),
+      translateRule(r, options.module, `${path}.entities.${id}.rules[${i}]`),
     ) ?? [];
     const metadata = (obj["metadata"] as Record<string, unknown> | undefined) ?? {};
-    const spec: EntitySpec = entitySpec(id, options.layer, {
+    const spec: EntitySpec = entitySpec(id, options.module, {
       ...(kind !== undefined ? { kind } : {}),
       traits,
       fields,
@@ -413,7 +413,7 @@ function loadAssertions(def: GameDefinition, list: unknown[], options: LoadOptio
     def.addInitialAssertion({
       relation: obj["relation"],
       args,
-      layer: options.layer,
+      module: options.module,
     });
   }
 }
@@ -426,7 +426,7 @@ function loadFacts(def: GameDefinition, list: unknown[], options: LoadOptions): 
       throw new YamlLoadError("fact must have id", path);
     }
     const args = ensureArray(obj["args"] ?? [], `${path}.fact.args`);
-    def.addInitialFact({ id: obj["id"], args, layer: options.layer });
+    def.addInitialFact({ id: obj["id"], args, module: options.module });
   }
 }
 

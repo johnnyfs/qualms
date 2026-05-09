@@ -16,7 +16,7 @@
  *     attached to the QueryContext; the evaluator inlines them on demand.
  */
 
-import type { Layer } from "../core/types.js";
+import type { Module } from "../core/types.js";
 
 // ──────── Terms (values that can appear as relation arguments) ────────
 
@@ -79,7 +79,7 @@ export type Expression =
  */
 export interface TraitFilter {
   name: string;
-  layer?: Layer;
+  module?: Module;
 }
 
 // ──────── Queries (top-level) ────────
@@ -129,7 +129,7 @@ export const INTROSPECTION_RELATIONS = [
   "uses", // uses(kind, trait)
   "defines", // defines(trait, name) — name can be field, relation, action, or rule id
   "instance_of", // instance_of(entity, kind)
-  "in_layer", // in_layer(definition-or-entity, layer)
+  "in_layer", // in_layer(definition-or-entity, module)
 ] as const;
 export type IntrospectionRelation = (typeof INTROSPECTION_RELATIONS)[number];
 

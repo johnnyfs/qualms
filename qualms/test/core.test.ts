@@ -36,7 +36,7 @@ describe("core builders", () => {
     const t = trait("Presentable", "prelude", {
       fields: [field("name", { type: "str", default: "" })],
     });
-    expect(t.layer).toBe("prelude");
+    expect(t.module).toBe("prelude");
     expect(t.id).toBe("Presentable");
     expect(t.relations).toEqual([]);
     expect(t.actions).toEqual([]);
@@ -56,8 +56,8 @@ describe("GameDefinition (layered)", () => {
     expect(def.hasTrait("Relocatable")).toBe(true);
     expect(def.hasRelation("At")).toBe(true);
     expect(def.hasAction("Move")).toBe(true);
-    expect(def.relation("At").layer).toBe("prelude");
-    expect(def.action("Move").layer).toBe("prelude");
+    expect(def.relation("At").module).toBe("prelude");
+    expect(def.action("Move").module).toBe("prelude");
   });
 
   it("throws on duplicate trait id with cross-layer context", () => {
@@ -80,10 +80,10 @@ describe("GameDefinition (layered)", () => {
     def.addTrait(trait("Bonus", "game"));
     def.addRelation(relation("Custom", "session", [parameter("a")]));
 
-    expect(def.traitsByLayer("prelude").map((t) => t.id)).toEqual(["Presentable"]);
-    expect(def.traitsByLayer("game").map((t) => t.id)).toEqual(["Bonus"]);
-    expect(def.traitsByLayer("session")).toEqual([]);
-    expect(def.relationsByLayer("session").map((r) => r.id)).toEqual(["Custom"]);
+    expect(def.traitsByModule("prelude").map((t) => t.id)).toEqual(["Presentable"]);
+    expect(def.traitsByModule("game").map((t) => t.id)).toEqual(["Bonus"]);
+    expect(def.traitsByModule("session")).toEqual([]);
+    expect(def.relationsByModule("session").map((r) => r.id)).toEqual(["Custom"]);
   });
 
   it("preserves layer attribution on lifted relations from cross-layer traits", () => {
@@ -92,8 +92,8 @@ describe("GameDefinition (layered)", () => {
     const r = relation("R", "session", [parameter("x")]);
     def.addTrait(trait("OddOne", "game", { relations: [r] }));
     // Trait is game; relation keeps its declared layer.
-    expect(def.trait("OddOne").layer).toBe("game");
-    expect(def.relation("R").layer).toBe("session");
+    expect(def.trait("OddOne").module).toBe("game");
+    expect(def.relation("R").module).toBe("session");
   });
 
   it("validate() catches kind referencing unknown trait", () => {
@@ -110,7 +110,7 @@ describe("GameDefinition (layered)", () => {
 
   it("validate() catches initial assertion against unknown relation", () => {
     const def = new GameDefinition();
-    def.addInitialAssertion({ relation: "Ghost", args: [], layer: "game" });
+    def.addInitialAssertion({ relation: "Ghost", args: [], module: "game" });
     expect(() => def.validate()).toThrowError(/unknown relation 'Ghost'/);
   });
 });
@@ -134,7 +134,7 @@ describe("buildEntity", () => {
     const def = presentable();
     const e = buildEntity(def, entitySpec("rock", "game", { kind: "Thing" }));
     expect(e.id).toBe("rock");
-    expect(e.layer).toBe("game");
+    expect(e.module).toBe("game");
     expect(e.traits["Presentable"]?.fields["name"]).toBe("");
     expect(e.traits["Presentable"]?.fields["description"]).toBe("");
   });
@@ -227,12 +227,12 @@ describe("instantiate + WorldState", () => {
     def.addInitialAssertion({
       relation: "At",
       args: ["player", "here"],
-      layer: "game",
+      module: "game",
     });
     const state = instantiate(def);
     expect(state.entities.size).toBe(2);
     expect(state.test("At", ["player", "here"])).toBe(true);
-    expect(state.storedTuples("At")[0]?.layer).toBe("game");
+    expect(state.storedTuples("At")[0]?.module).toBe("game");
   });
 
   it("test() throws for derived relations in step 1", () => {
@@ -276,7 +276,7 @@ describe("instantiate + WorldState", () => {
     def.addInitialAssertion({
       relation: "At",
       args: ["player", "here"],
-      layer: "game",
+      module: "game",
     });
     const state = instantiate(def);
     state.retractRelation("At", ["player", "here"]);
@@ -319,9 +319,9 @@ describe("layer attribution survives merge", () => {
     def.addTrait(trait("StoryTag", "game"));
     def.addRelation(relation("PlayerSpawn", "session", [parameter("a")]));
 
-    expect(def.traitsByLayer("prelude").map((t) => t.id)).toEqual(["Presentable"]);
-    expect(def.traitsByLayer("game").map((t) => t.id)).toEqual(["StoryTag"]);
-    expect(def.relationsByLayer("session").map((r) => r.id)).toEqual(["PlayerSpawn"]);
+    expect(def.traitsByModule("prelude").map((t) => t.id)).toEqual(["Presentable"]);
+    expect(def.traitsByModule("game").map((t) => t.id)).toEqual(["StoryTag"]);
+    expect(def.relationsByModule("session").map((r) => r.id)).toEqual(["PlayerSpawn"]);
     // Merged view sees all of them.
     expect([...def.traits.keys()].sort()).toEqual(["Presentable", "StoryTag"]);
     expect([...def.relations.keys()]).toContain("PlayerSpawn");
@@ -344,8 +344,8 @@ describe("rulebook registration", () => {
     const def = new GameDefinition();
     def.addRulebook(rulebook("EveryTurn", "prelude"));
     expect(def.hasRulebook("EveryTurn")).toBe(true);
-    expect(def.rulebook("EveryTurn").layer).toBe("prelude");
-    expect(def.rulebooksByLayer("prelude").map((r) => r.id)).toEqual(["EveryTurn"]);
+    expect(def.rulebook("EveryTurn").module).toBe("prelude");
+    expect(def.rulebooksByModule("prelude").map((r) => r.id)).toEqual(["EveryTurn"]);
   });
 
   it("rejects duplicate ids", () => {

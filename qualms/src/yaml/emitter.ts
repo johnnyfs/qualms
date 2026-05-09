@@ -2,7 +2,7 @@
  * YAML emitter — inverse of `loader.ts`. Serializes a GameDefinition's slice
  * (single layer) back to a YAML string compatible with `loadYamlIntoDefinition`.
  *
- * Round-trip property: for any layer slice, `loadParsed(emitToObject(def, layer))`
+ * Round-trip property: for any layer slice, `loadParsed(emitToObject(def, module))`
  * reproduces the original definitions, entities, assertions, and facts at that
  * layer. Exercised in `qualms/test/yaml.test.ts`.
  *
@@ -21,7 +21,7 @@ import type {
   InitialAssertion,
   InitialFact,
   KindDefinition,
-  Layer,
+  Module,
   ParameterDefinition,
   RelationDefinition,
   Rule,
@@ -31,13 +31,13 @@ import type {
 } from "../core/types.js";
 import type { Expression, Term } from "../query/ast.js";
 
-export function emitDefinition(def: GameDefinition, layer: Layer): string {
-  return YAML.dump(emitToObject(def, layer), { schema: YAML.JSON_SCHEMA });
+export function emitDefinition(def: GameDefinition, module: Module): string {
+  return YAML.dump(emitToObject(def, module), { schema: YAML.JSON_SCHEMA });
 }
 
-export function emitToObject(def: GameDefinition, layer: Layer): Record<string, unknown> {
+export function emitToObject(def: GameDefinition, module: Module): Record<string, unknown> {
   const definitions: Record<string, unknown> = {};
-  const traits = def.traitsByLayer(layer).map(emitTrait);
+  const traits = def.traitsByModule(module).map(emitTrait);
   if (traits.length > 0) definitions["traits"] = traits;
 
   // Relations / actions / rules contributed by traits at this layer are
@@ -46,39 +46,39 @@ export function emitToObject(def: GameDefinition, layer: Layer): Record<string, 
   const traitOwnedRelations = new Set<string>();
   const traitOwnedActions = new Set<string>();
   const traitOwnedRules = new Set<string>();
-  for (const t of def.traitsByLayer(layer)) {
+  for (const t of def.traitsByModule(module)) {
     for (const r of t.relations) traitOwnedRelations.add(r.id);
     for (const a of t.actions) traitOwnedActions.add(a.id);
     for (const rl of t.rules) traitOwnedRules.add(rl.id);
   }
 
   const relations = def
-    .relationsByLayer(layer)
+    .relationsByModule(module)
     .filter((r) => !traitOwnedRelations.has(r.id))
     .map(emitRelation);
   if (relations.length > 0) definitions["relations"] = relations;
 
   const actions = def
-    .actionsByLayer(layer)
+    .actionsByModule(module)
     .filter((a) => !traitOwnedActions.has(a.id))
     .map(emitAction);
   if (actions.length > 0) definitions["actions"] = actions;
 
   // Rules group by rulebook for emission.
-  const layerRules = def
-    .rulesByLayer(layer)
+  const moduleRules = def
+    .rulesByModule(module)
     .filter((r) => !traitOwnedRules.has(r.id));
-  const rulebooks = def.rulebooksByLayer(layer);
+  const rulebooks = def.rulebooksByModule(module);
   const rulesByBook = new Map<string, Rule[]>();
   for (const rb of rulebooks) rulesByBook.set(rb.id, []);
-  for (const r of layerRules) {
+  for (const r of moduleRules) {
     if (r.rulebook !== undefined) {
       const bucket = rulesByBook.get(r.rulebook) ?? [];
       bucket.push(r);
       rulesByBook.set(r.rulebook, bucket);
     }
   }
-  const orphanRules = layerRules.filter((r) => r.rulebook === undefined);
+  const orphanRules = moduleRules.filter((r) => r.rulebook === undefined);
   if (rulebooks.length > 0) {
     definitions["rulebooks"] = rulebooks.map((rb) => ({
       id: rb.id,
@@ -94,23 +94,23 @@ export function emitToObject(def: GameDefinition, layer: Layer): Record<string, 
     ];
   }
 
-  const kinds = def.kindsByLayer(layer).map(emitKind);
+  const kinds = def.kindsByModule(module).map(emitKind);
   if (kinds.length > 0) definitions["kinds"] = kinds;
 
   const out: Record<string, unknown> = {};
   if (Object.keys(definitions).length > 0) out["definitions"] = definitions;
 
-  const entities = def.initialEntitiesByLayer(layer).map(emitEntity);
+  const entities = def.initialEntitiesByModule(module).map(emitEntity);
   if (entities.length > 0) out["entities"] = entities;
 
-  const assertions = def.initialAssertionsByLayer(layer).map(emitAssertion);
+  const assertions = def.initialAssertionsByModule(module).map(emitAssertion);
   if (assertions.length > 0) out["assertions"] = assertions;
 
-  const facts = def.initialFactsByLayer(layer).map(emitFact);
+  const facts = def.initialFactsByModule(module).map(emitFact);
   if (facts.length > 0) out["facts"] = facts;
 
-  // Layer metadata (e.g. `start.*`).
-  const md = def.metadataFor(layer);
+  // Module metadata (e.g. `start.*`).
+  const md = def.metadataFor(module);
   const startKeys = Object.keys(md).filter((k) => k.startsWith("start."));
   if (startKeys.length > 0) {
     const start: Record<string, unknown> = {};
@@ -274,7 +274,7 @@ export function emitPredicate(expr: Expression): unknown {
         has_trait: {
           entity: emitTerm(expr.entity),
           trait: expr.filter.name,
-          ...(expr.filter.layer !== undefined ? { layer: expr.filter.layer } : {}),
+          ...(expr.filter.module !== undefined ? { layer: expr.filter.module } : {}),
         },
       };
     case "exists":

@@ -186,13 +186,13 @@ function buildWorld(): { def: GameDefinition; state: ReturnType<typeof instantia
     }),
   );
 
-  def.addInitialAssertion({ relation: "Path", args: ["here", "there"], layer: "game" });
-  def.addInitialAssertion({ relation: "Path", args: ["there", "hall"], layer: "game" });
-  def.addInitialAssertion({ relation: "At", args: ["player", "here"], layer: "game" });
-  def.addInitialAssertion({ relation: "At", args: ["rock", "here"], layer: "game" });
-  def.addInitialAssertion({ relation: "At", args: ["gem", "there"], layer: "game" });
-  def.addInitialAssertion({ relation: "At", args: ["keystone", "player"], layer: "game" });
-  def.addInitialAssertion({ relation: "IsPlayer", args: ["player"], layer: "game" });
+  def.addInitialAssertion({ relation: "Path", args: ["here", "there"], module: "game" });
+  def.addInitialAssertion({ relation: "Path", args: ["there", "hall"], module: "game" });
+  def.addInitialAssertion({ relation: "At", args: ["player", "here"], module: "game" });
+  def.addInitialAssertion({ relation: "At", args: ["rock", "here"], module: "game" });
+  def.addInitialAssertion({ relation: "At", args: ["gem", "there"], module: "game" });
+  def.addInitialAssertion({ relation: "At", args: ["keystone", "player"], module: "game" });
+  def.addInitialAssertion({ relation: "IsPlayer", args: ["player"], module: "game" });
 
   // Session-layer overlay
   def.addTrait(trait("BonusTag", "session"));
@@ -489,7 +489,7 @@ describe("evaluator: meta-types and scope addressing", () => {
   it("Trait@prelude restricts to prelude layer", () => {
     const { def, state } = buildWorld();
     const ctx = makeContext(def, { state });
-    const q = query(["t"], traitOf(v("t"), { name: "Trait", layer: "prelude" }));
+    const q = query(["t"], traitOf(v("t"), { name: "Trait", module: "prelude" }));
     const ts = new Set(runQuery(q, ctx).rows.map((r) => r["t"]));
     expect(ts.has("Presentable")).toBe(true);
     expect(ts.has("BonusTag")).toBe(false);
@@ -498,7 +498,7 @@ describe("evaluator: meta-types and scope addressing", () => {
   it("Trait@session restricts to session layer", () => {
     const { def, state } = buildWorld();
     const ctx = makeContext(def, { state });
-    const q = query(["t"], traitOf(v("t"), { name: "Trait", layer: "session" }));
+    const q = query(["t"], traitOf(v("t"), { name: "Trait", module: "session" }));
     const ts = new Set(runQuery(q, ctx).rows.map((r) => r["t"]));
     expect(ts).toEqual(new Set(["BonusTag"]));
   });
@@ -507,7 +507,7 @@ describe("evaluator: meta-types and scope addressing", () => {
     const { def, state } = buildWorld();
     const ctx = makeContext(def, { state });
     expect(() =>
-      runQuery(query(["x"], traitOf(v("x"), { name: "Item", layer: "prelude" })), ctx),
+      runQuery(query(["x"], traitOf(v("x"), { name: "Item", module: "prelude" })), ctx),
     ).toThrowError(/layer filter/);
   });
 
@@ -521,7 +521,7 @@ describe("evaluator: meta-types and scope addressing", () => {
     const q = query(
       ["r"],
       and(
-        traitOf(v("r"), { name: "Relation", layer: "prelude" }),
+        traitOf(v("r"), { name: "Relation", module: "prelude" }),
         regex(f(v("r"), "id"), "^Can"),
       ),
     );

@@ -20,18 +20,20 @@ The rewrite addresses all five at once by reimplementing the engine in TypeScrip
 
 ## Architectural moves
 
-### Four-layer structural model
+### Four-tier structural model (modules)
 
-The live world is composed of four explicit layers, each with its own edit path:
+The live world is composed of three structural modules plus a runtime tier, each with its own edit path:
 
-| Layer | What lives there | Edit path |
+| Module | What lives there | Edit path |
 |---|---|---|
 | **prelude** | Universal traits, relations, actions, kinds, rulebooks shared across all stories. | File-edit only by the coding agent. **Off-limits to MCP.** |
-| **game_definition** | Per-story schema additions, kinds, entity initial states, story-specific rules. The `story.qualms.yaml` artifact. | `commit(transaction_id, scope=story)` writes to `story.qualms.yaml`. |
-| **session_definition** | Per-run structural overlay invented for this player (e.g., agent-spawned NPCs, scenario-specific traits). | `commit(transaction_id, scope=session)` lands in the in-memory overlay; persisted on `save(session_id)`. |
-| **session_state** | The live `WorldState` — facts, fields, events, allocators. Mutated by actions during play. | `__command`/`__play` apply actions; `save(session_id)` snapshots. |
+| **game** | Per-story schema additions, kinds, entity initial states, story-specific rules. The `story.qualms.yaml` artifact. | `commit(transactionId)` after `begin({ module: "game", targetPath })` writes the game-module slice to the target YAML on disk. |
+| **session** | Per-run structural overlay invented for this player (e.g., agent-spawned NPCs, scenario-specific traits). | `commit(transactionId)` after `begin({ module: "session" })` finalizes the overlay in memory; persisted later on `save(sessionId)`. |
+| **session_state** (runtime tier) | The live `WorldState` — facts, fields, events, allocators. Mutated by actions during play. | `command`/`play` apply actions; `save(sessionId)` snapshots. |
 
-At load, the live world is `prelude ⊕ game_definition ⊕ session_definition` for definitions plus `session_state` for runtime facts. Two distinct save operations, two destinations: `save(session_id)` writes player progress (`session_definition + session_state`); `commit(transaction_id, scope=story)` writes structural changes to disk.
+At load, the live world is `prelude ⊕ game ⊕ session` for definitions plus `session_state` for runtime facts. Two distinct save operations, two destinations: `save(sessionId)` writes player progress (`session module + session_state`); `commit` after a game-module `begin` writes structural changes to disk.
+
+The "module" framing replaces the prior "layer" terminology — same concept, better word for what the architecture is heading toward (named, importable units of definition). Generalization to arbitrary named modules with `using` imports is deferred.
 
 ### One grammar, multiple roles
 
@@ -47,7 +49,7 @@ The grammar combines first-order logic, Cypher-style path patterns over binary r
 
 ### Structural objects in the query namespace
 
-Traits, kinds, actions, relations, rules, rulebooks, and entities are all first-class queryable types. The engine exposes introspection relations (`uses(kind, trait)`, `defines(trait, field)`, `instance_of(entity, kind)`, etc.) so that meta-queries use the same grammar as world queries. A single composition can ask "entities of kinds that use trait X" without crossing a tool boundary. Scope addressing (`Trait@prelude`, `Trait@game`, `Trait@session`; bare `Trait` = merged) targets specific layers when needed.
+Traits, kinds, actions, relations, rules, rulebooks, and entities are all first-class queryable types. The engine exposes introspection relations (`uses(kind, trait)`, `defines(trait, field)`, `instance_of(entity, kind)`, etc.) so that meta-queries use the same grammar as world queries. A single composition can ask "entities of kinds that use trait X" without crossing a tool boundary. Module addressing (`Trait@prelude`, `Trait@game`, `Trait@session`; bare `Trait` = merged) targets specific modules when needed.
 
 ### MCP server is the agent surface
 
@@ -68,7 +70,7 @@ There is no CLI in this milestone. The agent-facing surface is a stateful MCP se
 - **Engine reimplemented in TypeScript** (Node 20+, ESM, strict mode).
 - **Repo layout:** `deprecated/qualms/`, `deprecated/curses/` for reference; new `qualms/` (TypeScript engine + prelude) and `mcp/` (MCP server) at the repo root. `godot/` ignored.
 - **Query/mutation surface:** new DSL with FOL + Cypher path patterns + Datalog-style named rules; structural meta-types in the same query namespace; ASCII/unicode parity.
-- **Four-scope structural model** with `begin`/`commit`/`rollback`/`mutate`/`diff` transactions (shipped in milestone 2); `save` writes player progress separately from structural commits (deferred). Story-scope `commit` writes the `game`-layer slice back to a YAML file on disk; session-scope `commit` finalizes in memory until `save` lands.
+- **Module-aware structural model** with `begin`/`commit`/`rollback`/`mutate`/`diff` transactions (shipped in milestone 2); `save` writes player progress separately from structural commits (deferred). `begin({ module: "game", targetPath })` opens a transaction whose `commit` writes the game module slice back to the target YAML on disk; `begin({ module: "session" })` finalizes the session overlay in memory until `save` lands. The earlier `scope: "story" | "session"` parameter is gone — transactions name their target module directly.
 - **Storage class collapse.** Relations have no `persistence` field; they are stored by default and derived when a `get` body is present. `WorldState` keeps a single relations Map. Story-level memory patterns (e.g. tracking visited locations) belong in story files, not the prelude.
 - **No CLI** in this milestone. Future frontend will be Ink/JS, not curses.
 - **No NOVA-specific surface anywhere.** The prelude is genuinely universal; story-specific vocabulary lives in story files.
@@ -77,11 +79,12 @@ There is no CLI in this milestone. The agent-facing surface is a stateful MCP se
 
 - `def view` rendering and the `__render` tool. View rules may also be relocated outside the rule space later — they are player-POV ergonomic concerns, not gameplay rules.
 - `__command`, `__play`, `__attempt`, `__coauthor` tools (Tier 2 LLM-mediated and Tier 1 play-scoped).
-- `__save` — gameplay save (snapshots `session_state`). Session-scope `__commit` finalizes the `session` overlay in memory; persistence to disk happens later via `__save`.
+- `save` — gameplay save (snapshots `session_state`). Session-module `commit` finalizes the session overlay in memory; persistence to disk happens later via `save`.
 - `__expand` (definition introspection by name).
 - Inform-style addressing (`X, do Y` rebinds actor) — prelude-resident, later.
 - Live-extension stricter rules ("no changing what the player has seen without an in-game event"). Until then, core validation (no hanging refs) is the only safety on structural commits during play.
-- Concurrent transactions across scopes; for now, one active transaction per session.
+- Concurrent transactions across modules; for now, one active transaction per session.
+- **Module generalization.** The three modules (`prelude`/`game`/`session`) are fixed in this milestone. Future work generalizes to arbitrary named modules per file with `using <module>` imports and runtime module creation.
 - Migration of stellar / wave_collapse story content.
 - NOVA prelude port. The current milestone ships only a clean core prelude.
 - Functional amend layer for transactions. Snapshot-based rollback (deep-clone of `GameDefinition` + `WorldState` at `begin`) is provisional; the intended endpoint is a base-ref + delta merged on read so cost scales with transaction size and parallel transactions across scopes become possible.
@@ -104,15 +107,14 @@ When all eight hold, the milestone is done. Subsequent milestones add story-file
 
 ## Glossary
 
-- **Prelude.** Universal schema layer. Defines the core traits, relations, actions, rules, kinds usable by any story. Edited only by file edit; never reachable through MCP.
-- **Game definition.** Per-story schema additions and initial state. Lives in a `story.qualms.yaml` file. Committed via story-scope transactions.
-- **Session definition.** Per-run structural overlay. Schema/entity additions invented during a player's session that affect only this run. Persisted in the save file.
-- **Session state.** The live `WorldState` — entity records, trait field values, asserted relations, facts, events, allocators. Mutated by action effects during play.
-- **Layer.** One of {prelude, game, session}. Every definition and entity tracks the layer it came from. Layer attribution is preserved through merges and surfaces in `Type@layer` query notation.
-- **Scope.** Used for transactions: `scope=story` opens a transaction against `game_definition`; `scope=session` opens one against `session_definition`. Prelude has no transaction scope.
+- **Module.** One of {prelude, game, session}. Every definition and entity tracks the module it came from. Module attribution is preserved through merges and surfaces in `Type@module` query notation. (Was previously called "layer" — same concept, renamed in milestone 2 to set up eventual module-graph generalization.)
+- **Prelude.** Universal schema module. Defines the core traits, relations, actions, rules, kinds usable by any story. Edited only by file edit; never writable through MCP.
+- **Game.** Per-story schema additions and initial state. Lives in a `story.qualms.yaml` file. Mutations target it via `begin({ module: "game" })`; `commit` writes the slice back to disk.
+- **Session.** Per-run structural overlay. Schema/entity additions invented during a player's session that affect only this run. Mutations target it via `begin({ module: "session" })`; persisted later in the save file by `save`.
+- **Session state.** The live `WorldState` — entity records, trait field values, asserted relations, facts, events, allocators. Mutated by action effects during play. Not a structural module; the runtime tier.
 - **AST.** Abstract syntax tree. The query DSL parser produces an AST; the evaluator consumes one. Tools that take "expressions" accept either AST objects (programmatic callers) or DSL strings (parser-then-eval).
 - **View rule.** A `def view` rule in the prelude that emits formatted text or structured nodes from world state for player-POV rendering. Not implemented in this milestone; flagged for possible isolation/rename later.
-- **Tier 1 / Tier 2 / Tier 3.** Tool layering. Tier 1 = deterministic primitives; Tier 2 = LLM-mediated wrappers (`__play`, `__coauthor`); Tier 3 = real frontend (Ink) and concurrent autonomous agents.
+- **Tier 1 / Tier 2 / Tier 3.** Tool layering. Tier 1 = deterministic primitives; Tier 2 = LLM-mediated wrappers (`play`, `coauthor`); Tier 3 = real frontend (Ink) and concurrent autonomous agents.
 - **Meta-type.** A reflective type for a structural object: `Trait`, `Kind`, `Action`, `Relation`, `Rule`, `Rulebook`, `Entity`. Queryable in the same namespace as world entities.
 - **Introspection relation.** A relation exposed by the engine that talks about structure rather than state: `uses(kind, trait)`, `defines(trait, field)`, `instance_of(entity, kind)`, etc.
 

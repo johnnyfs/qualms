@@ -60,7 +60,7 @@ import type {
   Value,
 } from "./ast.js";
 import { isUndefTargetKind } from "./ast.js";
-import type { Layer } from "../core/types.js";
+import type { Module } from "../core/types.js";
 
 // ──────── Lexer ────────
 
@@ -243,7 +243,7 @@ function unquoteString(token: IToken): string {
   return raw.slice(1, -1).replace(/\\(.)/g, "$1");
 }
 
-function parseLayer(token: IToken): Layer {
+function parseLayer(token: IToken): Module {
   // Use tokenType so we can survive the grammar-recording phase where image
   // may be a placeholder.
   const name = token.tokenType?.name;
@@ -540,7 +540,7 @@ class QualmsParser extends EmbeddedActionsParser {
         { ALT: () => this.CONSUME(GameLayer) },
         { ALT: () => this.CONSUME(SessionLayer) },
       ]);
-      filter.layer = parseLayer(layerToken);
+      filter.module = parseLayer(layerToken);
     });
     return filter;
   });

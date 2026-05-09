@@ -13,7 +13,7 @@
 import { randomUUID } from "node:crypto";
 import {
   GameDefinition,
-  type Layer,
+  type Module,
   WorldState,
   instantiate,
   mutation as mutationNs,
@@ -26,7 +26,7 @@ type MutationStatement = queryNs.MutationStatement;
 const { loadFileIntoDefinition } = yamlNs;
 const { Transaction, applyMutation } = mutationNs;
 type Transaction = ReturnType<typeof Transaction.begin>;
-type Scope = Transaction["scope"];
+type WritableModule = Transaction["module"];
 
 export interface SessionStartOptions {
   corePath: string;
@@ -75,9 +75,9 @@ export class SessionManager {
 
   start(options: SessionStartOptions): Session {
     const def = new GameDefinition();
-    loadFileIntoDefinition(def, options.corePath, "prelude" satisfies Layer);
+    loadFileIntoDefinition(def, options.corePath, "prelude" satisfies Module);
     for (const storyPath of options.storyPaths ?? []) {
-      loadFileIntoDefinition(def, storyPath, "game" satisfies Layer);
+      loadFileIntoDefinition(def, storyPath, "game" satisfies Module);
     }
     const state = instantiate(def);
     const session: Session = {
@@ -117,14 +117,14 @@ export class SessionManager {
   // ──────── Transactions ────────
 
   /** Open a structural transaction. Throws if one is already open. */
-  beginTransaction(sessionId: string, scope: Scope, targetPath?: string): Transaction {
+  beginTransaction(sessionId: string, module: WritableModule, targetPath?: string): Transaction {
     const s = this.get(sessionId);
     if (s.transaction !== null) {
       throw new TransactionAlreadyOpenError(sessionId);
     }
     const tx = Transaction.begin({
       id: randomUUID(),
-      scope,
+      module,
       def: s.definition,
       state: s.state,
       ...(targetPath !== undefined ? { targetPath } : {}),

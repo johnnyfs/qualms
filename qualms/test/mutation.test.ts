@@ -49,12 +49,12 @@ function buildBaseDef(): GameDefinition {
   return def;
 }
 
-function freshTx(scope: "story" | "session", def: GameDefinition) {
+function freshTx(module: "game" | "session", def: GameDefinition) {
   const state = instantiate(def);
   return {
     def,
     state,
-    tx: Transaction.begin({ id: "tx-1", scope, def, state }),
+    tx: Transaction.begin({ id: "tx-1", module, def, state }),
   };
 }
 
@@ -70,13 +70,13 @@ describe("mutation executor: assert / retract", () => {
     applyMutation(parseMutation('assert Owns("a", "b")'), tx, def, state);
     expect(state.test("Owns", ["a", "b"])).toBe(true);
     // Layer attribution: assertion records the session layer.
-    expect(def.initialAssertions.some((a) => a.relation === "Owns" && a.layer === "session")).toBe(
+    expect(def.initialAssertions.some((a) => a.relation === "Owns" && a.module === "session")).toBe(
       true,
     );
   });
 
   it("retract removes an asserted tuple", () => {
-    const { def, state, tx } = freshTx("story", buildBaseDef());
+    const { def, state, tx } = freshTx("game", buildBaseDef());
     applyMutation(parseMutation('assert Owns("a", "b")'), tx, def, state);
     applyMutation(parseMutation('retract Owns("a", "b")'), tx, def, state);
     expect(state.test("Owns", ["a", "b"])).toBe(false);
@@ -98,37 +98,31 @@ describe("mutation executor: assert / retract", () => {
 });
 
 describe("mutation executor: def trait / relation / action / kind", () => {
-  it("def trait adds a trait at the tx layer", () => {
-    const { def, state, tx } = freshTx("game" as never, buildBaseDef());
-    // Note: scope "game" is invalid; runtime mapping is story→game / session→session.
-    // Use story scope for game-layer.
-    const recovered = freshTx("story", buildBaseDef());
+  it("def trait adds a trait at the tx module", () => {
+    const { def, state, tx } = freshTx("game", buildBaseDef());
     applyMutation(
       parseMutation('def trait NewTrait { fields: { x: { default: 0 } } }'),
-      recovered.tx,
-      recovered.def,
-      recovered.state,
+      tx,
+      def,
+      state,
     );
-    expect(recovered.def.hasTrait("NewTrait")).toBe(true);
-    expect(recovered.def.trait("NewTrait").layer).toBe("game");
-    expect(recovered.def.trait("NewTrait").fields.map((f) => f.id)).toEqual(["x"]);
-    void def;
-    void state;
-    void tx;
+    expect(def.hasTrait("NewTrait")).toBe(true);
+    expect(def.trait("NewTrait").module).toBe("game");
+    expect(def.trait("NewTrait").fields.map((f) => f.id)).toEqual(["x"]);
   });
 
   it("def relation lands at the tx layer (session)", () => {
     const { def, state, tx } = freshTx("session", buildBaseDef());
     applyMutation(parseMutation("def relation Owes(a, b) {}"), tx, def, state);
-    expect(def.relation("Owes").layer).toBe("session");
+    expect(def.relation("Owes").module).toBe("session");
     // Stored: no `get` body present.
     expect(def.relation("Owes").get).toBeUndefined();
   });
 
   it("def action lands at tx layer", () => {
-    const { def, state, tx } = freshTx("story", buildBaseDef());
+    const { def, state, tx } = freshTx("game", buildBaseDef());
     applyMutation(parseMutation("def action Look(actor) {}"), tx, def, state);
-    expect(def.action("Look").layer).toBe("game");
+    expect(def.action("Look").module).toBe("game");
   });
 
   it("def kind validates trait references", () => {
@@ -144,14 +138,14 @@ describe("mutation executor: def trait / relation / action / kind", () => {
   });
 
   it("def kind succeeds with known traits", () => {
-    const { def, state, tx } = freshTx("story", buildBaseDef());
+    const { def, state, tx } = freshTx("game", buildBaseDef());
     applyMutation(
       parseMutation("def kind Mob { traits: [Presentable, Combatant] }"),
       tx,
       def,
       state,
     );
-    expect(def.kind("Mob").layer).toBe("game");
+    expect(def.kind("Mob").module).toBe("game");
     expect(def.kind("Mob").traits.map((t) => t.id)).toEqual(["Presentable", "Combatant"]);
   });
 });
@@ -161,11 +155,11 @@ describe("mutation executor: def rule / rulebook", () => {
     const { def, state, tx } = freshTx("session", buildBaseDef());
     applyMutation(parseMutation("def rulebook PerSession {}"), tx, def, state);
     expect(def.hasRulebook("PerSession")).toBe(true);
-    expect(def.rulebook("PerSession").layer).toBe("session");
+    expect(def.rulebook("PerSession").module).toBe("session");
   });
 
   it("def rule succeeds when rulebook exists", () => {
-    const { def, state, tx } = freshTx("story", buildBaseDef());
+    const { def, state, tx } = freshTx("game", buildBaseDef());
     applyMutation(
       parseMutation("def rule Tick in EveryTurn { phase: after, match: Move(a: x) }"),
       tx,
@@ -175,7 +169,7 @@ describe("mutation executor: def rule / rulebook", () => {
     const r = def.rules.find((r) => r.id === "Tick");
     expect(r).toBeDefined();
     expect(r!.rulebook).toBe("EveryTurn");
-    expect(r!.layer).toBe("game");
+    expect(r!.module).toBe("game");
   });
 
   it("def rule fails when rulebook is missing", () => {
@@ -206,7 +200,7 @@ describe("mutation executor: def entity", () => {
     expect(state.hasEntity("grunt")).toBe(true);
     expect(state.entity("grunt").traits["Presentable"]?.fields["name"]).toBe("Grunt");
     expect(state.entity("grunt").traits["Combatant"]).toBeDefined();
-    expect(def.initialEntity("grunt").layer).toBe("session");
+    expect(def.initialEntity("grunt").module).toBe("session");
   });
 
   it("def entity without kind, with traits", () => {
@@ -221,7 +215,7 @@ describe("mutation executor: def entity", () => {
   });
 
   it("rejects duplicate entity id", () => {
-    const { def, state, tx } = freshTx("story", buildBaseDef());
+    const { def, state, tx } = freshTx("game", buildBaseDef());
     applyMutation(parseMutation("def entity x : Foe {}"), tx, def, state);
     expect(() =>
       applyMutation(parseMutation("def entity x : Foe {}"), tx, def, state),
@@ -231,7 +225,7 @@ describe("mutation executor: def entity", () => {
 
 describe("mutation executor: field assign", () => {
   it("assigns a field on an entity", () => {
-    const { def, state, tx } = freshTx("story", buildBaseDef());
+    const { def, state, tx } = freshTx("game", buildBaseDef());
     applyMutation(parseMutation("def entity x : Foe {}"), tx, def, state);
     applyMutation(parseMutation('x.Presentable.name := "Renamed"'), tx, def, state);
     expect(state.entity("x").traits["Presentable"]?.fields["name"]).toBe("Renamed");
@@ -269,7 +263,7 @@ describe("mutation executor: undef", () => {
   });
 
   it("undef rejects when something references the target", () => {
-    const { def, state, tx } = freshTx("story", buildBaseDef());
+    const { def, state, tx } = freshTx("game", buildBaseDef());
     applyMutation(parseMutation("def trait NewTrait {}"), tx, def, state);
     applyMutation(parseMutation("def kind UsesIt { traits: [NewTrait] }"), tx, def, state);
     expect(() =>
@@ -327,16 +321,16 @@ describe("mutation executor: snapshots and rollback", () => {
 
 describe("mutation executor: layer mapping", () => {
   it("story scope → game layer", () => {
-    const { def, state, tx } = freshTx("story", buildBaseDef());
-    expect(tx.layer).toBe("game");
+    const { def, state, tx } = freshTx("game", buildBaseDef());
+    expect(tx.module).toBe("game");
     applyMutation(parseMutation("def trait X {}"), tx, def, state);
-    expect(def.trait("X").layer).toBe("game");
+    expect(def.trait("X").module).toBe("game");
   });
 
   it("session scope → session layer", () => {
     const { def, state, tx } = freshTx("session", buildBaseDef());
-    expect(tx.layer).toBe("session");
+    expect(tx.module).toBe("session");
     applyMutation(parseMutation("def trait X {}"), tx, def, state);
-    expect(def.trait("X").layer).toBe("session");
+    expect(def.trait("X").module).toBe("session");
   });
 });

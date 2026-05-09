@@ -114,7 +114,7 @@ describe("yaml predicate translator", () => {
 describe("yaml loader: per-construct", () => {
   function load(input: string): GameDefinition {
     const def = new GameDefinition();
-    loadYamlIntoDefinition(def, input, { layer: "prelude" });
+    loadYamlIntoDefinition(def, input, { module: "prelude" });
     return def;
   }
 
@@ -136,7 +136,7 @@ definitions:
     expect(t.fields[0]?.id).toBe("name");
     expect(t.fields[0]?.hasDefault).toBe(true);
     expect(t.fields[0]?.default).toBe("");
-    expect(t.layer).toBe("prelude");
+    expect(t.module).toBe("prelude");
   });
 
   it("lifts trait-owned relations into the merged map", () => {
@@ -275,14 +275,14 @@ story:
     actor: rock
 `);
     expect(def.initialEntities).toHaveLength(2);
-    expect(def.initialEntities[0]?.layer).toBe("prelude");
+    expect(def.initialEntities[0]?.module).toBe("prelude");
     expect(def.initialAssertions).toHaveLength(1);
     expect(def.metadataFor("prelude")["start.actor"]).toBe("rock");
   });
 
   it("rejects malformed YAML root", () => {
     expect(() =>
-      loadYamlIntoDefinition(new GameDefinition(), "- not a mapping", { layer: "prelude" }),
+      loadYamlIntoDefinition(new GameDefinition(), "- not a mapping", { module: "prelude" }),
     ).toThrowError(/root must be a mapping/);
   });
 
@@ -297,7 +297,7 @@ definitions:
     - id: Bad
       persistence: current
       params: []`,
-        { layer: "prelude" },
+        { module: "prelude" },
       ),
     ).toThrowError(/persistence/);
   });
@@ -439,7 +439,7 @@ describe("yaml emitter: round-trip of game-layer slice", () => {
         metadata: { spawned: true },
       }),
     );
-    def.addInitialAssertion({ relation: "Owns", args: ["grunt", "stick"], layer: "game" });
+    def.addInitialAssertion({ relation: "Owns", args: ["grunt", "stick"], module: "game" });
     return def;
   }
 
@@ -451,11 +451,11 @@ describe("yaml emitter: round-trip of game-layer slice", () => {
     const reloaded = new GameDefinition();
     reloaded.addTrait(trait("Presentable", "prelude", { fields: [field("name", { default: "" })] }));
     reloaded.addTrait(trait("Item", "prelude"));
-    loadParsed(reloaded, emitted, { layer: "game" });
+    loadParsed(reloaded, emitted, { module: "game" });
 
     // Trait round-trips with its fields.
     expect(reloaded.hasTrait("Combatant")).toBe(true);
-    expect(reloaded.trait("Combatant").layer).toBe("game");
+    expect(reloaded.trait("Combatant").module).toBe("game");
     expect(reloaded.trait("Combatant").fields.map((f) => f.id)).toEqual(["hp", "dmg"]);
 
     // Relation, action, rulebook.
@@ -489,7 +489,7 @@ describe("yaml emitter: round-trip of game-layer slice", () => {
     const reloaded = new GameDefinition();
     reloaded.addTrait(trait("Presentable", "prelude", { fields: [field("name", { default: "" })] }));
     reloaded.addTrait(trait("Item", "prelude"));
-    loadYamlIntoDefinition(reloaded, yamlText, { layer: "game" });
+    loadYamlIntoDefinition(reloaded, yamlText, { module: "game" });
     expect(reloaded.hasKind("Foe")).toBe(true);
   });
 
