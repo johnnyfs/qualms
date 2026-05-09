@@ -142,7 +142,7 @@ describe("dsl v2: def trait", () => {
 
   it("nested def action with default effect", () => {
     const stmt = parseStatement(
-      "def trait Relocatable { def action Move(actor, subject, destination) { default: [ assert At(subject, destination) ] } }",
+      "def trait Relocatable { def action Move(actor, subject, destination) { effects: [ assert At(subject, destination) ] } }",
     );
     if (stmt.kind !== "mutation" || stmt.mutation.type !== "defTrait") throw new Error("wrong shape");
     expect(stmt.mutation.spec.actions![0]?.id).toBe("Move");
@@ -202,12 +202,12 @@ describe("dsl v2: def relation", () => {
 describe("dsl v2: def action", () => {
   it("with requires and default clauses", () => {
     const stmt = parseStatement(
-      "def action Take(actor, item) { requires: CanTouch(actor, item); default: [ assert CarriedBy(actor, item) ] }",
+      "def action Take(actor, item) { requires: CanTouch(actor, item); effects: [ assert CarriedBy(actor, item) ] }",
     );
     if (stmt.kind !== "mutation" || stmt.mutation.type !== "defAction") throw new Error("wrong shape");
     expect(stmt.mutation.spec.id).toBe("Take");
     expect(stmt.mutation.spec.requires).toBeDefined();
-    expect(stmt.mutation.spec.defaultEffects).toHaveLength(1);
+    expect(stmt.mutation.spec.effects).toHaveLength(1);
   });
 
   it("optional return-type annotation parses (documentation-only)", () => {

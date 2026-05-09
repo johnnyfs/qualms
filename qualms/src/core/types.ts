@@ -71,7 +71,7 @@ export interface ActionDefinition {
   readonly module: Module;
   readonly parameters: readonly ParameterDefinition[];
   readonly requires: PredicateSpec;
-  readonly defaultEffects: readonly EffectSpec[];
+  readonly effects: readonly EffectSpec[];
 }
 
 export interface ActionPattern {

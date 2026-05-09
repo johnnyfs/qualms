@@ -517,8 +517,8 @@ function relationFromSpec(spec: RelationDefSpec, tx: Transaction): RelationDefin
 function actionFromSpec(spec: ActionDefSpec, tx: Transaction): ActionDefinition {
   return buildAction(spec.id, tx.module, spec.parameters.map(paramFromSpec), {
     ...(spec.requires !== undefined ? { requires: spec.requires } : {}),
-    ...(spec.defaultEffects !== undefined
-      ? { defaultEffects: effectsToSpecs(spec.defaultEffects) }
+    ...(spec.effects !== undefined
+      ? { effects: effectsToSpecs(spec.effects) }
       : {}),
   });
 }

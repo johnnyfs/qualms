@@ -35,7 +35,7 @@ def trait Relocatable {
   };
   def action Move(actor: Actor? = null, subject: Relocatable, destination: Location) {
     requires: true;
-    default: [ assert At(subject, destination); ];
+    effects: [ assert At(subject, destination); ];
   };
 }
 
@@ -59,18 +59,18 @@ def trait Container {
 def trait Portable {
   def action Take(actor: Actor, item: Portable) {
     requires: CanTouch(actor, item);
-    default: [ assert CarriedBy(actor, item); ];
+    effects: [ assert CarriedBy(actor, item); ];
   };
   def action Drop(actor: Actor, item: Portable, destination: Location) {
     requires: true;
-    default: [ assert At(item, destination); ];
+    effects: [ assert At(item, destination); ];
   };
 }
 
 def trait Usable {
   def action Use(actor: Actor, source: Usable, target: Entity? = null) {
     requires: CarriedBy(actor, source);
-    default: [ emit { text: "Nothing happens." }; ];
+    effects: [ emit { text: "Nothing happens." }; ];
   };
 }
 
@@ -83,11 +83,11 @@ def trait Equipment {
   };
   def action Equip(actor: Actor, item: Equipment) {
     requires: true;
-    default: [ assert Equipped(actor, item); ];
+    effects: [ assert Equipped(actor, item); ];
   };
   def action Unequip(actor: Actor, item: Equipment) {
     requires: true;
-    default: [ item.equipped_by := null; ];
+    effects: [ item.equipped_by := null; ];
   };
 }
 
@@ -118,17 +118,17 @@ def relation IsPlayer(actor: Actor) {}
 
 def action Name(actor: Actor? = null, target: Presentable) {
   requires: true;
-  default: [ emit { text: target.name }; ];
+  effects: [ emit { text: target.name }; ];
 }
 
 def action Examine(actor: Actor? = null, target: Presentable) {
   requires: (actor = null | CanSee(actor, target));
-  default: [ emit { text: target.description }; ];
+  effects: [ emit { text: target.description }; ];
 }
 
 def action Enter(actor: Actor, destination: Location) {
   requires: true;
-  default: [ assert At(actor, destination); ];
+  effects: [ assert At(actor, destination); ];
 }
 
 def kind Thing: Presentable;

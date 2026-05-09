@@ -204,7 +204,7 @@ export interface ActionDefSpec {
   id: string;
   parameters: ParameterDefSpec[];
   requires?: Expression;
-  defaultEffects?: Effect[];
+  effects?: Effect[];
 }
 
 export interface KindDefSpec {

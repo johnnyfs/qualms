@@ -1330,12 +1330,12 @@ class QualmsParser extends EmbeddedActionsParser {
   );
 
   /**
-   * Action body: `{ (requires: Expression | default: [EffectList]) (";" …)* ";"? }`.
+   * Action body: `{ (requires: Expression | effects: [EffectList]) (";" …)* ";"? }`.
    */
   private defActionBody = this.RULE(
     "defActionBody",
     (): Omit<ActionDefSpec, "id" | "parameters"> => {
-      const out: { requires?: Expression; defaultEffects?: Effect[] } = {};
+      const out: { requires?: Expression; effects?: Effect[] } = {};
       this.CONSUME(LBrace);
       this.OPTION(() => {
         this.SUBRULE(this.actionClause, { ARGS: [out] });
@@ -1348,22 +1348,22 @@ class QualmsParser extends EmbeddedActionsParser {
       this.CONSUME(RBrace);
       const ret: Omit<ActionDefSpec, "id" | "parameters"> = {};
       if (out.requires !== undefined) ret.requires = out.requires;
-      if (out.defaultEffects !== undefined) ret.defaultEffects = out.defaultEffects;
+      if (out.effects !== undefined) ret.effects = out.effects;
       return ret;
     },
   );
 
   private actionClause = this.RULE(
     "actionClause",
-    (out: { requires?: Expression; defaultEffects?: Effect[] }): void => {
+    (out: { requires?: Expression; effects?: Effect[] }): void => {
       const key = this.CONSUME(Identifier).image;
       this.CONSUME(Colon);
       if (key === "requires") {
         const expr = this.SUBRULE(this.expression);
         if (out) out.requires = expr;
-      } else if (key === "default") {
+      } else if (key === "effects") {
         const effects = this.SUBRULE(this.effectList);
-        if (out) out.defaultEffects = effects;
+        if (out) out.effects = effects;
       } else {
         this.SUBRULE(this.value);
       }

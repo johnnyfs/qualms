@@ -108,8 +108,8 @@ export function emitAction(a: ActionDefinition): string {
   if (a.requires !== undefined && a.requires !== true) {
     clauses.push(`requires: ${emitExpression(a.requires as Expression)}`);
   }
-  if (a.defaultEffects.length > 0) {
-    clauses.push(`default: [ ${a.defaultEffects.map(emitEffectSpec).join("; ")}; ]`);
+  if (a.effects.length > 0) {
+    clauses.push(`effects: [ ${a.effects.map(emitEffectSpec).join("; ")}; ]`);
   }
   const params = a.parameters.map(emitParameter).join(", ");
   return `action ${a.id}(${params}) ${formatBody(clauses)}`;

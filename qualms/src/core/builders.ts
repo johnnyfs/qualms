@@ -97,7 +97,7 @@ export function action(
   parameters: readonly ParameterDefinition[],
   options: {
     requires?: PredicateSpec;
-    defaultEffects?: readonly EffectSpec[];
+    effects?: readonly EffectSpec[];
   } = {},
 ): ActionDefinition {
   return {
@@ -105,7 +105,7 @@ export function action(
     module,
     parameters,
     requires: options.requires ?? true,
-    defaultEffects: options.defaultEffects ?? [],
+    effects: options.effects ?? [],
   };
 }
 
