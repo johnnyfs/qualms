@@ -1,5 +1,11 @@
-# Core prelude (DSL v2). Differences from the legacy YAML form are recorded
-# in qualms/MIGRATION.md:
+# Core prelude (DSL v2).
+#
+# Type convention:
+#   - lowercase identifiers (str, int, bool) are primitives.
+#   - PascalCase identifiers (Location, Actor, Item) are entity-references.
+#   - Nullable suffix `?` (e.g. `Location?`) for optional entity refs.
+#
+# Differences from the legacy YAML form are recorded in qualms/MIGRATION.md:
 #   + IsPlayer(actor) top-level relation — universal "who is the player".
 #   + Item kind (Presentable + Relocatable) — near-universal authoring need.
 #   - SequenceComplete relation removed — orphaned legacy memory mechanic.
@@ -18,51 +24,51 @@ def trait Presentable {
 def trait Actor {}
 
 def trait Location {
-  def relation Path(source: ref<Location>, target: ref<Location>) {};
+  def relation Path(source: Location, target: Location) {};
 }
 
 def trait Relocatable {
-  location: ref<Location>? = null;
-  def relation At(subject: ref<Relocatable>, location: ref<Location>) {
+  location: Location? = null;
+  def relation At(subject: Relocatable, location: Location) {
     get: ?- subject.Relocatable.location = location;
     set: [ subject.Relocatable.location := location; ];
   };
-  def action Move(actor: ref<Actor>? = null, subject: ref<Relocatable>, destination: ref<Location>) {
+  def action Move(actor: Actor? = null, subject: Relocatable, destination: Location) {
     requires: ?- true;
     default: [ assert At(subject, destination); ];
   };
 }
 
 def trait Scope {
-  def relation CanTouch(actor: ref<Actor>, target: ref<Relocatable>) {
+  def relation CanTouch(actor: Actor, target: Relocatable) {
     get: ?- ((actor : Relocatable & target.Relocatable.location = actor.Relocatable.location)
             | CarriedBy(actor, target));
   };
-  def relation CanSee(actor: ref<Actor>, target: ref<Relocatable>) {
+  def relation CanSee(actor: Actor, target: Relocatable) {
     get: ?- CanTouch(actor, target);
   };
 }
 
 def trait Container {
-  def relation Contains(container: ref<Container>, item: ref<Relocatable>) {
+  def relation Contains(container: Container, item: Relocatable) {
     get: ?- At(item, container);
     set: [ assert At(item, container); ];
   };
 }
 
 def trait Portable {
-  def action Take(actor: ref<Actor>, item: ref<Portable>) {
+  def action Take(actor: Actor, item: Portable) {
     requires: ?- CanTouch(actor, item);
     default: [ assert CarriedBy(actor, item); ];
   };
-  def action Drop(actor: ref<Actor>, item: ref<Portable>, destination: ref<Location>) {
+  def action Drop(actor: Actor, item: Portable, destination: Location) {
     requires: ?- true;
     default: [ assert At(item, destination); ];
   };
 }
 
 def trait Usable {
-  def action Use(actor: ref<Actor>, source: ref<Usable>, target: ref? = null) {
+  def action Use(actor: Actor, source: Usable, target: Entity? = null) {
     requires: ?- CarriedBy(actor, source);
     default: [ emit { text: "Nothing happens." }; ];
   };
@@ -70,57 +76,57 @@ def trait Usable {
 
 def trait Equipment {
   slot: str = "";
-  equipped_by: ref<Actor>? = null;
-  def relation Equipped(actor: ref<Actor>, item: ref<Equipment>) {
+  equipped_by: Actor? = null;
+  def relation Equipped(actor: Actor, item: Equipment) {
     get: ?- item.Equipment.equipped_by = actor;
     set: [ item.Equipment.equipped_by := actor; ];
   };
-  def action Equip(actor: ref<Actor>, item: ref<Equipment>) {
+  def action Equip(actor: Actor, item: Equipment) {
     requires: ?- true;
     default: [ assert Equipped(actor, item); ];
   };
-  def action Unequip(actor: ref<Actor>, item: ref<Equipment>) {
+  def action Unequip(actor: Actor, item: Equipment) {
     requires: ?- true;
     default: [ item.Equipment.equipped_by := null; ];
   };
 }
 
 def trait Ownable {
-  owner: ref<Actor>? = null;
-  def relation OwnedBy(item: ref<Ownable>, actor: ref<Actor>) {
+  owner: Actor? = null;
+  def relation OwnedBy(item: Ownable, actor: Actor) {
     get: ?- item.Ownable.owner = actor;
     set: [ item.Ownable.owner := actor; ];
   };
 }
 
-def relation CarriedBy(actor: ref<Actor>, item: ref<Relocatable>) {
+def relation CarriedBy(actor: Actor, item: Relocatable) {
   get: ?- At(item, actor);
   set: [ assert At(item, actor); ];
 }
 
-def relation Named(entity: ref<Presentable>, name: str) {
+def relation Named(entity: Presentable, name: str) {
   get: ?- entity.Presentable.name = name;
 }
 
-def relation Visible(entity: ref) {
+def relation Visible(entity: Entity) {
   get: ?- true;
 }
 
 # Universal "who is the player" entry point. Stories assert IsPlayer(<actor-id>)
 # at start; the player view and any player-anchored rules read from this.
-def relation IsPlayer(actor: ref<Actor>) {}
+def relation IsPlayer(actor: Actor) {}
 
-def action Name(actor: ref<Actor>? = null, target: ref<Presentable>) {
+def action Name(actor: Actor? = null, target: Presentable) {
   requires: ?- true;
   default: [ emit { text: target.Presentable.name }; ];
 }
 
-def action Examine(actor: ref<Actor>? = null, target: ref<Presentable>) {
+def action Examine(actor: Actor? = null, target: Presentable) {
   requires: ?- (actor = null | CanSee(actor, target));
   default: [ emit { text: target.Presentable.description }; ];
 }
 
-def action Enter(actor: ref<Actor>, destination: ref<Location>) {
+def action Enter(actor: Actor, destination: Location) {
   requires: ?- true;
   default: [ assert At(actor, destination); ];
 }
