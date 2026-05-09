@@ -30,8 +30,8 @@ def trait Location {
 def trait Relocatable {
   location: Location? = null;
   def relation At(subject: Relocatable, location: Location) {
-    get: ?- subject.Relocatable.location = location;
-    set: [ subject.Relocatable.location := location; ];
+    get: ?- subject.location = location;
+    set: [ subject.location := location; ];
   };
   def action Move(actor: Actor? = null, subject: Relocatable, destination: Location) {
     requires: ?- true;
@@ -41,7 +41,7 @@ def trait Relocatable {
 
 def trait Scope {
   def relation CanTouch(actor: Actor, target: Relocatable) {
-    get: ?- ((actor : Relocatable & target.Relocatable.location = actor.Relocatable.location)
+    get: ?- ((actor : Relocatable & target.location = actor.Relocatable.location)
             | CarriedBy(actor, target));
   };
   def relation CanSee(actor: Actor, target: Relocatable) {
@@ -78,8 +78,8 @@ def trait Equipment {
   slot: str = "";
   equipped_by: Actor? = null;
   def relation Equipped(actor: Actor, item: Equipment) {
-    get: ?- item.Equipment.equipped_by = actor;
-    set: [ item.Equipment.equipped_by := actor; ];
+    get: ?- item.equipped_by = actor;
+    set: [ item.equipped_by := actor; ];
   };
   def action Equip(actor: Actor, item: Equipment) {
     requires: ?- true;
@@ -87,15 +87,15 @@ def trait Equipment {
   };
   def action Unequip(actor: Actor, item: Equipment) {
     requires: ?- true;
-    default: [ item.Equipment.equipped_by := null; ];
+    default: [ item.equipped_by := null; ];
   };
 }
 
 def trait Ownable {
   owner: Actor? = null;
   def relation OwnedBy(item: Ownable, actor: Actor) {
-    get: ?- item.Ownable.owner = actor;
-    set: [ item.Ownable.owner := actor; ];
+    get: ?- item.owner = actor;
+    set: [ item.owner := actor; ];
   };
 }
 
@@ -105,7 +105,7 @@ def relation CarriedBy(actor: Actor, item: Relocatable) {
 }
 
 def relation Named(entity: Presentable, name: str) {
-  get: ?- entity.Presentable.name = name;
+  get: ?- entity.name = name;
 }
 
 def relation Visible(entity: Entity) {
@@ -118,12 +118,12 @@ def relation IsPlayer(actor: Actor) {}
 
 def action Name(actor: Actor? = null, target: Presentable) {
   requires: ?- true;
-  default: [ emit { text: target.Presentable.name }; ];
+  default: [ emit { text: target.name }; ];
 }
 
 def action Examine(actor: Actor? = null, target: Presentable) {
   requires: ?- (actor = null | CanSee(actor, target));
-  default: [ emit { text: target.Presentable.description }; ];
+  default: [ emit { text: target.description }; ];
 }
 
 def action Enter(actor: Actor, destination: Location) {
