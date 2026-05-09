@@ -214,6 +214,19 @@ export interface KindDefSpec {
   rules?: RuleDefSpec[];
 }
 
+/**
+ * Trait grant on an entity (v2): attach a trait beyond what the kind provides,
+ * with optional field overrides. v1's `parameters` are dropped — entity-level
+ * trait params were unused in practice and complicate the v2 grammar.
+ *
+ * Defined in 3a; wired through in 3b together with the parser rewrite that
+ * narrows `EntityDefSpec.traits` and `KindDefSpec.traits` to the v2 shapes.
+ */
+export interface TraitGrantSpec {
+  id: string;
+  fields?: Record<string, unknown>;
+}
+
 export interface ActionPatternSpec {
   action: string;
   args: Record<string, unknown>;

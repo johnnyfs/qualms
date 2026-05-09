@@ -228,7 +228,9 @@ const QualmsLexer = new Lexer(allTokens);
 export type Statement =
   | { kind: "query"; query: Query }
   | { kind: "named_predicate"; predicate: NamedPredicate }
-  | { kind: "mutation"; mutation: MutationStatement };
+  | { kind: "mutation"; mutation: MutationStatement }
+  | { kind: "exists"; body: Expression }
+  | { kind: "show"; targetKind: UndefTargetKind; name: string };
 
 export class ParseError extends Error {
   constructor(message: string, public readonly span?: { startOffset?: number; endOffset?: number; line?: number; column?: number }) {

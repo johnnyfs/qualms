@@ -18,6 +18,7 @@ export type {
   Term,
   TraitAttachmentSpec,
   TraitDefSpec,
+  TraitGrantSpec,
   TraitFilter,
   UndefTargetKind,
   Value,
