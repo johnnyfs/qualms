@@ -35,17 +35,45 @@ At load, the live world is `prelude ⊕ game ⊕ session` for definitions plus `
 
 The "module" framing replaces the prior "layer" terminology — same concept, better word for what the architecture is heading toward (named, importable units of definition). Generalization to arbitrary named modules with `using` imports is deferred.
 
-### One grammar, multiple roles
+### One grammar, three surfaces
 
-A single DSL serves five purposes:
+A single DSL is the canonical authoring surface for all three:
 
-1. **Queries** — `?- ∃ k. uses(k, Equipment)`
-2. **Derived relation bodies** — `CanTouch(a, t) :- (a : Relocatable ∧ a.location = t.location) ∨ CarriedBy(a, t) ∨ Aboard(a, t.location)`
-3. **Rule guards** — `requires : ∃ x. CarriedBy(actor, x)`
-4. **Rule effects** — `effects : assert Visited(actor, destination)`
-5. **Agent mutations** — `mutate(tx_id, "def entity test : Item { name = 'Test' }")`
+1. **Module files** (`.qualms`) — sequence of `def` statements that load into a `GameDefinition` at the file's module attribution.
+2. **Mutations** through the MCP `mutate` tool — `def`/`undef`/`assert`/`retract`/`:=` statements applied transactionally.
+3. **Queries** through the MCP `query` tool — `query { vars | φ };`, `exists { φ };`, `show <kind> <name>;`, plus named-predicate definitions for inlinable subpatterns.
 
-The grammar combines first-order logic, Cypher-style path patterns over binary relations, and Datalog-style named rules. Both ASCII and unicode mathematical operators are supported and produce the same AST. Statement-level heads (`assert`, `retract`, `:=`, `def`, `undef`) distinguish queries from mutations; expression bodies are uniform.
+The grammar combines first-order logic, Cypher-style path patterns over binary relations, and Datalog-style named rules. Both ASCII and unicode mathematical operators are supported and produce the same AST. Statement-level verbs (`def`, `undef`, `query`, `exists`, `show`, plus `assert`/`retract`/`:=` as standalone or effect-list members) distinguish read from write at the wire level. Body conventions are uniform: brace-delimited, `;`-separated clauses; expression bodies in `?- φ` form; effect lists in `[ effect; effect; ]` form.
+
+DSL examples:
+
+```
+# Trait with field declarations and a nested derived relation
+def trait Relocatable {
+  location: ref<Location>? = null;
+  def relation At(subject: ref<Relocatable>, location: ref<Location>) {
+    get: ?- subject.Relocatable.location = location;
+    set: [ subject.Relocatable.location := location; ];
+  };
+};
+
+# Kind with colon-separated trait list and field overrides
+def kind Foe: Combatant, Presentable {
+  Presentable.name = "Foe";
+};
+
+# Entity with kind reference, qualified field overrides, metadata
+def entity grunt: Foe {
+  Combatant.hp = 5;
+  Presentable.name = "Grunt";
+  metadata.spawned = true;
+};
+
+# Read surface
+query { e | e : Entity & instance_of(e, "Foe") };
+exists { ∃ r : Relation. r.id = "IsPlayer" };
+show trait Presentable;
+```
 
 ### Structural objects in the query namespace
 
@@ -57,20 +85,22 @@ There is no CLI in this milestone. The agent-facing surface is a stateful MCP se
 
 ## What's preserved
 
-- **Story YAML format**, with deliberate prelude additions and removals:
-  - **Added**: `IsPlayer(actor)` top-level relation (universal "who is the player" entry point) and the `Item` kind (Presentable + Relocatable).
-  - **Removed**: `Visited` relation and the `core-memory` rulebook — story-level memory is a story concern, not a universal primitive. `Aboard` relation absorbed into `At` + `CarriedBy` in `CanTouch`'s derivation. `SequenceComplete` removed as orphaned.
-  - **Collapsed**: `persistence: current | remembered | both` is gone. A relation is **stored** (no `get` body) or **derived** (has `get`). The single `WorldState.relations` Map replaces the prior `currentRelations` / `rememberedRelations` split.
-- **Prelude semantics for traits, relations, actions, rules, kinds.** The grammar is new; the model is the same.
+- **Prelude semantics** for traits, relations, actions, rules, kinds, rulebooks, entities. The grammar and file format are new (DSL v2, `.qualms`); the model is the same.
 - **Coauthor concept.** Deferred to Tier 2; not implemented in this milestone.
-- **`stories/`.** Untouched in this milestone. Story content migration follows once the engine and MCP surface stabilize.
+- **`stories/`.** Untouched in this milestone. Story content migration follows once the engine and MCP surface stabilize. Stories migrate by hand from `.qualms.yaml` to `.qualms` when they're touched.
+
+### Prelude additions and removals (cumulative across milestones)
+
+- **Added**: `IsPlayer(actor)` top-level relation (universal "who is the player" entry point) and the `Item` kind (Presentable + Relocatable).
+- **Removed**: `Visited` relation and the `core-memory` rulebook — story-level memory is a story concern, not a universal primitive. `Aboard` relation absorbed into `At` + `CarriedBy` in `CanTouch`'s derivation. `SequenceComplete` removed as orphaned.
+- **Collapsed**: `persistence: current | remembered | both` is gone. A relation is **stored** (no `get` body) or **derived** (has `get`). The single `WorldState.relations` Map replaces the prior `currentRelations` / `rememberedRelations` split.
 
 ## What's changing
 
 - **Engine reimplemented in TypeScript** (Node 20+, ESM, strict mode).
 - **Repo layout:** `deprecated/qualms/`, `deprecated/curses/` for reference; new `qualms/` (TypeScript engine + prelude) and `mcp/` (MCP server) at the repo root. `godot/` ignored.
-- **Query/mutation surface:** new DSL with FOL + Cypher path patterns + Datalog-style named rules; structural meta-types in the same query namespace; ASCII/unicode parity.
-- **Module-aware structural model** with `begin`/`commit`/`rollback`/`mutate`/`diff` transactions (shipped in milestone 2); `save` writes player progress separately from structural commits (deferred). `begin({ module: "game", targetPath })` opens a transaction whose `commit` writes the game module slice back to the target YAML on disk; `begin({ module: "session" })` finalizes the session overlay in memory until `save` lands. The earlier `scope: "story" | "session"` parameter is gone — transactions name their target module directly.
+- **DSL v2 is the single authoring surface.** `.qualms` files (brace-delimited, `;`-separated statements) replace `.qualms.yaml`. The mutation surface, query surface, file format, and `show` definition retrieval all share one grammar. The legacy YAML loader, emitter, and predicate translator are gone.
+- **Module-aware structural model** with `begin`/`commit`/`rollback`/`mutate`/`diff` transactions. `save` writes player progress separately from structural commits (deferred). `begin({ module: "game", targetPath })` opens a transaction whose `commit` writes the game-module slice back to a `.qualms` file on disk; `begin({ module: "session" })` finalizes the session overlay in memory until `save` lands. Module name (`prelude`/`game`/`session`) is passed directly — no `scope` parameter.
 - **Storage class collapse.** Relations have no `persistence` field; they are stored by default and derived when a `get` body is present. `WorldState` keeps a single relations Map. Story-level memory patterns (e.g. tracking visited locations) belong in story files, not the prelude.
 - **No CLI** in this milestone. Future frontend will be Ink/JS, not curses.
 - **No NOVA-specific surface anywhere.** The prelude is genuinely universal; story-specific vocabulary lives in story files.
@@ -109,7 +139,8 @@ When all eight hold, the milestone is done. Subsequent milestones add story-file
 
 - **Module.** One of {prelude, game, session}. Every definition and entity tracks the module it came from. Module attribution is preserved through merges and surfaces in `Type@module` query notation. (Was previously called "layer" — same concept, renamed in milestone 2 to set up eventual module-graph generalization.)
 - **Prelude.** Universal schema module. Defines the core traits, relations, actions, rules, kinds usable by any story. Edited only by file edit; never writable through MCP.
-- **Game.** Per-story schema additions and initial state. Lives in a `story.qualms.yaml` file. Mutations target it via `begin({ module: "game" })`; `commit` writes the slice back to disk.
+- **Game.** Per-story schema additions and initial state. Lives in a `story.qualms` file. Mutations target it via `begin({ module: "game" })`; `commit` writes the slice back to disk.
+- **Module file (`.qualms`).** A DSL v2 text file containing a sequence of `def` statements. Loaded into a `GameDefinition` at the file's module attribution via `loadDslFile` / `loadDslText`.
 - **Session.** Per-run structural overlay. Schema/entity additions invented during a player's session that affect only this run. Mutations target it via `begin({ module: "session" })`; persisted later in the save file by `save`.
 - **Session state.** The live `WorldState` — entity records, trait field values, asserted relations, facts, events, allocators. Mutated by action effects during play. Not a structural module; the runtime tier.
 - **AST.** Abstract syntax tree. The query DSL parser produces an AST; the evaluator consumes one. Tools that take "expressions" accept either AST objects (programmatic callers) or DSL strings (parser-then-eval).
@@ -124,7 +155,8 @@ When all eight hold, the milestone is done. Subsequent milestones add story-file
 - pnpm workspaces. `qualms/` and `mcp/` are separate packages sharing types.
 - vitest for tests.
 - `@modelcontextprotocol/sdk` for the MCP server.
-- Chevrotain for the query DSL parser. In-code grammar; no codegen step. Full unicode support for math operators.
+- Chevrotain for the DSL parser. In-code grammar; no codegen step. Full unicode support for math operators.
+- DSL v2 (`.qualms`) is the single authoring surface for files, mutations, queries, and definition retrieval. No alternative file format ships.
 
 ## Out-of-scope cleanup
 
