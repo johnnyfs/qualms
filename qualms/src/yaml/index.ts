@@ -9,3 +9,9 @@ export {
   translatePredicate,
   translateTerm,
 } from "./predicate.js";
+export {
+  emitDefinition,
+  emitToObject,
+  emitPredicate,
+  emitTerm,
+} from "./emitter.js";

@@ -1,13 +1,29 @@
-import { resolve } from "node:path";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { beforeEach, describe, expect, it } from "vitest";
+import { GameDefinition, yaml as yamlNs } from "@quealm/qualms";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
+
+const { loadYamlIntoDefinition } = yamlNs;
 import {
+  MutationError,
   QueryError,
+  handleBegin,
+  handleCommit,
+  handleDiff,
+  handleMutate,
   handleQuery,
   handleQuit,
+  handleRollback,
   handleStart,
 } from "../src/tools.js";
-import { SessionManager, SessionNotFoundError } from "../src/session.js";
+import {
+  SessionManager,
+  SessionNotFoundError,
+  TransactionAlreadyOpenError,
+  TransactionNotFoundError,
+} from "../src/session.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const PRELUDE_PATH = resolve(__filename, "../../../qualms/prelude/core.qualms.yaml");
@@ -138,5 +154,209 @@ describe("buildServer wiring (no transport, just registration)", () => {
     const built = buildServer();
     expect(built.server).toBeDefined();
     expect(built.manager).toBeInstanceOf(SessionManager);
+  });
+});
+
+// ──────── Mutation tools ────────
+
+describe("tool handler: __begin / __mutate / __diff / __commit / __rollback", () => {
+  let mgr: SessionManager;
+  let sessionId: string;
+  const tmpFiles: string[] = [];
+  const tmpDir = mkdtempSync(join(tmpdir(), "qualms-tools-test-"));
+
+  afterAll(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  beforeEach(() => {
+    mgr = new SessionManager();
+    sessionId = handleStart(mgr, { corePath: PRELUDE_PATH }).sessionId;
+  });
+
+  it("__begin opens a session-scope transaction", () => {
+    const out = handleBegin(mgr, { sessionId, scope: "session" });
+    expect(out.scope).toBe("session");
+    expect(out.layer).toBe("session");
+    expect(out.transactionId).toMatch(/[0-9a-f-]{8,}/);
+  });
+
+  it("__begin rejects a second open transaction in the same session", () => {
+    handleBegin(mgr, { sessionId, scope: "session" });
+    expect(() => handleBegin(mgr, { sessionId, scope: "session" })).toThrowError(
+      TransactionAlreadyOpenError,
+    );
+  });
+
+  it("__begin story scope without targetPath fails when no story files loaded", () => {
+    expect(() => handleBegin(mgr, { sessionId, scope: "story" })).toThrowError(MutationError);
+  });
+
+  it("__mutate inside a transaction lets __query see pending changes", () => {
+    const tx = handleBegin(mgr, { sessionId, scope: "session" });
+    handleMutate(mgr, {
+      sessionId,
+      transactionId: tx.transactionId,
+      expr: "def trait NewTrait {}",
+    });
+    const out = handleQuery(mgr, {
+      sessionId,
+      expr: '?- exists T : Trait. T.id = "NewTrait"',
+    });
+    expect(out.count).toBe(1);
+  });
+
+  it("__diff reports applied mutations and summary counts", () => {
+    const tx = handleBegin(mgr, { sessionId, scope: "session" });
+    handleMutate(mgr, { sessionId, transactionId: tx.transactionId, expr: "def trait A {}" });
+    handleMutate(mgr, { sessionId, transactionId: tx.transactionId, expr: "def trait B {}" });
+    const diff = handleDiff(mgr, { sessionId, transactionId: tx.transactionId });
+    expect(diff.applied.map((a) => a.kind)).toEqual(["defTrait", "defTrait"]);
+    expect(diff.summary.traits.added).toBe(2);
+    expect(diff.summary.traits.removed).toBe(0);
+  });
+
+  it("__rollback discards pending changes and clears the transaction", () => {
+    const tx = handleBegin(mgr, { sessionId, scope: "session" });
+    handleMutate(mgr, {
+      sessionId,
+      transactionId: tx.transactionId,
+      expr: "def trait Tossed {}",
+    });
+    expect(
+      handleQuery(mgr, { sessionId, expr: '?- exists T : Trait. T.id = "Tossed"' }).count,
+    ).toBe(1);
+    const out = handleRollback(mgr, { sessionId, transactionId: tx.transactionId });
+    expect(out.discarded).toBe(1);
+    expect(
+      handleQuery(mgr, { sessionId, expr: '?- exists T : Trait. T.id = "Tossed"' }).count,
+    ).toBe(0);
+    expect(mgr.get(sessionId).transaction).toBe(null);
+    // A fresh __begin works after rollback.
+    expect(handleBegin(mgr, { sessionId, scope: "session" }).transactionId).toBeDefined();
+  });
+
+  it("__commit session-scope retains changes in memory only", () => {
+    const tx = handleBegin(mgr, { sessionId, scope: "session" });
+    handleMutate(mgr, {
+      sessionId,
+      transactionId: tx.transactionId,
+      expr: "def trait Kept {}",
+    });
+    const out = handleCommit(mgr, { sessionId, transactionId: tx.transactionId });
+    expect(out.persisted).toBe(false);
+    expect(out.reason).toBe("session-save-deferred");
+    expect(out.committed).toBe(1);
+    expect(
+      handleQuery(mgr, { sessionId, expr: '?- exists T : Trait. T.id = "Kept"' }).count,
+    ).toBe(1);
+    expect(mgr.get(sessionId).transaction).toBe(null);
+  });
+
+  it("__commit story-scope writes a YAML file the loader can re-read", () => {
+    const targetPath = join(tmpDir, "scratch.qualms.yaml");
+    tmpFiles.push(targetPath);
+    const tx = handleBegin(mgr, { sessionId, scope: "story", targetPath });
+    handleMutate(mgr, {
+      sessionId,
+      transactionId: tx.transactionId,
+      expr: 'def trait Combatant { fields: { hp: { default: 10 } } }',
+    });
+    handleMutate(mgr, {
+      sessionId,
+      transactionId: tx.transactionId,
+      expr: "def kind Foe { traits: [Combatant, Presentable] }",
+    });
+    handleMutate(mgr, {
+      sessionId,
+      transactionId: tx.transactionId,
+      expr: 'def entity grunt : Foe { fields: { Presentable: { name: "Grunt" } } }',
+    });
+    const out = handleCommit(mgr, { sessionId, transactionId: tx.transactionId });
+    expect(out.persisted).toBe(true);
+    expect(out.targetPath).toBe(targetPath);
+    expect(out.committed).toBe(3);
+
+    // Read the file back and confirm the structure round-trips through the loader.
+    const yamlText = readFileSync(targetPath, "utf-8");
+    const reloaded = new GameDefinition();
+    // Pre-load the prelude so trait references on the kind resolve.
+    yamlNs.loadFileIntoDefinition(reloaded, PRELUDE_PATH, "prelude");
+    loadYamlIntoDefinition(reloaded, yamlText, { layer: "game" });
+    expect(reloaded.hasTrait("Combatant")).toBe(true);
+    expect(reloaded.hasKind("Foe")).toBe(true);
+    expect(reloaded.initialEntities.find((e) => e.id === "grunt")?.kind).toBe("Foe");
+  });
+
+  it("__mutate without an open transaction errors", () => {
+    expect(() =>
+      handleMutate(mgr, { sessionId, transactionId: "nope", expr: "def trait X {}" }),
+    ).toThrowError(TransactionNotFoundError);
+  });
+
+  it("__diff / __commit / __rollback with a wrong transaction id error", () => {
+    handleBegin(mgr, { sessionId, scope: "session" });
+    expect(() => handleDiff(mgr, { sessionId, transactionId: "wrong" })).toThrowError(
+      TransactionNotFoundError,
+    );
+    expect(() => handleCommit(mgr, { sessionId, transactionId: "wrong" })).toThrowError(
+      TransactionNotFoundError,
+    );
+    expect(() => handleRollback(mgr, { sessionId, transactionId: "wrong" })).toThrowError(
+      TransactionNotFoundError,
+    );
+  });
+
+  it("__mutate parse error surfaces as QueryError(parse)", () => {
+    const tx = handleBegin(mgr, { sessionId, scope: "session" });
+    try {
+      handleMutate(mgr, {
+        sessionId,
+        transactionId: tx.transactionId,
+        expr: "def trait", // malformed
+      });
+      expect.unreachable("expected QueryError");
+    } catch (err) {
+      expect(err).toBeInstanceOf(QueryError);
+      expect((err as QueryError).category).toBe("parse");
+    }
+  });
+
+  it("__mutate prelude-protected errors with category=prelude_protected", () => {
+    const tx = handleBegin(mgr, { sessionId, scope: "session" });
+    try {
+      handleMutate(mgr, {
+        sessionId,
+        transactionId: tx.transactionId,
+        expr: "undef trait Presentable",
+      });
+      expect.unreachable("expected MutationError");
+    } catch (err) {
+      expect(err).toBeInstanceOf(MutationError);
+      expect((err as MutationError).category).toBe("prelude_protected");
+    }
+  });
+
+  it("cross-session isolation: mutating in one session does not affect another", () => {
+    const sessionB = handleStart(mgr, { corePath: PRELUDE_PATH }).sessionId;
+    const txA = handleBegin(mgr, { sessionId, scope: "session" });
+    handleMutate(mgr, {
+      sessionId,
+      transactionId: txA.transactionId,
+      expr: "def trait OnlyA {}",
+    });
+    const inB = handleQuery(mgr, {
+      sessionId: sessionB,
+      expr: '?- exists T : Trait. T.id = "OnlyA"',
+    });
+    expect(inB.count).toBe(0);
+  });
+
+  it("__quit during an open transaction releases the session cleanly", () => {
+    const tx = handleBegin(mgr, { sessionId, scope: "session" });
+    handleMutate(mgr, { sessionId, transactionId: tx.transactionId, expr: "def trait T {}" });
+    const out = handleQuit(mgr, { sessionId });
+    expect(out.ok).toBe(true);
+    expect(mgr.has(sessionId)).toBe(false);
   });
 });

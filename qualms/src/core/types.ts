@@ -92,6 +92,22 @@ export interface Rule {
   readonly control: RuleControl;
   readonly priority: number;
   readonly order: number;
+  /**
+   * Optional rulebook membership. New `def rule R in B { … }` mutations require
+   * one; existing trait/kind-owned rules omit it. When present, the referenced
+   * rulebook id must exist (enforced by `GameDefinition.validate()`).
+   */
+  readonly rulebook?: string;
+}
+
+/**
+ * Rulebook — first-class container for grouping rules. Currently a thin shell
+ * (id + layer); future iterations may add metadata, ordering, or per-rulebook
+ * activation gates.
+ */
+export interface RulebookDefinition {
+  readonly id: string;
+  readonly layer: Layer;
 }
 
 /** Spec for attaching a trait to an entity (kinds and entity specs both contain these). */

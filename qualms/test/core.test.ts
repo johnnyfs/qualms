@@ -15,6 +15,7 @@ import {
   pattern,
   relation,
   rule,
+  rulebook,
   trait,
 } from "../src/index.js";
 
@@ -337,5 +338,139 @@ describe("rule registration", () => {
     // A trait that re-declares the same rule id silently no-ops on the second add.
     def.addRule(r);
     expect(def.rules.length).toBe(1);
+  });
+});
+
+describe("rulebook registration", () => {
+  it("adds, looks up, and reports by layer", () => {
+    const def = new GameDefinition();
+    def.addRulebook(rulebook("EveryTurn", "prelude"));
+    expect(def.hasRulebook("EveryTurn")).toBe(true);
+    expect(def.rulebook("EveryTurn").layer).toBe("prelude");
+    expect(def.rulebooksByLayer("prelude").map((r) => r.id)).toEqual(["EveryTurn"]);
+  });
+
+  it("rejects duplicate ids", () => {
+    const def = new GameDefinition();
+    def.addRulebook(rulebook("R", "prelude"));
+    expect(() => def.addRulebook(rulebook("R", "game"))).toThrowError(
+      DuplicateDefinitionError,
+    );
+  });
+
+  it("validate() rejects rule referencing missing rulebook", () => {
+    const def = new GameDefinition();
+    def.addAction(action("X", "prelude", []));
+    def.addRule(
+      rule("orphan", "prelude", "after", {
+        pattern: pattern("X"),
+        rulebook: "NoSuchBook",
+      }),
+    );
+    expect(() => def.validate()).toThrowError(/unknown rulebook/);
+  });
+
+  it("validate() passes when rulebook reference resolves", () => {
+    const def = new GameDefinition();
+    def.addAction(action("X", "prelude", []));
+    def.addRulebook(rulebook("Book", "prelude"));
+    def.addRule(
+      rule("inbook", "prelude", "after", {
+        pattern: pattern("X"),
+        rulebook: "Book",
+      }),
+    );
+    expect(() => def.validate()).not.toThrow();
+  });
+});
+
+describe("GameDefinition removers", () => {
+  it("removeTrait drops the trait and its lifted relations/actions/rules", () => {
+    const def = new GameDefinition();
+    def.addTrait(
+      trait("Relocatable", "prelude", {
+        relations: [relation("At", "prelude", [parameter("a")], { persistence: "current" })],
+        actions: [action("Move", "prelude", [parameter("a")])],
+      }),
+    );
+    expect(def.hasRelation("At")).toBe(true);
+    def.removeTrait("Relocatable");
+    expect(def.hasTrait("Relocatable")).toBe(false);
+    expect(def.hasRelation("At")).toBe(false);
+    expect(def.hasAction("Move")).toBe(false);
+  });
+
+  it("removeRelation / removeAction / removeKind", () => {
+    const def = new GameDefinition();
+    def.addRelation(relation("R", "prelude", [], { persistence: "current" }));
+    def.addAction(action("A", "prelude", []));
+    def.addKind(kind("K", "prelude"));
+    def.removeRelation("R");
+    def.removeAction("A");
+    def.removeKind("K");
+    expect(def.hasRelation("R")).toBe(false);
+    expect(def.hasAction("A")).toBe(false);
+    expect(def.hasKind("K")).toBe(false);
+  });
+
+  it("removeRulebook", () => {
+    const def = new GameDefinition();
+    def.addRulebook(rulebook("Book", "prelude"));
+    def.removeRulebook("Book");
+    expect(def.hasRulebook("Book")).toBe(false);
+  });
+
+  it("removeRule + removeInitialEntity", () => {
+    const def = new GameDefinition();
+    def.addAction(action("A", "prelude", []));
+    def.addRule(rule("r1", "prelude", "after", { pattern: pattern("A") }));
+    def.addInitialEntity(entitySpec("e1", "game"));
+    def.removeRule("r1");
+    def.removeInitialEntity("e1");
+    expect(def.hasRule("r1")).toBe(false);
+    expect(def.hasInitialEntity("e1")).toBe(false);
+  });
+
+  it("each remover throws UnknownDefinitionError on missing id", () => {
+    const def = new GameDefinition();
+    expect(() => def.removeTrait("nope")).toThrowError(UnknownDefinitionError);
+    expect(() => def.removeRelation("nope")).toThrowError(UnknownDefinitionError);
+    expect(() => def.removeAction("nope")).toThrowError(UnknownDefinitionError);
+    expect(() => def.removeKind("nope")).toThrowError(UnknownDefinitionError);
+    expect(() => def.removeRulebook("nope")).toThrowError(UnknownDefinitionError);
+    expect(() => def.removeRule("nope")).toThrowError(UnknownDefinitionError);
+    expect(() => def.removeInitialEntity("nope")).toThrowError(UnknownDefinitionError);
+  });
+});
+
+describe("GameDefinition.clone()", () => {
+  it("produces a deep copy with no shared Map refs", () => {
+    const def = new GameDefinition();
+    def.addTrait(trait("Presentable", "prelude", { fields: [field("name", { default: "" })] }));
+    def.addRelation(relation("R", "prelude", [], { persistence: "current" }));
+    def.addInitialEntity(entitySpec("e1", "game"));
+
+    const copy = def.clone();
+    // Mutate the original.
+    def.removeTrait("Presentable");
+
+    // Clone is unaffected.
+    expect(copy.hasTrait("Presentable")).toBe(true);
+    expect(copy.hasRelation("R")).toBe(true);
+    expect(copy.hasInitialEntity("e1")).toBe(true);
+    expect(def.hasTrait("Presentable")).toBe(false);
+  });
+
+  it("clones rulebooks and rule rulebook references", () => {
+    const def = new GameDefinition();
+    def.addAction(action("A", "prelude", []));
+    def.addRulebook(rulebook("Book", "prelude"));
+    def.addRule(
+      rule("r1", "prelude", "after", { pattern: pattern("A"), rulebook: "Book" }),
+    );
+    const copy = def.clone();
+    expect(copy.hasRulebook("Book")).toBe(true);
+    expect(copy.rule("r1").rulebook).toBe("Book");
+    expect(() => copy.validate()).not.toThrow();
   });
 });

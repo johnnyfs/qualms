@@ -20,6 +20,7 @@ import type {
   Layer,
   RelationDefinition,
   Rule,
+  RulebookDefinition,
   TraitDefinition,
 } from "./types.js";
 
@@ -40,15 +41,16 @@ export class UnknownDefinitionError extends Error {
 }
 
 export class GameDefinition {
-  private readonly _traits: Map<string, TraitDefinition> = new Map();
-  private readonly _relations: Map<string, RelationDefinition> = new Map();
-  private readonly _actions: Map<string, ActionDefinition> = new Map();
-  private readonly _kinds: Map<string, KindDefinition> = new Map();
-  private readonly _rules: Rule[] = [];
-  private readonly _initialEntities: EntitySpec[] = [];
-  private readonly _initialAssertions: InitialAssertion[] = [];
-  private readonly _initialFacts: InitialFact[] = [];
-  private readonly _metadata: Record<Layer, Record<string, unknown>> = {
+  private _traits: Map<string, TraitDefinition> = new Map();
+  private _relations: Map<string, RelationDefinition> = new Map();
+  private _actions: Map<string, ActionDefinition> = new Map();
+  private _kinds: Map<string, KindDefinition> = new Map();
+  private _rulebooks: Map<string, RulebookDefinition> = new Map();
+  private _rules: Rule[] = [];
+  private _initialEntities: EntitySpec[] = [];
+  private _initialAssertions: InitialAssertion[] = [];
+  private _initialFacts: InitialFact[] = [];
+  private _metadata: Record<Layer, Record<string, unknown>> = {
     prelude: {},
     game: {},
     session: {},
@@ -116,6 +118,19 @@ export class GameDefinition {
     this._rules.push(rule);
   }
 
+  addRulebook(definition: RulebookDefinition): void {
+    const existing = this._rulebooks.get(definition.id);
+    if (existing) {
+      throw new DuplicateDefinitionError(
+        "rulebook",
+        definition.id,
+        existing.layer,
+        definition.layer,
+      );
+    }
+    this._rulebooks.set(definition.id, definition);
+  }
+
   addInitialEntity(spec: EntitySpec): void {
     if (this._initialEntities.some((e) => e.id === spec.id)) {
       throw new DuplicateDefinitionError(
@@ -166,6 +181,24 @@ export class GameDefinition {
     return k;
   }
 
+  rulebook(id: string): RulebookDefinition {
+    const rb = this._rulebooks.get(id);
+    if (!rb) throw new UnknownDefinitionError("rulebook", id);
+    return rb;
+  }
+
+  rule(id: string): Rule {
+    const r = this._rules.find((r) => r.id === id);
+    if (!r) throw new UnknownDefinitionError("rule", id);
+    return r;
+  }
+
+  initialEntity(id: string): EntitySpec {
+    const e = this._initialEntities.find((e) => e.id === id);
+    if (!e) throw new UnknownDefinitionError("initial entity", id);
+    return e;
+  }
+
   hasTrait(id: string): boolean {
     return this._traits.has(id);
   }
@@ -177,6 +210,15 @@ export class GameDefinition {
   }
   hasKind(id: string): boolean {
     return this._kinds.has(id);
+  }
+  hasRulebook(id: string): boolean {
+    return this._rulebooks.has(id);
+  }
+  hasRule(id: string): boolean {
+    return this._rules.some((r) => r.id === id);
+  }
+  hasInitialEntity(id: string): boolean {
+    return this._initialEntities.some((e) => e.id === id);
   }
 
   get traits(): ReadonlyMap<string, TraitDefinition> {
@@ -190,6 +232,9 @@ export class GameDefinition {
   }
   get kinds(): ReadonlyMap<string, KindDefinition> {
     return this._kinds;
+  }
+  get rulebooks(): ReadonlyMap<string, RulebookDefinition> {
+    return this._rulebooks;
   }
   get rules(): readonly Rule[] {
     return this._rules;
@@ -221,6 +266,9 @@ export class GameDefinition {
   kindsByLayer(layer: Layer): KindDefinition[] {
     return [...this._kinds.values()].filter((k) => k.layer === layer);
   }
+  rulebooksByLayer(layer: Layer): RulebookDefinition[] {
+    return [...this._rulebooks.values()].filter((rb) => rb.layer === layer);
+  }
   rulesByLayer(layer: Layer): Rule[] {
     return this._rules.filter((r) => r.layer === layer);
   }
@@ -232,6 +280,94 @@ export class GameDefinition {
   }
   initialFactsByLayer(layer: Layer): InitialFact[] {
     return this._initialFacts.filter((f) => f.layer === layer);
+  }
+
+  // ──────── Removers (for `undef` mutations) ────────
+
+  removeTrait(id: string): TraitDefinition {
+    const t = this._traits.get(id);
+    if (!t) throw new UnknownDefinitionError("trait", id);
+    this._traits.delete(id);
+    // Lifted relations/actions/rules came in via addTrait — drop them too.
+    for (const r of t.relations) this._relations.delete(r.id);
+    for (const a of t.actions) this._actions.delete(a.id);
+    for (const rl of t.rules) {
+      const idx = this._rules.findIndex((x) => x.id === rl.id);
+      if (idx >= 0) this._rules.splice(idx, 1);
+    }
+    return t;
+  }
+
+  removeRelation(id: string): RelationDefinition {
+    const r = this._relations.get(id);
+    if (!r) throw new UnknownDefinitionError("relation", id);
+    this._relations.delete(id);
+    return r;
+  }
+
+  removeAction(id: string): ActionDefinition {
+    const a = this._actions.get(id);
+    if (!a) throw new UnknownDefinitionError("action", id);
+    this._actions.delete(id);
+    return a;
+  }
+
+  removeKind(id: string): KindDefinition {
+    const k = this._kinds.get(id);
+    if (!k) throw new UnknownDefinitionError("kind", id);
+    this._kinds.delete(id);
+    return k;
+  }
+
+  removeRulebook(id: string): RulebookDefinition {
+    const rb = this._rulebooks.get(id);
+    if (!rb) throw new UnknownDefinitionError("rulebook", id);
+    this._rulebooks.delete(id);
+    return rb;
+  }
+
+  removeRule(id: string): Rule {
+    const idx = this._rules.findIndex((r) => r.id === id);
+    if (idx < 0) throw new UnknownDefinitionError("rule", id);
+    return this._rules.splice(idx, 1)[0]!;
+  }
+
+  removeInitialEntity(id: string): EntitySpec {
+    const idx = this._initialEntities.findIndex((e) => e.id === id);
+    if (idx < 0) throw new UnknownDefinitionError("initial entity", id);
+    return this._initialEntities.splice(idx, 1)[0]!;
+  }
+
+  // ──────── Snapshot / clone (for transactional rollback) ────────
+
+  /**
+   * Deep-clone a GameDefinition for transaction snapshots.
+   *
+   * NOTE: this is a provisional implementation for the mutation-tools
+   * milestone. It scales with world size, not transaction size, and forecloses
+   * parallel transactions across scopes (only one mutable live copy at a time).
+   * The intended endpoint is a functional amend layer where the transaction
+   * holds a reference to the base def + a delta (added objects, modified
+   * copies, tombstones) and reads merge the layers on the fly. Replace this
+   * `clone()` and the matching `WorldState.clone()` together when that lands.
+   */
+  clone(): GameDefinition {
+    const out = new GameDefinition();
+    for (const [id, t] of this._traits) out._traits.set(id, structuredClone(t));
+    for (const [id, r] of this._relations) out._relations.set(id, structuredClone(r));
+    for (const [id, a] of this._actions) out._actions.set(id, structuredClone(a));
+    for (const [id, k] of this._kinds) out._kinds.set(id, structuredClone(k));
+    for (const [id, rb] of this._rulebooks) out._rulebooks.set(id, structuredClone(rb));
+    out._rules = this._rules.map((r) => structuredClone(r));
+    out._initialEntities = this._initialEntities.map((e) => structuredClone(e));
+    out._initialAssertions = this._initialAssertions.map((a) => structuredClone(a));
+    out._initialFacts = this._initialFacts.map((f) => structuredClone(f));
+    out._metadata = {
+      prelude: structuredClone(this._metadata.prelude),
+      game: structuredClone(this._metadata.game),
+      session: structuredClone(this._metadata.session),
+    };
+    return out;
   }
 
   // ──────── Validation ────────
@@ -263,6 +399,11 @@ export class GameDefinition {
     for (const a of this._initialAssertions) {
       if (!this._relations.has(a.relation)) {
         throw new Error(`initial assertion references unknown relation '${a.relation}'`);
+      }
+    }
+    for (const r of this._rules) {
+      if (r.rulebook !== undefined && !this._rulebooks.has(r.rulebook)) {
+        throw new Error(`rule '${r.id}' references unknown rulebook '${r.rulebook}'`);
       }
     }
   }

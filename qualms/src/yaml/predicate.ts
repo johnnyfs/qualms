@@ -8,6 +8,7 @@
  * engine consumes them in a later step.
  */
 
+import type { Layer } from "../core/types.js";
 import type { Expression, Term } from "../query/ast.js";
 
 export class PredicateTranslateError extends Error {
@@ -95,7 +96,71 @@ export function translatePredicate(node: unknown, path = "predicate"): Expressio
       return {
         type: "traitOf",
         entity: translateTerm(r["entity"], `${path}.has_trait.entity`),
-        filter: { name: r["trait"] },
+        filter: {
+          name: r["trait"],
+          ...(typeof r["layer"] === "string" ? { layer: r["layer"] as Layer } : {}),
+        },
+      };
+    }
+    case "exists":
+    case "forall": {
+      const r = arg as Record<string, unknown>;
+      if (typeof r["variable"] !== "string") {
+        throw new PredicateTranslateError(`${key}.variable must be a string`, path);
+      }
+      return {
+        type: key,
+        variable: r["variable"],
+        ...(typeof r["trait"] === "string" ? { traitFilter: { name: r["trait"] } } : {}),
+        body: translatePredicate(r["body"], `${path}.${key}.body`),
+      };
+    }
+    case "regex": {
+      const r = arg as Record<string, unknown>;
+      if (typeof r["pattern"] !== "string") {
+        throw new PredicateTranslateError("regex.pattern must be a string", path);
+      }
+      return {
+        type: "regex",
+        subject: translateTerm(r["subject"], `${path}.regex.subject`),
+        pattern: r["pattern"],
+        ...(typeof r["flags"] === "string" ? { flags: r["flags"] } : {}),
+      };
+    }
+    case "like": {
+      const r = arg as Record<string, unknown>;
+      if (typeof r["pattern"] !== "string") {
+        throw new PredicateTranslateError("like.pattern must be a string", path);
+      }
+      return {
+        type: "like",
+        subject: translateTerm(r["subject"], `${path}.like.subject`),
+        pattern: r["pattern"],
+      };
+    }
+    case "path": {
+      const r = arg as Record<string, unknown>;
+      const relations = ensureArray(r["relations"], `${path}.path.relations`);
+      const direction = r["direction"];
+      if (direction !== "forward" && direction !== "backward" && direction !== "symmetric") {
+        throw new PredicateTranslateError("path.direction invalid", path);
+      }
+      const quantifier = r["quantifier"];
+      if (quantifier !== "1" && quantifier !== "*" && quantifier !== "+") {
+        throw new PredicateTranslateError("path.quantifier invalid", path);
+      }
+      return {
+        type: "path",
+        from: translateTerm(r["from"], `${path}.path.from`),
+        to: translateTerm(r["to"], `${path}.path.to`),
+        relations: relations.map((rel, i) => {
+          if (typeof rel !== "string") {
+            throw new PredicateTranslateError(`path.relations[${i}] must be a string`, path);
+          }
+          return rel;
+        }),
+        direction,
+        quantifier,
       };
     }
   }

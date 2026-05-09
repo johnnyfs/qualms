@@ -163,6 +163,31 @@ export class WorldState {
     return `${prefix}-${next}`;
   }
 
+  // ──────── Snapshot / clone (for transactional rollback) ────────
+
+  /**
+   * Deep-clone the WorldState for transaction snapshots. The caller must pass
+   * the corresponding cloned `GameDefinition` so the copy holds a consistent ref.
+   *
+   * NOTE: this is a provisional implementation for the mutation-tools
+   * milestone. Cloning scales with world size, not transaction size, and
+   * forecloses parallel transactions across scopes. The intended endpoint is a
+   * functional amend layer (base ref + delta merged on read). Replace this
+   * `clone()` and the matching `GameDefinition.clone()` together when that lands.
+   */
+  clone(definition: GameDefinition): WorldState {
+    const out = new WorldState(definition);
+    for (const [id, e] of this.entities) {
+      out.entities.set(id, structuredClone(e));
+    }
+    for (const [k, v] of this.currentRelations) out.currentRelations.set(k, v);
+    for (const [k, v] of this.rememberedRelations) out.rememberedRelations.set(k, v);
+    for (const [k, v] of this.facts) out.facts.set(k, v);
+    out.events.push(...this.events.map((e) => structuredClone(e)));
+    for (const [k, v] of this.allocators) out.allocators.set(k, v);
+    return out;
+  }
+
   // ──────── Internal ────────
 
   private relationStore(
@@ -188,6 +213,47 @@ export class WorldState {
     if (persistence === "both") return [this.currentRelations, this.rememberedRelations];
     throw new Error(`unknown persistence '${String(persistence)}'`);
   }
+}
+
+/**
+ * Resolve a field target on an entity to (traitId, fieldId). Used by both the
+ * query evaluator (for field-access reads) and the mutation executor (for `:=`
+ * writes). Validates: entity exists, trait is on the entity, field exists on
+ * the trait. Throws on ambiguity (multiple traits define the same field id).
+ *
+ * Returns `null` if the entity doesn't exist (caller can fall back to meta-field
+ * resolution against structural objects).
+ */
+export function resolveFieldTarget(
+  state: WorldState,
+  entityId: string,
+  fieldId: string,
+  traitId?: string,
+): { traitId: string; fieldId: string } | null {
+  if (!state.hasEntity(entityId)) return null;
+  if (traitId !== undefined) {
+    const def = state.definition;
+    if (!def.hasTrait(traitId)) {
+      throw new Error(`unknown trait '${traitId}' on entity '${entityId}'`);
+    }
+    if (!def.trait(traitId).fields.some((f) => f.id === fieldId)) {
+      throw new Error(`trait '${traitId}' has no field '${fieldId}'`);
+    }
+    return { traitId, fieldId };
+  }
+  const entity = state.entity(entityId);
+  const matches: string[] = [];
+  for (const tId of Object.keys(entity.traits)) {
+    const traitDef = state.definition.trait(tId);
+    if (traitDef.fields.some((f) => f.id === fieldId)) matches.push(tId);
+  }
+  if (matches.length === 0) return null;
+  if (matches.length > 1) {
+    throw new Error(
+      `ambiguous field '${fieldId}' on '${entityId}': defined by traits ${matches.join(", ")} — qualify with .Trait.${fieldId}`,
+    );
+  }
+  return { traitId: matches[0]!, fieldId };
 }
 
 // ──────── Builders ────────

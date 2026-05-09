@@ -48,7 +48,7 @@ async function startMissingCoreClient(): Promise<{ client: Client; close: () => 
 
 async function start(client: Client): Promise<string> {
   const r = (await client.callTool({
-    name: "__start",
+    name: "start",
     arguments: { corePath: PRELUDE_PATH },
   })) as ToolResult;
   expect(r.isError).not.toBe(true);
@@ -62,7 +62,7 @@ async function query(
   expr: string,
 ): Promise<ToolResult> {
   return (await client.callTool({
-    name: "__query",
+    name: "query",
     arguments: { sessionId, expr },
   })) as ToolResult;
 }
@@ -79,10 +79,19 @@ describe("MCP server: tool discovery", () => {
     await close();
   });
 
-  it("lists __start, __quit, __query", async () => {
+  it("lists the full tool set including mutation tools", async () => {
     const tools = await client.listTools();
     const names = tools.tools.map((t) => t.name).sort();
-    expect(names).toEqual(["__query", "__quit", "__start"]);
+    expect(names).toEqual([
+      "begin",
+      "commit",
+      "diff",
+      "mutate",
+      "query",
+      "quit",
+      "rollback",
+      "start",
+    ]);
   });
 });
 
@@ -100,7 +109,7 @@ describe("MCP server: lifecycle", () => {
 
   it("__start with valid core succeeds and reports counts", async () => {
     const r = (await client.callTool({
-      name: "__start",
+      name: "start",
       arguments: { corePath: PRELUDE_PATH },
     })) as ToolResult;
     expect(r.isError).not.toBe(true);
@@ -115,7 +124,7 @@ describe("MCP server: lifecycle", () => {
 
   it("__start with missing core returns isError", async () => {
     const r = (await client.callTool({
-      name: "__start",
+      name: "start",
       arguments: { corePath: "/totally/does/not/exist.yaml" },
     })) as ToolResult;
     expect(r.isError).toBe(true);
@@ -126,12 +135,12 @@ describe("MCP server: lifecycle", () => {
   it("__quit with valid id returns ok=true; quit on dead id returns ok=false", async () => {
     const sessionId = await start(client);
     const r1 = (await client.callTool({
-      name: "__quit",
+      name: "quit",
       arguments: { sessionId },
     })) as ToolResult;
     expect((r1.structuredContent as { ok: boolean }).ok).toBe(true);
     const r2 = (await client.callTool({
-      name: "__quit",
+      name: "quit",
       arguments: { sessionId },
     })) as ToolResult;
     expect((r2.structuredContent as { ok: boolean }).ok).toBe(false);
@@ -139,7 +148,7 @@ describe("MCP server: lifecycle", () => {
 
   it("__query on a dead session id returns isError", async () => {
     const r = (await client.callTool({
-      name: "__query",
+      name: "query",
       arguments: { sessionId: "ghost", expr: "?- true" },
     })) as ToolResult;
     expect(r.isError).toBe(true);

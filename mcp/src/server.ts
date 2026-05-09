@@ -1,17 +1,30 @@
 /**
- * MCP server wiring — registers __start, __quit, __query tools on an
- * McpServer instance backed by a SessionManager. The CLI in cli.ts wires
- * this server to a stdio transport and starts it.
+ * MCP server wiring — registers the lifecycle, query, and mutation tools on
+ * an McpServer instance backed by a SessionManager. Tool names omit the
+ * `__` prefix; the framework prepends `mcp__qualms__` at the wire level so
+ * `start` is exposed as `mcp__qualms__start`. The CLI in cli.ts wires this
+ * server to a stdio transport and starts it.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { z } from "zod";
-import { SessionManager, SessionNotFoundError } from "./session.js";
 import {
+  SessionManager,
+  SessionNotFoundError,
+  TransactionAlreadyOpenError,
+  TransactionNotFoundError,
+} from "./session.js";
+import {
+  MutationError,
   QueryError,
+  handleBegin,
+  handleCommit,
+  handleDiff,
+  handleMutate,
   handleQuery,
   handleQuit,
+  handleRollback,
   handleStart,
 } from "./tools.js";
 
@@ -33,7 +46,7 @@ export function buildServer(options: BuildServerOptions = {}): {
   });
 
   server.registerTool(
-    "__start",
+    "start",
     {
       description:
         "Load a core prelude (read-only) and zero or more story files into a new session. " +
@@ -70,7 +83,7 @@ export function buildServer(options: BuildServerOptions = {}): {
   );
 
   server.registerTool(
-    "__quit",
+    "quit",
     {
       description: "Terminate a session and release its resources.",
       inputSchema: {
@@ -91,7 +104,7 @@ export function buildServer(options: BuildServerOptions = {}): {
   );
 
   server.registerTool(
-    "__query",
+    "query",
     {
       description:
         "Run a query against the loaded definition+state. Accepts the DSL surface " +
@@ -122,6 +135,168 @@ export function buildServer(options: BuildServerOptions = {}): {
     },
   );
 
+  server.registerTool(
+    "begin",
+    {
+      description:
+        "Open a structural transaction. Mutations apply in-place to the live " +
+        "definition + state so `query` mid-transaction sees pending changes; " +
+        "`rollback` restores the snapshot. One open transaction per session.",
+      inputSchema: {
+        sessionId: z.string(),
+        scope: z
+          .enum(["story", "session"])
+          .describe(
+            "story: mutations land at the `game` layer; `commit` writes the " +
+              "game-layer slice to `targetPath` on disk. " +
+              "session: mutations land at the `session` layer; `commit` is in-memory " +
+              "only this milestone (gameplay `save` lands later).",
+          ),
+        targetPath: z
+          .string()
+          .optional()
+          .describe(
+            "Story-scope only: target YAML file path for `commit`. Defaults to " +
+              "the single loaded story file when unambiguous.",
+          ),
+      },
+    },
+    async (args) => {
+      try {
+        const out = handleBegin(manager, {
+          sessionId: args.sessionId,
+          scope: args.scope,
+          ...(args.targetPath !== undefined ? { targetPath: args.targetPath } : {}),
+        });
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(out, null, 2) }],
+          structuredContent: out as unknown as Record<string, unknown>,
+        };
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "mutate",
+    {
+      description:
+        "Apply a single mutation statement (assert/retract/:= / def / undef) " +
+        "to the open transaction. Errors surface with category=parse for " +
+        "syntax issues, mutation-error categories for semantic ones.",
+      inputSchema: {
+        sessionId: z.string(),
+        transactionId: z.string(),
+        expr: z
+          .string()
+          .describe(
+            "Mutation statement. Examples: `def trait Combatant { fields: { hp: { default: 10 } } }`, " +
+              "`def entity grunt : Foe {}`, `assert IsPlayer(\"grunt\")`, " +
+              "`grunt.hp := 5`, `undef trait Combatant`.",
+          ),
+      },
+    },
+    async (args) => {
+      try {
+        const out = handleMutate(manager, {
+          sessionId: args.sessionId,
+          transactionId: args.transactionId,
+          expr: args.expr,
+        });
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(out, null, 2) }],
+          structuredContent: out as unknown as Record<string, unknown>,
+        };
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "diff",
+    {
+      description:
+        "Report the mutations applied so far in the open transaction, plus a " +
+        "summary count of structural objects added/removed by category.",
+      inputSchema: {
+        sessionId: z.string(),
+        transactionId: z.string(),
+      },
+    },
+    async (args) => {
+      try {
+        const out = handleDiff(manager, {
+          sessionId: args.sessionId,
+          transactionId: args.transactionId,
+        });
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(out, null, 2) }],
+          structuredContent: out as unknown as Record<string, unknown>,
+        };
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "commit",
+    {
+      description:
+        "Finalize the open transaction. Story-scope writes the game-layer slice " +
+        "to the YAML file given at `begin` (response: persisted=true, targetPath). " +
+        "Session-scope finalizes in memory only; persistence rides on gameplay " +
+        "`save` (response: persisted=false, reason=\"session-save-deferred\").",
+      inputSchema: {
+        sessionId: z.string(),
+        transactionId: z.string(),
+      },
+    },
+    async (args) => {
+      try {
+        const out = handleCommit(manager, {
+          sessionId: args.sessionId,
+          transactionId: args.transactionId,
+        });
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(out, null, 2) }],
+          structuredContent: out as unknown as Record<string, unknown>,
+        };
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "rollback",
+    {
+      description:
+        "Discard the open transaction's changes; restore the live def + state " +
+        "to the snapshot taken at `begin`.",
+      inputSchema: {
+        sessionId: z.string(),
+        transactionId: z.string(),
+      },
+    },
+    async (args) => {
+      try {
+        const out = handleRollback(manager, {
+          sessionId: args.sessionId,
+          transactionId: args.transactionId,
+        });
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(out, null, 2) }],
+          structuredContent: out as unknown as Record<string, unknown>,
+        };
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
   return { server, manager };
 }
 
@@ -142,7 +317,13 @@ function errorResult(err: unknown): {
   if (err instanceof QueryError) {
     const span = err.span ? ` (offset ${err.span.startOffset ?? "?"})` : "";
     message = `[${err.category}] ${err.message}${span}`;
-  } else if (err instanceof SessionNotFoundError) {
+  } else if (err instanceof MutationError) {
+    message = `[${err.category}] ${err.message}`;
+  } else if (
+    err instanceof TransactionNotFoundError ||
+    err instanceof TransactionAlreadyOpenError ||
+    err instanceof SessionNotFoundError
+  ) {
     message = err.message;
   } else if (err instanceof Error) {
     message = err.message;

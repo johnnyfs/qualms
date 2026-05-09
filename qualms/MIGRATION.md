@@ -65,7 +65,7 @@ There is no CLI in this milestone. The agent-facing surface is a stateful MCP se
 - **Engine reimplemented in TypeScript** (Node 20+, ESM, strict mode).
 - **Repo layout:** `deprecated/qualms/`, `deprecated/curses/` for reference; new `qualms/` (TypeScript engine + prelude) and `mcp/` (MCP server) at the repo root. `godot/` ignored.
 - **Query/mutation surface:** new DSL with FOL + Cypher path patterns + Datalog-style named rules; structural meta-types in the same query namespace; ASCII/unicode parity.
-- **Four-scope structural model** with `__begin`/`__commit`/`__rollback` transactions; `__save` writes player progress separately from structural commits.
+- **Four-scope structural model** with `__begin`/`__commit`/`__rollback`/`__mutate`/`__diff` transactions (shipped in milestone 2); `__save` writes player progress separately from structural commits (deferred). Story-scope `__commit` writes the `game`-layer slice back to a YAML file on disk; session-scope `__commit` finalizes in memory until `__save` lands.
 - **No CLI** in this milestone. Future frontend will be Ink/JS, not curses.
 - **No NOVA-specific surface anywhere.** The prelude is genuinely universal; story-specific vocabulary lives in story files.
 
@@ -73,14 +73,14 @@ There is no CLI in this milestone. The agent-facing surface is a stateful MCP se
 
 - `def view` rendering and the `__render` tool. View rules may also be relocated outside the rule space later — they are player-POV ergonomic concerns, not gameplay rules.
 - `__command`, `__play`, `__attempt`, `__coauthor` tools (Tier 2 LLM-mediated and Tier 1 play-scoped).
-- Mutation tools: `__begin`, `__commit`, `__rollback`, `__mutate`, `__diff`, `__save`.
+- `__save` — gameplay save (snapshots `session_state`). Session-scope `__commit` finalizes the `session` overlay in memory; persistence to disk happens later via `__save`.
 - `__expand` (definition introspection by name).
 - Inform-style addressing (`X, do Y` rebinds actor) — prelude-resident, later.
 - Live-extension stricter rules ("no changing what the player has seen without an in-game event"). Until then, core validation (no hanging refs) is the only safety on structural commits during play.
 - Concurrent transactions across scopes; for now, one active transaction per session.
-- Round-trip serialization from runtime back to YAML.
 - Migration of stellar / wave_collapse story content.
 - NOVA prelude port. The current milestone ships only a clean core prelude.
+- Functional amend layer for transactions. Snapshot-based rollback (deep-clone of `GameDefinition` + `WorldState` at `__begin`) is provisional; the intended endpoint is a base-ref + delta merged on read so cost scales with transaction size and parallel transactions across scopes become possible.
 
 ## Goals statement: definition of "first milestone done"
 

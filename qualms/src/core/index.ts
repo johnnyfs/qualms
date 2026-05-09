@@ -11,4 +11,5 @@ export {
   buildEntity,
   buildTraitInstance,
   instantiate,
+  resolveFieldTarget,
 } from "./worldState.js";

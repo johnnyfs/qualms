@@ -19,6 +19,7 @@ import type {
   Rule,
   RuleControl,
   RulePhase,
+  RulebookDefinition,
   TraitAttachment,
   TraitDefinition,
 } from "./types.js";
@@ -129,6 +130,7 @@ export function rule(
     control?: RuleControl;
     priority?: number;
     order?: number;
+    rulebook?: string;
   },
 ): Rule {
   return {
@@ -141,7 +143,12 @@ export function rule(
     control: options.control ?? "continue",
     priority: options.priority ?? 0,
     order: options.order ?? 0,
+    ...(options.rulebook !== undefined ? { rulebook: options.rulebook } : {}),
   };
+}
+
+export function rulebook(id: string, layer: Layer): RulebookDefinition {
+  return { id, layer };
 }
 
 export function attachment(

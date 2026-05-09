@@ -150,6 +150,13 @@ function loadDefinitionsBlock(
     for (const rb of ensureArray(rulebooks, `${path}.definitions.rulebooks`)) {
       const obj = rb as Record<string, unknown>;
       const rulebookId = obj["id"] as string | undefined;
+      if (rulebookId !== undefined) {
+        // Register the rulebook itself so `def rule R in B` references resolve
+        // and meta-queries see it.
+        if (!def.hasRulebook(rulebookId)) {
+          def.addRulebook({ id: rulebookId, layer: options.layer });
+        }
+      }
       const rules = ensureArray(obj["rules"], `${path}.rulebooks.rules`);
       for (const r of rules) {
         const rule = translateRule(r, options.layer, path, rulebookId);
@@ -302,7 +309,7 @@ function translateRule(
     guard,
     control,
     priority,
-    ...(rulebookId !== undefined ? {} : {}),
+    ...(rulebookId !== undefined ? { rulebook: rulebookId } : {}),
   });
 }
 

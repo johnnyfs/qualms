@@ -38,13 +38,28 @@
 
 import { CstParser, EmbeddedActionsParser, Lexer, type IToken, createToken } from "chevrotain";
 import type {
+  ActionDefSpec,
+  ActionPatternSpec,
+  Effect,
+  EntityDefSpec,
   Expression,
+  FieldDefSpec,
+  KindDefSpec,
+  MutationStatement,
   NamedPredicate,
+  ParameterDefSpec,
   Query,
+  RelationDefSpec,
+  RuleDefSpec,
+  RulebookDefSpec,
   Term,
+  TraitAttachmentSpec,
+  TraitDefSpec,
   TraitFilter,
+  UndefTargetKind,
   Value,
 } from "./ast.js";
+import { isUndefTargetKind } from "./ast.js";
 import type { Layer } from "../core/types.js";
 
 // ──────── Lexer ────────
@@ -77,6 +92,12 @@ const False = keyword("False", "false");
 const PreludeLayer = keyword("PreludeLayer", "prelude");
 const GameLayer = keyword("GameLayer", "game");
 const SessionLayer = keyword("SessionLayer", "session");
+// Mutation-statement keywords
+const Def = keyword("Def", "def");
+const Undef = keyword("Undef", "undef");
+const Assert = keyword("Assert", "assert");
+const Retract = keyword("Retract", "retract");
+const In = keyword("In", "in");
 
 // Unicode operator shortcuts (single-char, no longer_alt needed).
 const ExistsU = createToken({ name: "ExistsU", pattern: /∃/ });
@@ -88,6 +109,7 @@ const NotEqU = createToken({ name: "NotEqU", pattern: /≠/ });
 
 // Multi-char operators — declare BEFORE single-char to ensure longest match.
 const Implies = createToken({ name: "Implies", pattern: /:-/ });
+const Walrus = createToken({ name: "Walrus", pattern: /:=/ });
 const QueryQ = createToken({ name: "QueryQ", pattern: /\?-/ });
 const RegexEq = createToken({ name: "RegexEq", pattern: /=~/ });
 const NotEq = createToken({ name: "NotEq", pattern: /!=/ });
@@ -105,6 +127,8 @@ const LParen = createToken({ name: "LParen", pattern: /\(/ });
 const RParen = createToken({ name: "RParen", pattern: /\)/ });
 const LBrace = createToken({ name: "LBrace", pattern: /\{/ });
 const RBrace = createToken({ name: "RBrace", pattern: /\}/ });
+const LBracket = createToken({ name: "LBracket", pattern: /\[/ });
+const RBracket = createToken({ name: "RBracket", pattern: /\]/ });
 const Pipe = createToken({ name: "Pipe", pattern: /\|/ });
 const Amp = createToken({ name: "Amp", pattern: /&/ });
 const Star = createToken({ name: "Star", pattern: /\*/ });
@@ -141,6 +165,7 @@ const allTokens = [
   Whitespace,
   LineComment,
   // multi-char first
+  Walrus,
   Implies,
   QueryQ,
   RegexEq,
@@ -171,6 +196,11 @@ const allTokens = [
   PreludeLayer,
   GameLayer,
   SessionLayer,
+  Def,
+  Undef,
+  Assert,
+  Retract,
+  In,
   Identifier,
   // single-char
   Eq,
@@ -183,6 +213,8 @@ const allTokens = [
   RParen,
   LBrace,
   RBrace,
+  LBracket,
+  RBracket,
   Pipe,
   Amp,
   Star,
@@ -195,7 +227,8 @@ const QualmsLexer = new Lexer(allTokens);
 
 export type Statement =
   | { kind: "query"; query: Query }
-  | { kind: "named_predicate"; predicate: NamedPredicate };
+  | { kind: "named_predicate"; predicate: NamedPredicate }
+  | { kind: "mutation"; mutation: MutationStatement };
 
 export class ParseError extends Error {
   constructor(message: string, public readonly span?: { startOffset?: number; endOffset?: number; line?: number; column?: number }) {
@@ -232,7 +265,7 @@ function parseRegex(token: IToken): { pattern: string; flags: string } {
 
 class QualmsParser extends EmbeddedActionsParser {
   constructor() {
-    super(allTokens, { recoveryEnabled: false, maxLookahead: 4 });
+    super(allTokens, { recoveryEnabled: false, maxLookahead: 5 });
     this.performSelfAnalysis();
   }
 
@@ -245,6 +278,73 @@ class QualmsParser extends EmbeddedActionsParser {
           this.CONSUME(QueryQ);
           const body = this.SUBRULE(this.expression);
           return { kind: "query", query: { head: [], body } };
+        },
+      },
+      // Mutation: assert / retract relation calls
+      {
+        ALT: () => {
+          this.CONSUME(Assert);
+          const { relation, args } = this.SUBRULE(this.relationCallParts);
+          return {
+            kind: "mutation",
+            mutation: { type: "assert", relation, args },
+          };
+        },
+      },
+      {
+        ALT: () => {
+          this.CONSUME(Retract);
+          const { relation, args } = this.SUBRULE2(this.relationCallParts);
+          return {
+            kind: "mutation",
+            mutation: { type: "retract", relation, args },
+          };
+        },
+      },
+      // Mutation: def <kind> ...
+      {
+        ALT: () => {
+          this.CONSUME(Def);
+          return this.SUBRULE(this.defStmt);
+        },
+      },
+      // Mutation: undef <kind> <name>  (kind validated post-parse to survive recording phase)
+      {
+        ALT: () => {
+          this.CONSUME(Undef);
+          const kindTok = this.CONSUME3(Identifier).image;
+          const name = this.CONSUME4(Identifier).image;
+          return {
+            kind: "mutation",
+            mutation: {
+              type: "undef",
+              targetKind: kindTok as UndefTargetKind,
+              name,
+            },
+          };
+        },
+      },
+      // Field assign: term := value  (gated by Walrus lookahead so we don't shadow the named-predicate alternative)
+      {
+        GATE: () => {
+          // Look ahead for `:=` within the next few tokens, only if the leading
+          // tokens look like a term-led path (Identifier with optional `.` chain).
+          if (this.LA(1).tokenType !== Identifier) return false;
+          let i = 2;
+          while (i <= 6 && this.LA(i).tokenType === Dot) {
+            // Skip the dot and the following identifier.
+            i += 2;
+          }
+          return this.LA(i).tokenType === Walrus;
+        },
+        ALT: () => {
+          const target = this.SUBRULE(this.term);
+          this.CONSUME(Walrus);
+          const value = this.SUBRULE2(this.term);
+          return {
+            kind: "mutation",
+            mutation: { type: "fieldAssign", target, value },
+          };
         },
       },
       // Comprehension: { var [: TraitFilter] | expression }
@@ -283,10 +383,10 @@ class QualmsParser extends EmbeddedActionsParser {
           this.CONSUME2(LParen);
           const parameters: string[] = [];
           this.OPTION2(() => {
-            parameters.push(this.CONSUME3(Identifier).image);
+            parameters.push(this.CONSUME5(Identifier).image);
             this.MANY(() => {
               this.CONSUME(Comma);
-              parameters.push(this.CONSUME4(Identifier).image);
+              parameters.push(this.CONSUME6(Identifier).image);
             });
           });
           this.CONSUME(RParen);
@@ -470,19 +570,28 @@ class QualmsParser extends EmbeddedActionsParser {
   });
 
   private relationCall = this.RULE("relationCall", (): Expression => {
-    const name = this.CONSUME(Identifier).image;
-    this.CONSUME(LParen);
-    const args: Term[] = [];
-    this.OPTION(() => {
-      args.push(this.SUBRULE(this.term));
-      this.MANY(() => {
-        this.CONSUME(Comma);
-        args.push(this.SUBRULE2(this.term));
-      });
-    });
-    this.CONSUME(RParen);
-    return { type: "relation", relation: name, args };
+    const { relation, args } = this.SUBRULE(this.relationCallParts);
+    return { type: "relation", relation, args };
   });
+
+  /** Shared parts: identifier `(` arg-list `)` — used by query relation calls and assert/retract mutations. */
+  private relationCallParts = this.RULE(
+    "relationCallParts",
+    (): { relation: string; args: Term[] } => {
+      const name = this.CONSUME(Identifier).image;
+      this.CONSUME(LParen);
+      const args: Term[] = [];
+      this.OPTION(() => {
+        args.push(this.SUBRULE(this.term));
+        this.MANY(() => {
+          this.CONSUME(Comma);
+          args.push(this.SUBRULE2(this.term));
+        });
+      });
+      this.CONSUME(RParen);
+      return { relation: name, args };
+    },
+  );
 
   private likeCall = this.RULE("likeCall", (): Expression => {
     this.CONSUME(Like);
@@ -664,6 +773,583 @@ class QualmsParser extends EmbeddedActionsParser {
       field: secondSegment,
     } as Term;
   });
+
+  // ──────── Mutation grammar ────────
+
+  /**
+   * `def <kind> ...` body. The leading `Def` token has already been consumed by
+   * the statement-level alternative. Each per-kind alternative dispatches to its
+   * own sub-rule so CONSUME indices stay tractable.
+   */
+  private defStmt = this.RULE("defStmt", (): Statement => {
+    return this.OR([
+      {
+        GATE: () => this.LA(1).image === "trait",
+        ALT: () => this.SUBRULE(this.defTraitStmt),
+      },
+      {
+        GATE: () => this.LA(1).image === "relation",
+        ALT: () => this.SUBRULE(this.defRelationStmt),
+      },
+      {
+        GATE: () => this.LA(1).image === "action",
+        ALT: () => this.SUBRULE(this.defActionStmt),
+      },
+      {
+        GATE: () => this.LA(1).image === "kind",
+        ALT: () => this.SUBRULE(this.defKindStmt),
+      },
+      {
+        GATE: () => this.LA(1).image === "rule",
+        ALT: () => this.SUBRULE(this.defRuleStmt),
+      },
+      {
+        GATE: () => this.LA(1).image === "rulebook",
+        ALT: () => this.SUBRULE(this.defRulebookStmt),
+      },
+      {
+        GATE: () => this.LA(1).image === "entity",
+        ALT: () => this.SUBRULE(this.defEntityStmt),
+      },
+    ]);
+  });
+
+  private defTraitStmt = this.RULE("defTraitStmt", (): Statement => {
+    this.CONSUME(Identifier); // 'trait'
+    const id = this.CONSUME2(Identifier).image;
+    const spec = this.SUBRULE(this.defTraitBody);
+    return { kind: "mutation", mutation: { type: "defTrait", spec: { id, ...spec } } };
+  });
+
+  private defRelationStmt = this.RULE("defRelationStmt", (): Statement => {
+    this.CONSUME(Identifier); // 'relation'
+    const id = this.CONSUME2(Identifier).image;
+    const parameters = this.SUBRULE(this.paramList);
+    const body = this.SUBRULE(this.defRelationBody);
+    return {
+      kind: "mutation",
+      mutation: { type: "defRelation", spec: { id, parameters, ...body } },
+    };
+  });
+
+  private defActionStmt = this.RULE("defActionStmt", (): Statement => {
+    this.CONSUME(Identifier); // 'action'
+    const id = this.CONSUME2(Identifier).image;
+    const parameters = this.SUBRULE(this.paramList);
+    const body = this.SUBRULE(this.defActionBody);
+    return {
+      kind: "mutation",
+      mutation: { type: "defAction", spec: { id, parameters, ...body } },
+    };
+  });
+
+  private defKindStmt = this.RULE("defKindStmt", (): Statement => {
+    this.CONSUME(Identifier); // 'kind'
+    const id = this.CONSUME2(Identifier).image;
+    const body = this.SUBRULE(this.defKindBody);
+    return {
+      kind: "mutation",
+      mutation: { type: "defKind", spec: { id, ...body } },
+    };
+  });
+
+  private defRuleStmt = this.RULE("defRuleStmt", (): Statement => {
+    this.CONSUME(Identifier); // 'rule'
+    const id = this.CONSUME2(Identifier).image;
+    this.CONSUME(In);
+    const rulebook = this.CONSUME3(Identifier).image;
+    const body = this.SUBRULE(this.defRuleBody);
+    return {
+      kind: "mutation",
+      mutation: { type: "defRule", spec: { id, rulebook, ...body } },
+    };
+  });
+
+  private defRulebookStmt = this.RULE("defRulebookStmt", (): Statement => {
+    this.CONSUME(Identifier); // 'rulebook'
+    const id = this.CONSUME2(Identifier).image;
+    this.SUBRULE(this.defEmptyBody); // accepts `{}`
+    return { kind: "mutation", mutation: { type: "defRulebook", spec: { id } } };
+  });
+
+  private defEntityStmt = this.RULE("defEntityStmt", (): Statement => {
+    this.CONSUME(Identifier); // 'entity'
+    const id = this.CONSUME2(Identifier).image;
+    let kindRef: string | undefined;
+    this.OPTION(() => {
+      this.CONSUME(Colon);
+      kindRef = this.CONSUME3(Identifier).image;
+    });
+    const body = this.SUBRULE(this.defEntityBody);
+    return {
+      kind: "mutation",
+      mutation: {
+        type: "defEntity",
+        spec: { id, ...(kindRef !== undefined ? { kind: kindRef } : {}), ...body },
+      },
+    };
+  });
+
+  /** `( id (: type)? , ... )` — used by relation/action parameter lists. */
+  private paramList = this.RULE("paramList", (): ParameterDefSpec[] => {
+    this.CONSUME(LParen);
+    const out: ParameterDefSpec[] = [];
+    this.OPTION(() => {
+      out.push(this.SUBRULE(this.param));
+      this.MANY(() => {
+        this.CONSUME(Comma);
+        out.push(this.SUBRULE2(this.param));
+      });
+    });
+    this.CONSUME(RParen);
+    return out;
+  });
+
+  private param = this.RULE("param", (): ParameterDefSpec => {
+    const id = this.CONSUME(Identifier).image;
+    let type: string | undefined;
+    this.OPTION(() => {
+      this.CONSUME(Colon);
+      type = this.CONSUME2(Identifier).image;
+    });
+    return type !== undefined ? { id, type } : { id };
+  });
+
+  /** `{}` — used by def rulebook (empty body). */
+  private defEmptyBody = this.RULE("defEmptyBody", (): void => {
+    this.CONSUME(LBrace);
+    this.CONSUME(RBrace);
+  });
+
+  /**
+   * Generic def-body parser: `{ key: value, key: value, ... }`. Returns a record
+   * of clauses; each consumer extracts the keys it cares about.
+   */
+  private defBody = this.RULE("defBody", (): Record<string, unknown> => {
+    const out: Record<string, unknown> = {};
+    this.CONSUME(LBrace);
+    this.OPTION(() => {
+      const first = this.SUBRULE(this.defClause);
+      if (first) out[first.key] = first.value;
+      this.MANY(() => {
+        this.CONSUME(Comma);
+        const next = this.SUBRULE2(this.defClause);
+        if (next) out[next.key] = next.value;
+      });
+    });
+    this.CONSUME(RBrace);
+    return out;
+  });
+
+  private defClause = this.RULE(
+    "defClause",
+    (): { key: string; value: unknown } => {
+      const key = this.CONSUME(Identifier).image;
+      this.CONSUME(Colon);
+      const value = this.SUBRULE(this.clauseValue);
+      return { key, value };
+    },
+  );
+
+  /**
+   * Clause value: predicate (?- expr), effect list, action call (for rule.match),
+   * or a JSON-like value (scalar / identifier / object / array).
+   */
+  private clauseValue = this.RULE("clauseValue", (): unknown => {
+    return this.OR([
+      // Predicate: ?- expression  (used for guard, requires, get)
+      {
+        GATE: () => this.LA(1).tokenType === QueryQ,
+        ALT: () => {
+          this.CONSUME(QueryQ);
+          return this.SUBRULE(this.expression);
+        },
+      },
+      // Effect list: [ effect, effect, ... ]   (used for effects, set, default)
+      // We GATE on the first element looking like an effect statement (Assert/Retract/Identifier-with-Walrus-shape).
+      {
+        GATE: () => {
+          if (this.LA(1).tokenType !== LBracket) return false;
+          const t2 = this.LA(2).tokenType;
+          if (t2 === Assert || t2 === Retract) return true;
+          // Field-assign effect: Identifier (Dot Identifier)+ Walrus
+          if (t2 !== Identifier) return false;
+          let i = 3;
+          while (i <= 7 && this.LA(i).tokenType === Dot) i += 2;
+          return this.LA(i).tokenType === Walrus;
+        },
+        ALT: () => this.SUBRULE(this.effectList),
+      },
+      // Action-call value: Identifier `(` argName `:` value, ... `)`  (used for rule.match)
+      {
+        GATE: () =>
+          this.LA(1).tokenType === Identifier &&
+          this.LA(2).tokenType === LParen &&
+          // distinguish from a generic ident-followed-by-paren by looking inside
+          // for `name :` (keyword-arg) — bare `(` `)` is also ok.
+          (this.LA(3).tokenType === RParen ||
+            (this.LA(3).tokenType === Identifier && this.LA(4).tokenType === Colon)),
+        ALT: () => this.SUBRULE(this.actionCallValue),
+      },
+      { ALT: () => this.SUBRULE(this.jsonValue) },
+    ]);
+  });
+
+  /**
+   * JSON-like value used inside def bodies: scalars (string/number/bool),
+   * identifiers (treated as strings — for trait/kind/relation refs and named
+   * options like `current`), object literals, array literals.
+   */
+  private jsonValue = this.RULE("jsonValue", (): unknown => {
+    return this.OR([
+      {
+        ALT: () => unquoteString(this.CONSUME(StringLiteral)),
+      },
+      {
+        ALT: () => Number(this.CONSUME(NumberLiteral).image),
+      },
+      {
+        ALT: () => {
+          this.CONSUME(True);
+          return true;
+        },
+      },
+      {
+        ALT: () => {
+          this.CONSUME(False);
+          return false;
+        },
+      },
+      { ALT: () => this.SUBRULE(this.jsonObject) },
+      { ALT: () => this.SUBRULE(this.jsonArray) },
+      // Bare identifier — treated as a string. Lets `persistence: current` and
+      // `traits: [Presentable, Container]` work without quoting.
+      {
+        ALT: () => this.CONSUME(Identifier).image,
+      },
+    ]);
+  });
+
+  private jsonObject = this.RULE("jsonObject", (): Record<string, unknown> => {
+    this.CONSUME(LBrace);
+    const out: Record<string, unknown> = {};
+    this.OPTION(() => {
+      const first = this.SUBRULE(this.jsonObjectEntry);
+      if (first) out[first.key] = first.value;
+      this.MANY(() => {
+        this.CONSUME(Comma);
+        const next = this.SUBRULE2(this.jsonObjectEntry);
+        if (next) out[next.key] = next.value;
+      });
+    });
+    this.CONSUME(RBrace);
+    return out;
+  });
+
+  private jsonObjectEntry = this.RULE(
+    "jsonObjectEntry",
+    (): { key: string; value: unknown } => {
+      const key = this.OR([
+        { ALT: () => unquoteString(this.CONSUME(StringLiteral)) },
+        { ALT: () => this.CONSUME(Identifier).image },
+      ]);
+      this.CONSUME(Colon);
+      const value = this.SUBRULE(this.jsonValue);
+      return { key, value };
+    },
+  );
+
+  private jsonArray = this.RULE("jsonArray", (): unknown[] => {
+    this.CONSUME(LBracket);
+    const out: unknown[] = [];
+    this.OPTION(() => {
+      out.push(this.SUBRULE(this.jsonValue));
+      this.MANY(() => {
+        this.CONSUME(Comma);
+        out.push(this.SUBRULE2(this.jsonValue));
+      });
+    });
+    this.CONSUME(RBracket);
+    return out;
+  });
+
+  /** Action-pattern call: `Move(actor: x, target: y)`. Args are Term-typed. */
+  private actionCallValue = this.RULE("actionCallValue", (): ActionPatternSpec => {
+    const action = this.CONSUME(Identifier).image;
+    this.CONSUME(LParen);
+    const args: Record<string, unknown> = {};
+    this.OPTION(() => {
+      const first = this.SUBRULE(this.actionCallArg);
+      if (first) args[first.key] = first.value;
+      this.MANY(() => {
+        this.CONSUME(Comma);
+        const next = this.SUBRULE2(this.actionCallArg);
+        if (next) args[next.key] = next.value;
+      });
+    });
+    this.CONSUME(RParen);
+    return { action, args };
+  });
+
+  private actionCallArg = this.RULE(
+    "actionCallArg",
+    (): { key: string; value: unknown } => {
+      const name = this.CONSUME(Identifier).image;
+      this.CONSUME(Colon);
+      const value = this.SUBRULE(this.term);
+      return { key: name, value };
+    },
+  );
+
+  /** `[ effect, effect, ... ]` */
+  private effectList = this.RULE("effectList", (): Effect[] => {
+    this.CONSUME(LBracket);
+    const out: Effect[] = [];
+    this.OPTION(() => {
+      out.push(this.SUBRULE(this.effect));
+      this.MANY(() => {
+        this.CONSUME(Comma);
+        out.push(this.SUBRULE2(this.effect));
+      });
+    });
+    this.CONSUME(RBracket);
+    return out;
+  });
+
+  private effect = this.RULE("effect", (): Effect => {
+    return this.OR([
+      {
+        ALT: () => {
+          this.CONSUME(Assert);
+          const { relation, args } = this.SUBRULE(this.relationCallParts);
+          return { type: "assert", relation, args } as Effect;
+        },
+      },
+      {
+        ALT: () => {
+          this.CONSUME(Retract);
+          const { relation, args } = this.SUBRULE2(this.relationCallParts);
+          return { type: "retract", relation, args } as Effect;
+        },
+      },
+      // Field-assign effect: term := term
+      {
+        GATE: () => {
+          if (this.LA(1).tokenType !== Identifier) return false;
+          let i = 2;
+          while (i <= 6 && this.LA(i).tokenType === Dot) i += 2;
+          return this.LA(i).tokenType === Walrus;
+        },
+        ALT: () => {
+          const target = this.SUBRULE(this.term);
+          this.CONSUME(Walrus);
+          const value = this.SUBRULE2(this.term);
+          return { type: "fieldAssign", target, value } as Effect;
+        },
+      },
+    ]);
+  });
+
+  // ──────── Per-def-kind body wrappers ────────
+
+  private defTraitBody = this.RULE(
+    "defTraitBody",
+    (): Omit<TraitDefSpec, "id"> => {
+      const clauses = this.SUBRULE(this.defBody);
+      const out: Omit<TraitDefSpec, "id"> = {};
+      if (clauses["fields"] !== undefined) out.fields = toFieldList(clauses["fields"], "fields");
+      if (clauses["parameters"] !== undefined) out.parameters = toParamList(clauses["parameters"], "parameters");
+      // Note: relations/actions/rules nested inside trait bodies parse into the
+      // generic record shape; the executor (or future grammar refinement) can
+      // expand them. For now only fields/parameters are supported on traits.
+      return out;
+    },
+  );
+
+  private defRelationBody = this.RULE(
+    "defRelationBody",
+    (): Omit<RelationDefSpec, "id" | "parameters"> => {
+      const clauses = this.SUBRULE(this.defBody);
+      const out: Omit<RelationDefSpec, "id" | "parameters"> = {};
+      if (clauses["persistence"] !== undefined) {
+        // Validation deferred to post-parse to survive Chevrotain's recording phase.
+        out.persistence = clauses["persistence"] as RelationDefSpec["persistence"];
+      }
+      if (clauses["get"] !== undefined) out.get = clauses["get"] as Expression;
+      if (clauses["set"] !== undefined) out.setEffects = clauses["set"] as Effect[];
+      return out;
+    },
+  );
+
+  private defActionBody = this.RULE(
+    "defActionBody",
+    (): Omit<ActionDefSpec, "id" | "parameters"> => {
+      const clauses = this.SUBRULE(this.defBody);
+      const out: Omit<ActionDefSpec, "id" | "parameters"> = {};
+      if (clauses["requires"] !== undefined) out.requires = clauses["requires"] as Expression;
+      if (clauses["default"] !== undefined) out.defaultEffects = clauses["default"] as Effect[];
+      return out;
+    },
+  );
+
+  private defKindBody = this.RULE(
+    "defKindBody",
+    (): Omit<KindDefSpec, "id"> => {
+      const clauses = this.SUBRULE(this.defBody);
+      const traits: TraitAttachmentSpec[] = clauses["traits"]
+        ? toAttachmentList(clauses["traits"])
+        : [];
+      const out: Omit<KindDefSpec, "id"> = { traits };
+      if (clauses["fields"] !== undefined) {
+        out.fields = clauses["fields"] as Record<string, Record<string, unknown>>;
+      }
+      return out;
+    },
+  );
+
+  private defRuleBody = this.RULE(
+    "defRuleBody",
+    (): Omit<RuleDefSpec, "id" | "rulebook"> => {
+      const clauses = this.SUBRULE(this.defBody);
+      // Validation deferred to post-parse to survive Chevrotain's recording phase.
+      const out = {
+        phase: clauses["phase"] as RuleDefSpec["phase"],
+        pattern: clauses["match"] as ActionPatternSpec,
+      } as Omit<RuleDefSpec, "id" | "rulebook">;
+      if (clauses["guard"] !== undefined) out.guard = clauses["guard"] as Expression;
+      if (clauses["effects"] !== undefined) out.effects = clauses["effects"] as Effect[];
+      if (clauses["control"] !== undefined) out.control = clauses["control"] as RuleDefSpec["control"];
+      if (clauses["priority"] !== undefined) out.priority = clauses["priority"] as number;
+      return out;
+    },
+  );
+
+  private defEntityBody = this.RULE(
+    "defEntityBody",
+    (): Omit<EntityDefSpec, "id" | "kind"> => {
+      const clauses = this.SUBRULE(this.defBody);
+      const out: Omit<EntityDefSpec, "id" | "kind"> = {};
+      if (clauses["traits"] !== undefined) out.traits = toAttachmentList(clauses["traits"]);
+      if (clauses["fields"] !== undefined) {
+        out.fields = clauses["fields"] as Record<string, Record<string, unknown>>;
+      }
+      if (clauses["metadata"] !== undefined) {
+        out.metadata = clauses["metadata"] as Record<string, unknown>;
+      }
+      return out;
+    },
+  );
+}
+
+// ──────── Helpers for clause-shape conversion ────────
+//
+// These helpers run inside parser actions which Chevrotain executes both during
+// the grammar-recording phase (with placeholder tokens) and during real parsing.
+// They tolerate non-conforming inputs by short-circuiting; semantic validation
+// of the resulting AST runs in `validateMutationSpec` after parsing completes.
+
+function toFieldList(value: unknown, _label: string): FieldDefSpec[] {
+  if (Array.isArray(value)) {
+    return value
+      .filter((e): e is Record<string, unknown> => typeof e === "object" && e !== null)
+      .map((entry) => entryToFieldSpec(typeof entry["id"] === "string" ? entry["id"] : "?", entry));
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.entries(value as Record<string, unknown>).map(([id, entry]) =>
+      typeof entry === "object" && entry !== null
+        ? entryToFieldSpec(id, entry as Record<string, unknown>)
+        : ({ id } as FieldDefSpec),
+    );
+  }
+  return [];
+}
+
+function entryToFieldSpec(id: string, entry: Record<string, unknown>): FieldDefSpec {
+  const out: FieldDefSpec = { id };
+  if (typeof entry["type"] === "string") out.type = entry["type"];
+  if (Object.prototype.hasOwnProperty.call(entry, "default")) {
+    out.default = entry["default"];
+    out.hasDefault = true;
+  }
+  return out;
+}
+
+function toParamList(value: unknown, label: string): ParameterDefSpec[] {
+  return toFieldList(value, label) as ParameterDefSpec[];
+}
+
+function toAttachmentList(value: unknown): TraitAttachmentSpec[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry): TraitAttachmentSpec | null => {
+      if (typeof entry === "string") return { id: entry };
+      if (typeof entry === "object" && entry !== null) {
+        const e = entry as Record<string, unknown>;
+        if (typeof e["id"] !== "string") return null;
+        const out: TraitAttachmentSpec = { id: e["id"] };
+        if (e["parameters"] !== undefined) {
+          out.parameters = e["parameters"] as Record<string, unknown>;
+        }
+        if (e["fields"] !== undefined) {
+          out.fields = e["fields"] as Record<string, unknown>;
+        }
+        return out;
+      }
+      return null;
+    })
+    .filter((e): e is TraitAttachmentSpec => e !== null);
+}
+
+/**
+ * Post-parse semantic validation for mutation statements. Lets the parser stay
+ * dumb (and recording-phase-safe) while still surfacing clean errors for
+ * things like unknown undef target kinds, missing rule.match, etc.
+ */
+function validateMutationSpec(stmt: Statement): void {
+  if (stmt.kind !== "mutation") return;
+  const m = stmt.mutation;
+  switch (m.type) {
+    case "undef": {
+      if (!isUndefTargetKind(m.targetKind)) {
+        throw new ParseError(`unknown undef target kind '${m.targetKind}'`);
+      }
+      return;
+    }
+    case "defRelation": {
+      const p = m.spec.persistence;
+      if (p !== undefined && p !== "current" && p !== "remembered" && p !== "both") {
+        throw new ParseError(`unknown persistence '${String(p)}'`);
+      }
+      return;
+    }
+    case "defRule": {
+      const phase = m.spec.phase as unknown;
+      if (phase !== "before" && phase !== "during" && phase !== "after" && phase !== "instead") {
+        throw new ParseError(
+          `rule.phase must be before|during|after|instead (got '${String(phase)}')`,
+        );
+      }
+      const match = m.spec.pattern as unknown;
+      if (
+        typeof match !== "object" ||
+        match === null ||
+        typeof (match as ActionPatternSpec).action !== "string"
+      ) {
+        throw new ParseError("rule.match must be an action call (e.g. `Move(actor: x)`)");
+      }
+      const c = m.spec.control as unknown;
+      if (c !== undefined && c !== "continue" && c !== "stop") {
+        throw new ParseError(`rule.control must be continue|stop (got '${String(c)}')`);
+      }
+      const pri = m.spec.priority as unknown;
+      if (pri !== undefined && typeof pri !== "number") {
+        throw new ParseError("rule.priority must be a number");
+      }
+      return;
+    }
+    default:
+      return;
+  }
 }
 
 const parserInstance = new QualmsParser();
@@ -706,7 +1392,9 @@ export function parseStatement(input: string): Statement {
         : undefined,
     );
   }
-  return ast as Statement;
+  const stmt = ast as Statement;
+  validateMutationSpec(stmt);
+  return stmt;
 }
 
 export function parseQuery(input: string): Query {

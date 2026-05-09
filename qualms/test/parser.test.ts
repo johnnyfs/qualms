@@ -429,3 +429,336 @@ describe("parser error surfaces", () => {
     expect(() => parseStatement("R(x)")).toThrowError(/parse error/);
   });
 });
+
+// ──────── Mutation statements ────────
+
+describe("mutation parser: assert / retract / field-assign", () => {
+  it("assert with var args", () => {
+    const stmt = parseStatement("assert R(x, y)");
+    expect(stmt).toEqual({
+      kind: "mutation",
+      mutation: {
+        type: "assert",
+        relation: "R",
+        args: [
+          { type: "var", name: "x" },
+          { type: "var", name: "y" },
+        ],
+      },
+    });
+  });
+
+  it("assert with mixed term types", () => {
+    const stmt = parseStatement('assert R("alpha", 42, true)');
+    expect(stmt).toEqual({
+      kind: "mutation",
+      mutation: {
+        type: "assert",
+        relation: "R",
+        args: [
+          { type: "value", value: "alpha" },
+          { type: "value", value: 42 },
+          { type: "value", value: true },
+        ],
+      },
+    });
+  });
+
+  it("retract", () => {
+    const stmt = parseStatement("retract R(a, b)");
+    expect(stmt).toEqual({
+      kind: "mutation",
+      mutation: {
+        type: "retract",
+        relation: "R",
+        args: [
+          { type: "var", name: "a" },
+          { type: "var", name: "b" },
+        ],
+      },
+    });
+  });
+
+  it("field assign with one-segment field", () => {
+    const stmt = parseStatement("a.f := 5");
+    expect(stmt).toEqual({
+      kind: "mutation",
+      mutation: {
+        type: "fieldAssign",
+        target: { type: "field", entity: { type: "var", name: "a" }, field: "f" },
+        value: { type: "value", value: 5 },
+      },
+    });
+  });
+
+  it("field assign with trait-qualified field", () => {
+    const stmt = parseStatement('a.Presentable.name := "X"');
+    expect(stmt).toEqual({
+      kind: "mutation",
+      mutation: {
+        type: "fieldAssign",
+        target: {
+          type: "field",
+          entity: { type: "var", name: "a" },
+          trait: "Presentable",
+          field: "name",
+        },
+        value: { type: "value", value: "X" },
+      },
+    });
+  });
+
+  it("field assign with var on RHS", () => {
+    const stmt = parseStatement("a.f := b.g");
+    if (stmt.kind !== "mutation" || stmt.mutation.type !== "fieldAssign") throw new Error("wrong shape");
+    expect(stmt.mutation.value).toEqual({
+      type: "field",
+      entity: { type: "var", name: "b" },
+      field: "g",
+    });
+  });
+});
+
+describe("mutation parser: undef", () => {
+  for (const kind of ["trait", "relation", "action", "kind", "rule", "rulebook", "entity"]) {
+    it(`undef ${kind} <name>`, () => {
+      const stmt = parseStatement(`undef ${kind} Foo`);
+      expect(stmt).toEqual({
+        kind: "mutation",
+        mutation: { type: "undef", targetKind: kind, name: "Foo" },
+      });
+    });
+  }
+});
+
+describe("mutation parser: def trait", () => {
+  it("empty body", () => {
+    const stmt = parseStatement("def trait Empty {}");
+    expect(stmt).toEqual({
+      kind: "mutation",
+      mutation: { type: "defTrait", spec: { id: "Empty" } },
+    });
+  });
+
+  it("with fields (named-map form)", () => {
+    const stmt = parseStatement(
+      'def trait Container { fields: { capacity: { type: "number", default: 10 } } }',
+    );
+    if (stmt.kind !== "mutation" || stmt.mutation.type !== "defTrait") throw new Error("wrong shape");
+    expect(stmt.mutation.spec.id).toBe("Container");
+    expect(stmt.mutation.spec.fields).toEqual([
+      { id: "capacity", type: "number", default: 10, hasDefault: true },
+    ]);
+  });
+
+  it("with parameters", () => {
+    const stmt = parseStatement(
+      'def trait Owned { parameters: { owner: { type: "ref" } } }',
+    );
+    if (stmt.kind !== "mutation" || stmt.mutation.type !== "defTrait") throw new Error("wrong shape");
+    expect(stmt.mutation.spec.parameters).toEqual([
+      { id: "owner", type: "ref" },
+    ]);
+  });
+});
+
+describe("mutation parser: def relation", () => {
+  it("with persistence current", () => {
+    const stmt = parseStatement(
+      "def relation Owns(owner, owned) { persistence: current }",
+    );
+    expect(stmt).toEqual({
+      kind: "mutation",
+      mutation: {
+        type: "defRelation",
+        spec: {
+          id: "Owns",
+          parameters: [{ id: "owner" }, { id: "owned" }],
+          persistence: "current",
+        },
+      },
+    });
+  });
+
+  it("with each persistence value", () => {
+    for (const p of ["current", "remembered", "both"]) {
+      const stmt = parseStatement(`def relation R(a, b) { persistence: ${p} }`);
+      if (stmt.kind !== "mutation" || stmt.mutation.type !== "defRelation") throw new Error("wrong shape");
+      expect(stmt.mutation.spec.persistence).toBe(p);
+    }
+  });
+
+  it("with derived `get` predicate", () => {
+    const stmt = parseStatement(
+      "def relation Reachable(a, b) { persistence: current, get: ?- a -[Path]->+ b }",
+    );
+    if (stmt.kind !== "mutation" || stmt.mutation.type !== "defRelation") throw new Error("wrong shape");
+    expect(stmt.mutation.spec.get).toBeDefined();
+    expect(stmt.mutation.spec.get!.type).toBe("path");
+  });
+
+  it("with set effects", () => {
+    const stmt = parseStatement(
+      'def relation R(a, b) { persistence: current, set: [ assert Visited(a) ] }',
+    );
+    if (stmt.kind !== "mutation" || stmt.mutation.type !== "defRelation") throw new Error("wrong shape");
+    expect(stmt.mutation.spec.setEffects).toEqual([
+      { type: "assert", relation: "Visited", args: [{ type: "var", name: "a" }] },
+    ]);
+  });
+
+  it("typed parameter", () => {
+    const stmt = parseStatement("def relation R(a: ent, b: loc) { persistence: current }");
+    if (stmt.kind !== "mutation" || stmt.mutation.type !== "defRelation") throw new Error("wrong shape");
+    expect(stmt.mutation.spec.parameters).toEqual([
+      { id: "a", type: "ent" },
+      { id: "b", type: "loc" },
+    ]);
+  });
+});
+
+describe("mutation parser: def action", () => {
+  it("with requires and default effects", () => {
+    const stmt = parseStatement(
+      "def action Inspect(actor, target) { requires: ?- exists x. R(x), default: [ assert Seen(target) ] }",
+    );
+    if (stmt.kind !== "mutation" || stmt.mutation.type !== "defAction") throw new Error("wrong shape");
+    expect(stmt.mutation.spec.id).toBe("Inspect");
+    expect(stmt.mutation.spec.parameters).toEqual([{ id: "actor" }, { id: "target" }]);
+    expect(stmt.mutation.spec.requires).toBeDefined();
+    expect(stmt.mutation.spec.defaultEffects).toEqual([
+      { type: "assert", relation: "Seen", args: [{ type: "var", name: "target" }] },
+    ]);
+  });
+});
+
+describe("mutation parser: def kind", () => {
+  it("with bare trait list", () => {
+    const stmt = parseStatement(
+      "def kind Foe { traits: [Combatant, Presentable] }",
+    );
+    expect(stmt).toEqual({
+      kind: "mutation",
+      mutation: {
+        type: "defKind",
+        spec: {
+          id: "Foe",
+          traits: [{ id: "Combatant" }, { id: "Presentable" }],
+        },
+      },
+    });
+  });
+
+  it("with trait-attachment overrides", () => {
+    const stmt = parseStatement(
+      'def kind Foe { traits: [Combatant, { id: "Presentable", fields: { name: "Grunt" } }] }',
+    );
+    if (stmt.kind !== "mutation" || stmt.mutation.type !== "defKind") throw new Error("wrong shape");
+    expect(stmt.mutation.spec.traits[1]).toEqual({
+      id: "Presentable",
+      fields: { name: "Grunt" },
+    });
+  });
+
+  it("with kind-level field overrides", () => {
+    const stmt = parseStatement(
+      'def kind Foe { traits: [Presentable], fields: { Presentable: { name: "Foe" } } }',
+    );
+    if (stmt.kind !== "mutation" || stmt.mutation.type !== "defKind") throw new Error("wrong shape");
+    expect(stmt.mutation.spec.fields).toEqual({ Presentable: { name: "Foe" } });
+  });
+});
+
+describe("mutation parser: def rule", () => {
+  it("requires `in <rulebook>`", () => {
+    const stmt = parseStatement(
+      'def rule LookRule in EveryTurn { phase: before, match: Look(actor: x) }',
+    );
+    expect(stmt).toEqual({
+      kind: "mutation",
+      mutation: {
+        type: "defRule",
+        spec: {
+          id: "LookRule",
+          rulebook: "EveryTurn",
+          phase: "before",
+          pattern: { action: "Look", args: { actor: { type: "var", name: "x" } } },
+        },
+      },
+    });
+  });
+
+  it("with guard, effects, control, priority", () => {
+    const stmt = parseStatement(
+      "def rule R in B { phase: after, match: Move(actor: a), guard: ?- exists x. R(x), effects: [ assert Visited(a) ], control: stop, priority: 10 }",
+    );
+    if (stmt.kind !== "mutation" || stmt.mutation.type !== "defRule") throw new Error("wrong shape");
+    expect(stmt.mutation.spec.control).toBe("stop");
+    expect(stmt.mutation.spec.priority).toBe(10);
+    expect(stmt.mutation.spec.guard).toBeDefined();
+    expect(stmt.mutation.spec.effects).toEqual([
+      { type: "assert", relation: "Visited", args: [{ type: "var", name: "a" }] },
+    ]);
+  });
+
+  it("rejects `def rule` without `in <rulebook>`", () => {
+    expect(() => parseStatement("def rule R { phase: before, match: M() }")).toThrowError(/parse error/);
+  });
+});
+
+describe("mutation parser: def rulebook", () => {
+  it("empty body", () => {
+    const stmt = parseStatement("def rulebook EveryTurn {}");
+    expect(stmt).toEqual({
+      kind: "mutation",
+      mutation: { type: "defRulebook", spec: { id: "EveryTurn" } },
+    });
+  });
+});
+
+describe("mutation parser: def entity", () => {
+  it("with kind", () => {
+    const stmt = parseStatement(
+      'def entity grunt : Foe { fields: { Presentable: { name: "Grunt" } } }',
+    );
+    if (stmt.kind !== "mutation" || stmt.mutation.type !== "defEntity") throw new Error("wrong shape");
+    expect(stmt.mutation.spec.id).toBe("grunt");
+    expect(stmt.mutation.spec.kind).toBe("Foe");
+    expect(stmt.mutation.spec.fields).toEqual({ Presentable: { name: "Grunt" } });
+  });
+
+  it("without kind, with traits and metadata", () => {
+    const stmt = parseStatement(
+      'def entity ghost { traits: [Presentable], metadata: { source: "test" } }',
+    );
+    if (stmt.kind !== "mutation" || stmt.mutation.type !== "defEntity") throw new Error("wrong shape");
+    expect(stmt.mutation.spec.id).toBe("ghost");
+    expect(stmt.mutation.spec.kind).toBeUndefined();
+    expect(stmt.mutation.spec.traits).toEqual([{ id: "Presentable" }]);
+    expect(stmt.mutation.spec.metadata).toEqual({ source: "test" });
+  });
+});
+
+describe("mutation parser: negatives", () => {
+  it("`def trait` with no body", () => {
+    expect(() => parseStatement("def trait T")).toThrowError(/parse error/);
+  });
+
+  it("`assert` with no parens", () => {
+    expect(() => parseStatement("assert R")).toThrowError(/parse error/);
+  });
+
+  it("`:=` with no LHS", () => {
+    expect(() => parseStatement(":= 5")).toThrowError(/parse error/);
+  });
+
+  it("`undef <bogus-kind>`", () => {
+    expect(() => parseStatement("undef widget Foo")).toThrowError(ParseError);
+    expect(() => parseStatement("undef widget Foo")).toThrowError(/widget/);
+  });
+
+  it("trailing comma in body", () => {
+    // Either accepted permissively or rejected — we explicitly reject for clarity.
+    expect(() => parseStatement("def kind K { traits: [Presentable], }")).toThrowError(/parse error/);
+  });
+});

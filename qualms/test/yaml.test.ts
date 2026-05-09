@@ -3,7 +3,18 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   GameDefinition,
+  action,
+  attachment,
+  entitySpec,
+  field,
   instantiate,
+  kind,
+  parameter,
+  pattern,
+  relation,
+  rule,
+  rulebook,
+  trait,
   yaml,
 } from "../src/index.js";
 import {
@@ -12,7 +23,7 @@ import {
   runQuery,
 } from "../src/query/index.js";
 
-const { loadFileIntoDefinition, loadYamlIntoDefinition, translatePredicate } = yaml;
+const { emitDefinition, emitToObject, loadFileIntoDefinition, loadParsed, loadYamlIntoDefinition, translatePredicate } = yaml;
 
 const __filename = fileURLToPath(import.meta.url);
 const PRELUDE_PATH = resolve(__filename, "../../prelude/core.qualms.yaml");
@@ -390,5 +401,129 @@ describe("migrated core prelude (qualms/prelude/core.qualms.yaml)", () => {
   it("instantiate succeeds (no entities yet, but state is constructible)", () => {
     const { state } = loaded();
     expect(state.entities.size).toBe(0);
+  });
+});
+
+// ──────── Emitter round-trip tests ────────
+
+describe("yaml emitter: round-trip of game-layer slice", () => {
+  function buildGameDef(): GameDefinition {
+    const def = new GameDefinition();
+    // Prelude pieces — won't be emitted at game scope.
+    def.addTrait(trait("Presentable", "prelude", { fields: [field("name", { default: "" })] }));
+    def.addTrait(trait("Item", "prelude"));
+    // Game-layer additions.
+    def.addTrait(
+      trait("Combatant", "game", {
+        fields: [field("hp", { default: 10 }), field("dmg", { default: 1 })],
+      }),
+    );
+    def.addRelation(
+      relation("Owns", "game", [parameter("owner"), parameter("owned")], {
+        persistence: "current",
+      }),
+    );
+    def.addAction(action("Inspect", "game", [parameter("actor"), parameter("target")]));
+    def.addRulebook(rulebook("EveryTurn", "game"));
+    def.addRule(
+      rule("tick", "game", "after", {
+        pattern: pattern("Inspect", { actor: { type: "var", name: "a" } }),
+        rulebook: "EveryTurn",
+        priority: 5,
+      }),
+    );
+    def.addKind(
+      kind("Foe", "game", {
+        traits: [attachment("Combatant"), attachment("Presentable")],
+        fields: { Presentable: { name: "Grunt" } },
+      }),
+    );
+    def.addInitialEntity(
+      entitySpec("grunt", "game", {
+        kind: "Foe",
+        fields: { Combatant: { hp: 5 } },
+        metadata: { spawned: true },
+      }),
+    );
+    def.addInitialAssertion({ relation: "Owns", args: ["grunt", "stick"], layer: "game" });
+    return def;
+  }
+
+  it("emit + reload reproduces the game-layer slice", () => {
+    const original = buildGameDef();
+    const emitted = emitToObject(original, "game");
+
+    // Reload into a fresh def, with the prelude pre-loaded so refs resolve.
+    const reloaded = new GameDefinition();
+    reloaded.addTrait(trait("Presentable", "prelude", { fields: [field("name", { default: "" })] }));
+    reloaded.addTrait(trait("Item", "prelude"));
+    loadParsed(reloaded, emitted, { layer: "game" });
+
+    // Trait round-trips with its fields.
+    expect(reloaded.hasTrait("Combatant")).toBe(true);
+    expect(reloaded.trait("Combatant").layer).toBe("game");
+    expect(reloaded.trait("Combatant").fields.map((f) => f.id)).toEqual(["hp", "dmg"]);
+
+    // Relation, action, rulebook.
+    expect(reloaded.relation("Owns").persistence).toBe("current");
+    expect(reloaded.action("Inspect").parameters.map((p) => p.id)).toEqual(["actor", "target"]);
+    expect(reloaded.hasRulebook("EveryTurn")).toBe(true);
+
+    // Rule with rulebook membership.
+    const tick = reloaded.rules.find((r) => r.id === "tick");
+    expect(tick).toBeDefined();
+    expect(tick!.phase).toBe("after");
+    expect(tick!.priority).toBe(5);
+
+    // Kind, entity, assertion.
+    expect(reloaded.kind("Foe").traits.map((t) => t.id)).toEqual(["Combatant", "Presentable"]);
+    expect(reloaded.kind("Foe").fields).toEqual({ Presentable: { name: "Grunt" } });
+    const grunt = reloaded.initialEntity("grunt");
+    expect(grunt.kind).toBe("Foe");
+    expect(grunt.fields).toEqual({ Combatant: { hp: 5 } });
+    expect(grunt.metadata).toEqual({ spawned: true });
+    expect(reloaded.initialAssertions.find((a) => a.relation === "Owns")).toBeDefined();
+  });
+
+  it("emitDefinition produces a YAML string the loader accepts", () => {
+    const original = buildGameDef();
+    const yamlText = emitDefinition(original, "game");
+    expect(typeof yamlText).toBe("string");
+    expect(yamlText.length).toBeGreaterThan(0);
+
+    const reloaded = new GameDefinition();
+    reloaded.addTrait(trait("Presentable", "prelude", { fields: [field("name", { default: "" })] }));
+    reloaded.addTrait(trait("Item", "prelude"));
+    loadYamlIntoDefinition(reloaded, yamlText, { layer: "game" });
+    expect(reloaded.hasKind("Foe")).toBe(true);
+  });
+
+  it("emits an empty document for a layer with no contents", () => {
+    const def = new GameDefinition();
+    def.addTrait(trait("OnlyPrelude", "prelude"));
+    expect(emitToObject(def, "game")).toEqual({});
+  });
+
+  it("predicate inverter handles and/or/not/eq/relation/has_trait round-trip", () => {
+    const expr: import("../src/query/ast.js").Expression = {
+      type: "and",
+      left: {
+        type: "or",
+        left: { type: "equal", left: { type: "var", name: "a" }, right: { type: "value", value: 1 } },
+        right: { type: "not", operand: {
+          type: "relation",
+          relation: "R",
+          args: [{ type: "var", name: "x" }],
+        } },
+      },
+      right: {
+        type: "traitOf",
+        entity: { type: "var", name: "t" },
+        filter: { name: "Presentable" },
+      },
+    };
+    const yamlPredicate = yaml.emitPredicate(expr);
+    const reloaded = translatePredicate(yamlPredicate);
+    expect(reloaded).toEqual(expr);
   });
 });

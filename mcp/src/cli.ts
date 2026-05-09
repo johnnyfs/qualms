@@ -84,7 +84,7 @@ async function main(): Promise<void> {
   await startServer(transport);
 
   // The server doesn't use --core/--story to auto-load; sessions are started
-  // by the client via the __start tool. We surface the resolved path on stderr
+  // by the client via the `start` tool. We surface the resolved path on stderr
   // so operators know which prelude is available.
   process.stderr.write(
     `qualms-mcp: ready (prelude at ${corePath}, ${args.storyPaths.length} story files configured)\n`,

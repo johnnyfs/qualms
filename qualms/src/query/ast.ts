@@ -136,3 +136,145 @@ export type IntrospectionRelation = (typeof INTROSPECTION_RELATIONS)[number];
 export function isIntrospectionRelation(name: string): name is IntrospectionRelation {
   return (INTROSPECTION_RELATIONS as readonly string[]).includes(name);
 }
+
+// ──────── Effect AST ────────
+
+/**
+ * Effects produced by the parser for `effects:` clauses on rules, `set:` on
+ * relations, and standalone mutation statements. The mutation executor converts
+ * these to the opaque `EffectSpec` records stored on `Rule` / `RelationDefinition`.
+ */
+export type Effect =
+  | { type: "assert"; relation: string; args: Term[] }
+  | { type: "retract"; relation: string; args: Term[] }
+  | { type: "fieldAssign"; target: Term; value: Term }
+  | { type: "emit"; payload: Record<string, Term> };
+
+// ──────── Mutation specs (layer-stripped definition shapes) ────────
+
+/**
+ * `*DefSpec` types mirror `core/types.ts` definitions with `layer` removed —
+ * the mutation executor stamps the layer from the open transaction's scope.
+ * Predicate fields (`get`, `requires`, `guard`, `constraints`) carry parsed
+ * `Expression` trees; effect fields carry parsed `Effect` arrays.
+ */
+
+export interface ParameterDefSpec {
+  id: string;
+  type?: string;
+  default?: unknown;
+  hasDefault?: boolean;
+}
+
+export interface FieldDefSpec {
+  id: string;
+  type?: string;
+  default?: unknown;
+  hasDefault?: boolean;
+}
+
+export interface TraitAttachmentSpec {
+  id: string;
+  parameters?: Record<string, unknown>;
+  fields?: Record<string, unknown>;
+}
+
+export interface TraitDefSpec {
+  id: string;
+  parameters?: ParameterDefSpec[];
+  fields?: FieldDefSpec[];
+  relations?: RelationDefSpec[];
+  actions?: ActionDefSpec[];
+  rules?: RuleDefSpec[];
+  constraints?: Expression[];
+}
+
+export interface RelationDefSpec {
+  id: string;
+  parameters: ParameterDefSpec[];
+  persistence?: "current" | "remembered" | "both";
+  get?: Expression;
+  setEffects?: Effect[];
+}
+
+export interface ActionDefSpec {
+  id: string;
+  parameters: ParameterDefSpec[];
+  requires?: Expression;
+  defaultEffects?: Effect[];
+}
+
+export interface KindDefSpec {
+  id: string;
+  traits: TraitAttachmentSpec[];
+  fields?: Record<string, Record<string, unknown>>;
+  rules?: RuleDefSpec[];
+}
+
+export interface ActionPatternSpec {
+  action: string;
+  args: Record<string, unknown>;
+}
+
+export interface RuleDefSpec {
+  id: string;
+  /** Required for new mutations: every `def rule` lands in a rulebook (`def rule R in B { … }`). */
+  rulebook: string;
+  phase: "before" | "during" | "after" | "instead";
+  pattern: ActionPatternSpec;
+  guard?: Expression;
+  effects?: Effect[];
+  control?: "continue" | "stop";
+  priority?: number;
+}
+
+export interface RulebookDefSpec {
+  id: string;
+}
+
+export interface EntityDefSpec {
+  id: string;
+  kind?: string;
+  traits?: TraitAttachmentSpec[];
+  fields?: Record<string, Record<string, unknown>>;
+  rules?: RuleDefSpec[];
+  metadata?: Record<string, unknown>;
+}
+
+export type UndefTargetKind =
+  | "trait"
+  | "relation"
+  | "action"
+  | "kind"
+  | "rule"
+  | "rulebook"
+  | "entity";
+
+export const UNDEF_TARGET_KINDS: readonly UndefTargetKind[] = [
+  "trait",
+  "relation",
+  "action",
+  "kind",
+  "rule",
+  "rulebook",
+  "entity",
+] as const;
+
+export function isUndefTargetKind(name: string): name is UndefTargetKind {
+  return (UNDEF_TARGET_KINDS as readonly string[]).includes(name);
+}
+
+// ──────── Mutation statement union ────────
+
+export type MutationStatement =
+  | { type: "assert"; relation: string; args: Term[] }
+  | { type: "retract"; relation: string; args: Term[] }
+  | { type: "fieldAssign"; target: Term; value: Term }
+  | { type: "defTrait"; spec: TraitDefSpec }
+  | { type: "defRelation"; spec: RelationDefSpec }
+  | { type: "defAction"; spec: ActionDefSpec }
+  | { type: "defKind"; spec: KindDefSpec }
+  | { type: "defRule"; spec: RuleDefSpec }
+  | { type: "defRulebook"; spec: RulebookDefSpec }
+  | { type: "defEntity"; spec: EntityDefSpec }
+  | { type: "undef"; targetKind: UndefTargetKind; name: string };
