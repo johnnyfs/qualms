@@ -30,46 +30,46 @@ def trait Location {
 def trait Relocatable {
   location: Location? = null;
   def relation At(subject: Relocatable, location: Location) {
-    get: ?- subject.location = location;
+    get: subject.location = location;
     set: [ subject.location := location; ];
   };
   def action Move(actor: Actor? = null, subject: Relocatable, destination: Location) {
-    requires: ?- true;
+    requires: true;
     default: [ assert At(subject, destination); ];
   };
 }
 
 def trait Scope {
   def relation CanTouch(actor: Actor, target: Relocatable) {
-    get: ?- ((actor : Relocatable & target.location = actor.Relocatable.location)
+    get: ((actor : Relocatable & target.location = actor.Relocatable.location)
             | CarriedBy(actor, target));
   };
   def relation CanSee(actor: Actor, target: Relocatable) {
-    get: ?- CanTouch(actor, target);
+    get: CanTouch(actor, target);
   };
 }
 
 def trait Container {
   def relation Contains(container: Container, item: Relocatable) {
-    get: ?- At(item, container);
+    get: At(item, container);
     set: [ assert At(item, container); ];
   };
 }
 
 def trait Portable {
   def action Take(actor: Actor, item: Portable) {
-    requires: ?- CanTouch(actor, item);
+    requires: CanTouch(actor, item);
     default: [ assert CarriedBy(actor, item); ];
   };
   def action Drop(actor: Actor, item: Portable, destination: Location) {
-    requires: ?- true;
+    requires: true;
     default: [ assert At(item, destination); ];
   };
 }
 
 def trait Usable {
   def action Use(actor: Actor, source: Usable, target: Entity? = null) {
-    requires: ?- CarriedBy(actor, source);
+    requires: CarriedBy(actor, source);
     default: [ emit { text: "Nothing happens." }; ];
   };
 }
@@ -78,15 +78,15 @@ def trait Equipment {
   slot: str = "";
   equipped_by: Actor? = null;
   def relation Equipped(actor: Actor, item: Equipment) {
-    get: ?- item.equipped_by = actor;
+    get: item.equipped_by = actor;
     set: [ item.equipped_by := actor; ];
   };
   def action Equip(actor: Actor, item: Equipment) {
-    requires: ?- true;
+    requires: true;
     default: [ assert Equipped(actor, item); ];
   };
   def action Unequip(actor: Actor, item: Equipment) {
-    requires: ?- true;
+    requires: true;
     default: [ item.equipped_by := null; ];
   };
 }
@@ -94,22 +94,22 @@ def trait Equipment {
 def trait Ownable {
   owner: Actor? = null;
   def relation OwnedBy(item: Ownable, actor: Actor) {
-    get: ?- item.owner = actor;
+    get: item.owner = actor;
     set: [ item.owner := actor; ];
   };
 }
 
 def relation CarriedBy(actor: Actor, item: Relocatable) {
-  get: ?- At(item, actor);
+  get: At(item, actor);
   set: [ assert At(item, actor); ];
 }
 
 def relation Named(entity: Presentable, name: str) {
-  get: ?- entity.name = name;
+  get: entity.name = name;
 }
 
 def relation Visible(entity: Entity) {
-  get: ?- true;
+  get: true;
 }
 
 # Universal "who is the player" entry point. Stories assert IsPlayer(<actor-id>)
@@ -117,17 +117,17 @@ def relation Visible(entity: Entity) {
 def relation IsPlayer(actor: Actor) {}
 
 def action Name(actor: Actor? = null, target: Presentable) {
-  requires: ?- true;
+  requires: true;
   default: [ emit { text: target.name }; ];
 }
 
 def action Examine(actor: Actor? = null, target: Presentable) {
-  requires: ?- (actor = null | CanSee(actor, target));
+  requires: (actor = null | CanSee(actor, target));
   default: [ emit { text: target.description }; ];
 }
 
 def action Enter(actor: Actor, destination: Location) {
-  requires: ?- true;
+  requires: true;
   default: [ assert At(actor, destination); ];
 }
 

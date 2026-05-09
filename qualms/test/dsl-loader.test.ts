@@ -63,7 +63,7 @@ describe("dsl loader: file load to GameDefinition", () => {
         def trait Relocatable {
           location: ref<Location>? = null;
           def relation At(subject, target) {
-            get: ?- subject.Relocatable.location = target;
+            get: subject.Relocatable.location = target;
           };
         };
       `,

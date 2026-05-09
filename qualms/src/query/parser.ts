@@ -869,6 +869,11 @@ class QualmsParser extends EmbeddedActionsParser {
     this.CONSUME(Identifier); // 'relation'
     const id = this.CONSUME2(Identifier).image;
     const parameters = this.SUBRULE(this.paramList);
+    // Optional return-type annotation (documentation-only for now).
+    this.OPTION(() => {
+      this.CONSUME(Colon);
+      this.SUBRULE(this.typeRef);
+    });
     const body = this.SUBRULE(this.defRelationBody);
     return {
       kind: "mutation",
@@ -880,6 +885,11 @@ class QualmsParser extends EmbeddedActionsParser {
     this.CONSUME(Identifier); // 'action'
     const id = this.CONSUME2(Identifier).image;
     const parameters = this.SUBRULE(this.paramList);
+    // Optional return-type annotation (documentation-only for now).
+    this.OPTION(() => {
+      this.CONSUME(Colon);
+      this.SUBRULE(this.typeRef);
+    });
     const body = this.SUBRULE(this.defActionBody);
     return {
       kind: "mutation",
@@ -1307,7 +1317,6 @@ class QualmsParser extends EmbeddedActionsParser {
       const key = this.CONSUME(Identifier).image;
       this.CONSUME(Colon);
       if (key === "get") {
-        this.CONSUME(QueryQ);
         const expr = this.SUBRULE(this.expression);
         if (out) out.get = expr;
       } else if (key === "set") {
@@ -1350,7 +1359,6 @@ class QualmsParser extends EmbeddedActionsParser {
       const key = this.CONSUME(Identifier).image;
       this.CONSUME(Colon);
       if (key === "requires") {
-        this.CONSUME(QueryQ);
         const expr = this.SUBRULE(this.expression);
         if (out) out.requires = expr;
       } else if (key === "default") {
@@ -1396,7 +1404,6 @@ class QualmsParser extends EmbeddedActionsParser {
         const pattern = this.SUBRULE(this.actionCallValue);
         if (out) out.pattern = pattern;
       } else if (key === "guard") {
-        this.CONSUME(QueryQ);
         const expr = this.SUBRULE(this.expression);
         if (out) out.guard = expr;
       } else if (key === "effects") {

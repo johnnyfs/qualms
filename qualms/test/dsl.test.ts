@@ -165,7 +165,7 @@ describe("dsl v2: def relation", () => {
 
   it("derived relation with get clause (semicolon-terminated)", () => {
     const stmt = parseStatement(
-      "def relation Reachable(a, b) { get: ?- a -[Path]->+ b }",
+      "def relation Reachable(a, b) { get: a -[Path]->+ b }",
     );
     if (stmt.kind !== "mutation" || stmt.mutation.type !== "defRelation") throw new Error("wrong shape");
     expect(stmt.mutation.spec.get).toBeDefined();
@@ -188,6 +188,13 @@ describe("dsl v2: def relation", () => {
     expect(stmt.mutation.spec.parameters[0]?.type).toBe("ref<Actor>?");
     expect(stmt.mutation.spec.parameters[1]?.type).toBe("ref<Location>");
   });
+
+  it("optional return-type annotation parses (documentation-only)", () => {
+    const stmt = parseStatement("def relation R(a, b): bool { get: true }");
+    if (stmt.kind !== "mutation" || stmt.mutation.type !== "defRelation") throw new Error("wrong shape");
+    expect(stmt.mutation.spec.id).toBe("R");
+    expect(stmt.mutation.spec.get).toBeDefined();
+  });
 });
 
 // ──────── def action ────────
@@ -195,12 +202,18 @@ describe("dsl v2: def relation", () => {
 describe("dsl v2: def action", () => {
   it("with requires and default clauses", () => {
     const stmt = parseStatement(
-      "def action Take(actor, item) { requires: ?- CanTouch(actor, item); default: [ assert CarriedBy(actor, item) ] }",
+      "def action Take(actor, item) { requires: CanTouch(actor, item); default: [ assert CarriedBy(actor, item) ] }",
     );
     if (stmt.kind !== "mutation" || stmt.mutation.type !== "defAction") throw new Error("wrong shape");
     expect(stmt.mutation.spec.id).toBe("Take");
     expect(stmt.mutation.spec.requires).toBeDefined();
     expect(stmt.mutation.spec.defaultEffects).toHaveLength(1);
+  });
+
+  it("optional return-type annotation parses (documentation-only)", () => {
+    const stmt = parseStatement("def action A(actor): void { requires: true }");
+    if (stmt.kind !== "mutation" || stmt.mutation.type !== "defAction") throw new Error("wrong shape");
+    expect(stmt.mutation.spec.id).toBe("A");
   });
 });
 
@@ -265,7 +278,7 @@ describe("dsl v2: def rulebook + def rule", () => {
 
   it("rule with all clauses semicolon-separated", () => {
     const stmt = parseStatement(
-      "def rule R in B { phase: after; match: Move(actor: a); guard: ?- exists x. R(x); effects: [ assert Done(a) ]; control: stop; priority: 10 }",
+      "def rule R in B { phase: after; match: Move(actor: a); guard: exists x. R(x); effects: [ assert Done(a) ]; control: stop; priority: 10 }",
     );
     if (stmt.kind !== "mutation" || stmt.mutation.type !== "defRule") throw new Error("wrong shape");
     expect(stmt.mutation.spec.control).toBe("stop");

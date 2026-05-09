@@ -94,7 +94,7 @@ export function emitTrait(t: TraitDefinition): string {
 export function emitRelation(r: RelationDefinition): string {
   const clauses: string[] = [];
   if (r.get !== undefined) {
-    clauses.push(`get: ?- ${emitExpression(r.get as Expression)}`);
+    clauses.push(`get: ${emitExpression(r.get as Expression)}`);
   }
   if (r.setEffects !== undefined && r.setEffects.length > 0) {
     clauses.push(`set: [ ${r.setEffects.map(emitEffectSpec).join("; ")}; ]`);
@@ -106,7 +106,7 @@ export function emitRelation(r: RelationDefinition): string {
 export function emitAction(a: ActionDefinition): string {
   const clauses: string[] = [];
   if (a.requires !== undefined && a.requires !== true) {
-    clauses.push(`requires: ?- ${emitExpression(a.requires as Expression)}`);
+    clauses.push(`requires: ${emitExpression(a.requires as Expression)}`);
   }
   if (a.defaultEffects.length > 0) {
     clauses.push(`default: [ ${a.defaultEffects.map(emitEffectSpec).join("; ")}; ]`);
@@ -134,7 +134,7 @@ export function emitRule(r: Rule): string {
   clauses.push(`phase: ${r.phase}`);
   clauses.push(`match: ${emitActionPattern(r.pattern)}`);
   if (r.guard !== undefined && r.guard !== true) {
-    clauses.push(`guard: ?- ${emitExpression(r.guard as Expression)}`);
+    clauses.push(`guard: ${emitExpression(r.guard as Expression)}`);
   }
   if (r.effects.length > 0) {
     clauses.push(`effects: [ ${r.effects.map(emitEffectSpec).join("; ")}; ]`);
