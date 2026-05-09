@@ -67,3 +67,4 @@ export {
   parseStatements,
   tokenize,
 } from "./parser.js";
+export { substituteEffect, substituteTerm } from "./substitute.js";

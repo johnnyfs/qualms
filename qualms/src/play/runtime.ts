@@ -11,8 +11,9 @@
 
 import type { GameDefinition } from "../core/definition.js";
 import { resolveFieldTarget, type WorldState } from "../core/worldState.js";
-import type { Effect, Expression, Term, Value } from "../query/ast.js";
+import type { Effect, Expression, Term } from "../query/ast.js";
 import { evaluate, makeContext } from "../query/eval.js";
+import { substituteEffect } from "../query/substitute.js";
 
 export type PlayErrorCategory =
   | "unknown_action"
@@ -99,42 +100,6 @@ export function playAction(
   }
 
   return { action: actionId, args: { ...env }, events, effectsApplied };
-}
-
-function substituteTerm(t: Term, env: Record<string, unknown>): Term {
-  if (t.type === "var" && Object.prototype.hasOwnProperty.call(env, t.name)) {
-    return { type: "value", value: env[t.name] as Value };
-  }
-  if (t.type === "field") {
-    return { ...t, entity: substituteTerm(t.entity, env) };
-  }
-  return t;
-}
-
-function substituteEffect(e: Effect, env: Record<string, unknown>): Effect {
-  switch (e.type) {
-    case "assert":
-    case "retract":
-      return { ...e, args: e.args.map((t) => substituteTerm(t, env)) };
-    case "fieldAssign":
-      return {
-        ...e,
-        target: substituteTerm(e.target, env),
-        value: substituteTerm(e.value, env),
-      };
-    case "setAdd":
-    case "setRemove":
-      return {
-        ...e,
-        target: substituteTerm(e.target, env),
-        element: substituteTerm(e.element, env),
-      };
-    case "emit": {
-      const sub: Record<string, Term> = {};
-      for (const [k, v] of Object.entries(e.payload)) sub[k] = substituteTerm(v, env);
-      return { type: "emit", payload: sub };
-    }
-  }
 }
 
 function termToValue(t: Term, state: WorldState): unknown {

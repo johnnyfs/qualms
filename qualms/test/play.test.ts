@@ -3,11 +3,16 @@
  * fresh GameDefinition + WorldState, then plays an action.
  */
 
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { GameDefinition, dsl, instantiate, play } from "../src/index.js";
 
-const { loadDslText } = dsl;
+const { loadDslFile, loadDslText } = dsl;
 const { playAction, PlayError } = play;
+
+const __filename = fileURLToPath(import.meta.url);
+const PRELUDE_PATH = resolve(__filename, "../../prelude/core.qualms");
 
 function buildWorld(text: string): { def: GameDefinition; state: ReturnType<typeof instantiate> } {
   const def = new GameDefinition();
@@ -187,6 +192,68 @@ describe("play.playAction: effect application", () => {
     `);
     const r = playAction(def, state, "Name", { target: "rock" });
     expect(r.events).toEqual([{ text: "Rock" }]);
+  });
+
+  it("`Use(actor, source, target)` retracts Locked(target) and emits", () => {
+    const def = new GameDefinition();
+    loadDslFile(def, PRELUDE_PATH, "prelude");
+    loadDslText(
+      def,
+      `
+        def kind UsableItem: Presentable, Relocatable, Usable;
+        def entity here: Place;
+        def entity hero: Person;
+        def entity pick: UsableItem;
+      `,
+      { module: "game" },
+    );
+    const state = instantiate(def);
+    // Set up: hero is at here, pick is carried by hero, here is locked.
+    state.setField("hero", "Relocatable", "location", "here");
+    state.setField("pick", "Relocatable", "location", "hero");
+    state.assertRelation("Locked", ["here"], "game");
+    expect(state.test("Locked", ["here"])).toBe(true);
+
+    const r = playAction(def, state, "Use", {
+      actor: "hero",
+      source: "pick",
+      target: "here",
+    });
+    expect(state.test("Locked", ["here"])).toBe(false);
+    expect(r.events).toEqual([{ text: "You apply the source to the target." }]);
+  });
+
+  it("`Move(subject, destination)` requires Path and unlocked source", () => {
+    const def = new GameDefinition();
+    loadDslFile(def, PRELUDE_PATH, "prelude");
+    loadDslText(
+      def,
+      `
+        def entity here: Place;
+        def entity there: Place;
+        def entity hero: Person;
+      `,
+      { module: "game" },
+    );
+    const state = instantiate(def);
+    state.setField("hero", "Relocatable", "location", "here");
+
+    // No Path yet — Move must fail.
+    expect(() =>
+      playAction(def, state, "Move", { subject: "hero", destination: "there" }),
+    ).toThrowError(/requires.*not satisfied/);
+
+    state.assertRelation("Path", ["here", "there"], "game");
+    // Path now exists, source unlocked → Move succeeds.
+    playAction(def, state, "Move", { subject: "hero", destination: "there" });
+    expect(state.entity("hero").traits["Relocatable"]?.fields["location"]).toBe("there");
+
+    // Lock the new source; Move back should fail.
+    state.assertRelation("Path", ["there", "here"], "game");
+    state.assertRelation("Locked", ["there"], "game");
+    expect(() =>
+      playAction(def, state, "Move", { subject: "hero", destination: "here" }),
+    ).toThrowError(/requires.*not satisfied/);
   });
 
   it("multi-effect action applies in order", () => {

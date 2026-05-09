@@ -34,7 +34,7 @@ def trait Relocatable {
     set: [ subject.location := location; ];
   };
   def action Move(actor: Actor? = null, subject: Relocatable, destination: Location) {
-    requires: true;
+    requires: Path(subject.location, destination) & not Locked(subject.location);
     effects: [ assert At(subject, destination); ];
   };
 }
@@ -71,7 +71,7 @@ def trait Portable {
 def trait Usable {
   def action Use(actor: Actor, source: Usable, target: Entity? = null) {
     requires: CarriedBy(actor, source);
-    effects: [ emit { text: "Nothing happens." }; ];
+    effects: [ retract Locked(target); emit { text: "You apply the source to the target." }; ];
   };
 }
 
@@ -116,6 +116,10 @@ def relation Visible(entity: Entity) {
 # Universal "who is the player" entry point. Stories assert IsPlayer(<actor-id>)
 # at start; the player view and any player-anchored rules read from this.
 def relation IsPlayer(actor: Actor) {}
+
+# Generic lock state on a location. Stored relation; asserted by stories,
+# retracted by `Use` (default semantics). Move requires `not Locked(source)`.
+def relation Locked(location: Location) {}
 
 def action Name(actor: Actor? = null, target: Presentable) {
   requires: true;

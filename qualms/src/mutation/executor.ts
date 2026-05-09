@@ -48,8 +48,11 @@ import type {
   Term,
   TraitDefSpec,
 } from "../query/ast.js";
+import { substituteEffect } from "../query/substitute.js";
 import { MutationError } from "./errors.js";
 import type { Transaction } from "./transaction.js";
+
+const MAX_DERIVED_ASSERT_DEPTH = 16;
 
 export function applyMutation(
   m: MutationStatement,
@@ -57,9 +60,22 @@ export function applyMutation(
   def: GameDefinition,
   state: WorldState,
 ): void {
+  applyMutationCore(m, tx, def, state, 0);
+  // Only the top-level mutation goes on the applied log; recursive expansions
+  // of a derived assert are implementation detail.
+  tx.applied.push(m);
+}
+
+function applyMutationCore(
+  m: MutationStatement,
+  tx: Transaction,
+  def: GameDefinition,
+  state: WorldState,
+  depth: number,
+): void {
   switch (m.type) {
     case "assert":
-      execAssert(m, tx, def, state);
+      execAssert(m, tx, def, state, depth);
       break;
     case "retract":
       execRetract(m, tx, def, state);
@@ -96,8 +112,6 @@ export function applyMutation(
       execUndef(m, tx, def, state);
       break;
   }
-  // Each branch above pushes to tx.applied on success.
-  tx.applied.push(m);
 }
 
 // ──────── Per-mutation handlers ────────
@@ -107,20 +121,64 @@ function execAssert(
   tx: Transaction,
   def: GameDefinition,
   state: WorldState,
+  depth: number,
 ): void {
   if (!def.hasRelation(m.relation)) {
     throw new MutationError(`unknown relation '${m.relation}'`, "unknown_target");
   }
   const rel = def.relation(m.relation);
   if (rel.get !== undefined) {
-    throw new MutationError(
-      `relation '${m.relation}' is derived; cannot assert directly`,
-      "derived_relation",
-    );
+    if (depth >= MAX_DERIVED_ASSERT_DEPTH) {
+      throw new MutationError(
+        `derived-assert recursion exceeded depth ${MAX_DERIVED_ASSERT_DEPTH} (relation '${m.relation}')`,
+        "type_mismatch",
+      );
+    }
+    const setEffects = rel.setEffects as readonly Effect[] | undefined;
+    if (!setEffects || setEffects.length === 0) {
+      throw new MutationError(
+        `relation '${m.relation}' is derived and has no set: clause; cannot assert`,
+        "derived_relation",
+      );
+    }
+    // Bind the relation's parameters to the call args, substitute, and apply.
+    const env: Record<string, unknown> = {};
+    for (let i = 0; i < rel.parameters.length; i++) {
+      const p = rel.parameters[i]!;
+      if (m.args[i] !== undefined) {
+        env[p.id] = groundTerm(m.args[i]!, `assert ${m.relation}`);
+      }
+    }
+    for (const inner of setEffects) {
+      const sub = substituteEffect(inner, env);
+      applyMutationCore(effectToMutation(sub), tx, def, state, depth + 1);
+    }
+    return;
   }
   const args = m.args.map((t) => groundTerm(t, m.relation));
   state.assertRelation(m.relation, args, tx.module);
   def.addInitialAssertion({ relation: m.relation, args, module: tx.module });
+}
+
+/**
+ * The five Effect shapes that overlap with MutationStatement carry the same
+ * fields, so a structural cast is sufficient. `emit` has no mutation-context
+ * meaning and is rejected.
+ */
+function effectToMutation(e: Effect): MutationStatement {
+  switch (e.type) {
+    case "assert":
+    case "retract":
+    case "fieldAssign":
+    case "setAdd":
+    case "setRemove":
+      return e as MutationStatement;
+    case "emit":
+      throw new MutationError(
+        "emit effects are not allowed in mutation context (only at runtime via play)",
+        "type_mismatch",
+      );
+  }
 }
 
 function execRetract(

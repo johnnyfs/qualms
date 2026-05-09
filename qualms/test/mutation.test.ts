@@ -82,11 +82,11 @@ describe("mutation executor: assert / retract", () => {
     expect(state.test("Owns", ["a", "b"])).toBe(false);
   });
 
-  it("rejects assert on a derived relation", () => {
+  it("rejects assert on a derived relation with no set: clause", () => {
     const { def, state, tx } = freshTx("session", buildBaseDef());
     expect(() =>
       applyMutation(parseMutation('assert Derived("a", "b")'), tx, def, state),
-    ).toThrowError(MutationError);
+    ).toThrowError(/no set: clause/);
   });
 
   it("rejects assert on an unknown relation", () => {
@@ -94,6 +94,119 @@ describe("mutation executor: assert / retract", () => {
     expect(() =>
       applyMutation(parseMutation('assert NoSuchRel("a")'), tx, def, state),
     ).toThrowError(MutationError);
+  });
+});
+
+describe("mutation executor: derived-assert expansion", () => {
+  // Build a tiny prelude-like def with At/CarriedBy and a Bag entity to test
+  // the recursion: assert CarriedBy → assert At (set:) → fieldAssign (set:).
+  function buildPreludeLike(): GameDefinition {
+    const d = new GameDefinition();
+    d.addTrait(trait("Actor", "prelude"));
+    d.addTrait(
+      trait("Relocatable", "prelude", {
+        fields: [field("location", { type: "Location", default: null, hasDefault: true })],
+      }),
+    );
+    // At: derived from subject.location = location, set: writes the field.
+    d.addRelation(
+      relation(
+        "At",
+        "prelude",
+        [parameter("subject"), parameter("location")],
+        {
+          get: {
+            type: "equal",
+            left: { type: "field", entity: { type: "var", name: "subject" }, trait: "Relocatable", field: "location" },
+            right: { type: "var", name: "location" },
+          },
+          setEffects: [
+            {
+              type: "fieldAssign",
+              target: { type: "field", entity: { type: "var", name: "subject" }, trait: "Relocatable", field: "location" },
+              value: { type: "var", name: "location" },
+            },
+          ],
+        },
+      ),
+    );
+    // CarriedBy: derived from At(item, actor), set: assert At(item, actor).
+    d.addRelation(
+      relation(
+        "CarriedBy",
+        "prelude",
+        [parameter("actor"), parameter("item")],
+        {
+          get: {
+            type: "relation",
+            relation: "At",
+            args: [
+              { type: "var", name: "item" },
+              { type: "var", name: "actor" },
+            ],
+          },
+          setEffects: [
+            {
+              type: "assert",
+              relation: "At",
+              args: [
+                { type: "var", name: "item" },
+                { type: "var", name: "actor" },
+              ],
+            },
+          ],
+        },
+      ),
+    );
+    d.addKind(
+      kind("Person", "prelude", { traits: [attachment("Actor"), attachment("Relocatable")] }),
+    );
+    return d;
+  }
+
+  it("`assert At(...)` expands to set: clause; lands as field assignment", () => {
+    const def = buildPreludeLike();
+    const state = instantiate(def);
+    const tx = Transaction.begin({ id: "tx-1", module: "session", def, state });
+    applyMutation(parseMutation("def entity p1: Person"), tx, def, state);
+    applyMutation(parseMutation('assert At("p1", "here")'), tx, def, state);
+    expect(state.entity("p1").traits["Relocatable"]?.fields["location"]).toBe("here");
+  });
+
+  it("`assert CarriedBy(...)` chains through At's set:", () => {
+    const def = buildPreludeLike();
+    const state = instantiate(def);
+    const tx = Transaction.begin({ id: "tx-1", module: "session", def, state });
+    applyMutation(parseMutation("def entity p1: Person"), tx, def, state);
+    applyMutation(parseMutation("def entity rock: Person"), tx, def, state); // any Relocatable
+    applyMutation(parseMutation('assert CarriedBy("p1", "rock")'), tx, def, state);
+    expect(state.entity("rock").traits["Relocatable"]?.fields["location"]).toBe("p1");
+  });
+
+  it("recursion depth limit fires on mutually-asserting derived relations", () => {
+    const d = new GameDefinition();
+    // R loops to S, S loops to R — each as a one-effect set: clause.
+    d.addRelation(
+      relation("R", "prelude", [parameter("x")], {
+        get: { type: "literal", value: true },
+        setEffects: [
+          { type: "assert", relation: "S", args: [{ type: "var", name: "x" }] },
+        ],
+      }),
+    );
+    d.addRelation(
+      relation("S", "prelude", [parameter("x")], {
+        get: { type: "literal", value: true },
+        setEffects: [
+          { type: "assert", relation: "R", args: [{ type: "var", name: "x" }] },
+        ],
+      }),
+    );
+    const state = instantiate(d);
+    const tx = Transaction.begin({ id: "tx-1", module: "session", def: d, state });
+    expect(() =>
+      applyMutation(parseMutation('assert R("a")'), tx, d, state),
+    ).toThrowError(/recursion exceeded/);
   });
 });
 
