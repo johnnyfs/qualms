@@ -17,11 +17,13 @@ import {
 } from "./session.js";
 import {
   MutationError,
+  PlayError,
   QueryError,
   handleBegin,
   handleCommit,
   handleDiff,
   handleMutate,
+  handlePlay,
   handleQuery,
   handleQuit,
   handleRollback,
@@ -278,6 +280,49 @@ export function buildServer(options: BuildServerOptions = {}): {
   );
 
   server.registerTool(
+    "play",
+    {
+      description:
+        "Advance play one turn by invoking an action. Resolves the action, " +
+        "binds parameters from `args`, evaluates `requires` against current " +
+        "state, then applies the action's effects (assert/retract/`:=`/" +
+        "`+=`/`-=`/emit) to the live session_state. Returns emitted events. " +
+        "No transaction needed — runtime mutations bypass the structural log. " +
+        "Rules engine (before/during/after rule firing) is not implemented; " +
+        "only the action's own effects run.",
+      inputSchema: {
+        sessionId: z.string(),
+        action: z
+          .string()
+          .describe("Action id, e.g. \"Take\", \"Move\", \"Examine\"."),
+        args: z
+          .record(z.string(), z.unknown())
+          .optional()
+          .describe(
+            "Parameter bindings keyed by parameter name. Values are entity " +
+              "ids (strings) or primitive scalars. Missing parameters with " +
+              "defaults use their default; missing required parameters error.",
+          ),
+      },
+    },
+    async (args) => {
+      try {
+        const out = handlePlay(manager, {
+          sessionId: args.sessionId,
+          action: args.action,
+          ...(args.args !== undefined ? { args: args.args } : {}),
+        });
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(out, null, 2) }],
+          structuredContent: out as unknown as Record<string, unknown>,
+        };
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
     "rollback",
     {
       description:
@@ -325,6 +370,8 @@ function errorResult(err: unknown): {
     const span = err.span ? ` (offset ${err.span.startOffset ?? "?"})` : "";
     message = `[${err.category}] ${err.message}${span}`;
   } else if (err instanceof MutationError) {
+    message = `[${err.category}] ${err.message}`;
+  } else if (err instanceof PlayError) {
     message = `[${err.category}] ${err.message}`;
   } else if (
     err instanceof TransactionNotFoundError ||

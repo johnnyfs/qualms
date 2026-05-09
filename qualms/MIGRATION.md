@@ -117,6 +117,7 @@ There is no CLI in this milestone. The agent-facing surface is a stateful MCP se
 - **Storage class collapse.** Relations have no `persistence` field; they are stored by default and derived when a `get` body is present. `WorldState` keeps a single relations Map. Story-level memory patterns (e.g. tracking visited locations) belong in story files, not the prelude.
 - **No CLI** in this milestone. Future frontend will be Ink/JS, not curses.
 - **No NOVA-specific surface anywhere.** The prelude is genuinely universal; story-specific vocabulary lives in story files.
+- **`play` tool — runtime action execution.** `play({ sessionId, action, args })` resolves an action by id, binds parameters from `args`, evaluates `requires` against current state, then applies the action's effects (assert/retract/`:=`/`+=`/`-=`/emit) to live `WorldState`. Returns emitted events. `assert R(...)` on a *derived* relation runs R's `set:` clause with call args bound to R's parameters — so the prelude's `Take` (effect: `assert CarriedBy(actor, item)`) actually moves the item via `CarriedBy.set` → `At.set` → `subject.location := location`. The mutation surface still rejects derived asserts; structural setup uses `entity.field := value` directly. **Rules engine (before/during/after firing) is not implemented; only the action's own effects run.**
 
 ### DSL polish (M4)
 
@@ -130,7 +131,9 @@ There is no CLI in this milestone. The agent-facing surface is a stateful MCP se
 ## What's deferred (not in this milestone)
 
 - `def view` rendering and the `__render` tool. View rules may also be relocated outside the rule space later — they are player-POV ergonomic concerns, not gameplay rules.
-- `__command`, `__play`, `__attempt`, `__coauthor` tools (Tier 2 LLM-mediated and Tier 1 play-scoped).
+- `__command`, `__attempt`, `__coauthor` tools (Tier 2 LLM-mediated and Tier 1 play-scoped). (`play` is implemented as a Tier 1 deterministic primitive — no LLM mediation.)
+- **Rules engine.** `def rule … in <rulebook>` parses and stores, but matched-action firing (before/during/after/instead phases, priority, control) is not implemented. `play` runs only the invoked action's own effects.
+- **Derived asserts via `mutate`.** Asserting a derived relation only expands its `set:` clause inside `play`, not inside `mutate`. Structural setup (e.g. story initial state) uses `entity.field := value` directly.
 - `save` — gameplay save (snapshots `session_state`). Session-module `commit` finalizes the session overlay in memory; persistence to disk happens later via `save`.
 - `__expand` (definition introspection by name).
 - Inform-style addressing (`X, do Y` rebinds actor) — prelude-resident, later.

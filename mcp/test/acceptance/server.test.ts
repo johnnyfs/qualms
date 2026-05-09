@@ -87,6 +87,7 @@ describe("MCP server: tool discovery", () => {
       "commit",
       "diff",
       "mutate",
+      "play",
       "query",
       "quit",
       "rollback",

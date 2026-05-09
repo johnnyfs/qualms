@@ -8,6 +8,7 @@ import { writeFileSync } from "node:fs";
 import {
   dsl as dslNs,
   mutation as mutationNs,
+  play as playNs,
   query as queryNs,
 } from "@quealm/qualms";
 import type { SessionManager } from "./session.js";
@@ -15,6 +16,7 @@ import type { SessionManager } from "./session.js";
 const { makeContext, parseQuery, parseStatement, runQuery, ParseError } = queryNs;
 const { MutationError, unparseMutation } = mutationNs;
 const { emitDsl } = dslNs;
+const { playAction, PlayError } = playNs;
 
 // ──────── __start ────────
 
@@ -491,4 +493,30 @@ export function handleRollback(manager: SessionManager, input: RollbackInput): R
   return manager.rollback(input.sessionId, input.transactionId);
 }
 
-export { MutationError };
+// ──────── play (advance one turn by invoking an action) ────────
+
+export interface PlayInput {
+  sessionId: string;
+  action: string;
+  args?: Record<string, unknown>;
+}
+
+export interface PlayOutput {
+  action: string;
+  args: Record<string, unknown>;
+  events: Array<Record<string, unknown>>;
+  effectsApplied: number;
+}
+
+export function handlePlay(manager: SessionManager, input: PlayInput): PlayOutput {
+  const session = manager.get(input.sessionId);
+  const result = playAction(
+    session.definition,
+    session.state,
+    input.action,
+    input.args ?? {},
+  );
+  return result;
+}
+
+export { MutationError, PlayError };
