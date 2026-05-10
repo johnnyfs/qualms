@@ -11,12 +11,14 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
   GameDefinition,
   type Module,
   WorldState,
   dsl as dslNs,
   instantiate,
+  language as languageNs,
   mutation as mutationNs,
   query as queryNs,
 } from "@quealm/qualms";
@@ -29,19 +31,30 @@ type Transaction = ReturnType<typeof Transaction.begin>;
 type WritableModule = Transaction["module"];
 
 export interface SessionStartOptions {
-  corePath: string;
+  corePath?: string;
   storyPaths?: string[];
 }
 
-/** Session record. `definition` and `state` are mutable so __rollback can swap snapshots. */
-export interface Session {
+export interface LegacySession {
   readonly id: string;
+  readonly mode: "legacy";
   definition: GameDefinition;
   state: WorldState;
   readonly corePath: string;
   readonly storyPaths: readonly string[];
   transaction: Transaction | null;
 }
+
+export interface LanguageSession {
+  readonly id: string;
+  readonly mode: "language";
+  readonly languageModel: languageNs.StoryModel;
+  readonly storyPaths: readonly string[];
+  transaction: null;
+}
+
+/** Session record. Legacy `definition` and `state` are mutable so __rollback can swap snapshots. */
+export type Session = LegacySession | LanguageSession;
 
 export class SessionNotFoundError extends Error {
   constructor(sessionId: string) {
@@ -74,14 +87,31 @@ export class SessionManager {
   private readonly sessions = new Map<string, Session>();
 
   start(options: SessionStartOptions): Session {
+    if (options.corePath === undefined) {
+      const languageModel = new languageNs.StoryModel();
+      for (const storyPath of options.storyPaths ?? []) {
+        languageModel.apply(languageNs.parseProgram(readFileSync(storyPath, "utf-8")));
+      }
+      const session: LanguageSession = {
+        id: randomUUID(),
+        mode: "language",
+        languageModel,
+        storyPaths: options.storyPaths ?? [],
+        transaction: null,
+      };
+      this.sessions.set(session.id, session);
+      return session;
+    }
+
     const def = new GameDefinition();
     loadDslFile(def, options.corePath, "prelude" satisfies Module);
     for (const storyPath of options.storyPaths ?? []) {
       loadDslFile(def, storyPath, "game" satisfies Module);
     }
     const state = instantiate(def);
-    const session: Session = {
+    const session: LegacySession = {
       id: randomUUID(),
+      mode: "legacy",
       definition: def,
       state,
       corePath: options.corePath,
@@ -119,6 +149,9 @@ export class SessionManager {
   /** Open a structural transaction. Throws if one is already open. */
   beginTransaction(sessionId: string, module: WritableModule, targetPath?: string): Transaction {
     const s = this.get(sessionId);
+    if (s.mode !== "legacy") {
+      throw new TransactionNotFoundError(sessionId);
+    }
     if (s.transaction !== null) {
       throw new TransactionAlreadyOpenError(sessionId);
     }
@@ -140,6 +173,7 @@ export class SessionManager {
     m: MutationStatement,
   ): void {
     const s = this.get(sessionId);
+    if (s.mode !== "legacy") throw new TransactionNotFoundError(sessionId);
     const tx = s.transaction;
     if (tx === null) throw new TransactionNotFoundError(sessionId);
     if (tx.id !== transactionId) throw new TransactionNotFoundError(sessionId, transactionId);
@@ -148,10 +182,11 @@ export class SessionManager {
 
   /** Get the open transaction or throw. */
   requireTransaction(sessionId: string, transactionId: string): {
-    session: Session;
+    session: LegacySession;
     transaction: Transaction;
   } {
     const session = this.get(sessionId);
+    if (session.mode !== "legacy") throw new TransactionNotFoundError(sessionId);
     const tx = session.transaction;
     if (tx === null) throw new TransactionNotFoundError(sessionId);
     if (tx.id !== transactionId) {

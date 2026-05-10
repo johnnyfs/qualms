@@ -13,6 +13,7 @@ import {
   handleCommit,
   handleDiff,
   handleMutate,
+  handlePlay,
   handleQuery,
   handleQuit,
   handleRollback,
@@ -27,6 +28,7 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const PRELUDE_PATH = resolve(__filename, "../../../qualms/prelude/core.qualms");
+const TUTORIAL_PATH = resolve(__filename, "../../../qualms/specs/tutorial.qualms");
 
 describe("tool handler: __start", () => {
   let mgr: SessionManager;
@@ -34,8 +36,14 @@ describe("tool handler: __start", () => {
     mgr = new SessionManager();
   });
 
-  it("rejects missing corePath", () => {
-    expect(() => handleStart(mgr, { corePath: "" })).toThrowError(/corePath/);
+  it("starts a prelude-free language session when corePath is omitted", () => {
+    const out = handleStart(mgr, { storyPaths: [TUTORIAL_PATH] });
+    expect(out.sessionId).toMatch(/[0-9a-f-]{8,}/);
+    expect(out.loaded.corePath).toBe("");
+    expect(out.loaded.storyPaths).toEqual([TUTORIAL_PATH]);
+    expect(out.loaded.counts.traits).toBe(8);
+    expect(out.loaded.counts.actions).toBe(8);
+    expect(mgr.get(out.sessionId).mode).toBe("language");
   });
 
   it("loads the core prelude and reports counts", () => {
@@ -48,6 +56,18 @@ describe("tool handler: __start", () => {
     // 10 traits (Presentable, Actor, Location, Relocatable, Scope, Container, Portable, Usable, Equipment, Ownable)
     expect(out.loaded.counts.traits).toBe(10);
     expect(mgr.size()).toBe(1);
+  });
+
+  it("plays a prelude-free language call", () => {
+    const start = handleStart(mgr, { storyPaths: [TUTORIAL_PATH] });
+    const out = handlePlay(mgr, {
+      sessionId: start.sessionId,
+      call: "Open(Player, Bars)",
+    });
+    expect(out.events[0]).toMatchObject({
+      status: "failed",
+      feedback: "fail { Locked(Bars); }",
+    });
   });
 
   it("propagates a YAML load failure as an Error", () => {

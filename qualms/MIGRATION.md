@@ -28,6 +28,17 @@ transaction, query, MCP session, and test infrastructure should be reused, but
 the language/parser/runtime model now changes around the tutorial instead of
 around `qualms/prelude/core.qualms`.
 
+Implemented transition checkpoints:
+
+- `language.parseProgram` parses the tutorial syntax side-by-side with DSL v2.
+- `language.loadStoryProgram` compiles tutorial programs into a prelude-free
+  model of traits, relations, predicates, actions, rules, entities, and facts.
+- `language.playLanguageCall` executes tutorial action calls with predicate
+  dispatch, `before`/`after` rules, cardinality-aware `set`, and feedback such
+  as `fail { !Path(Cell, Outside); }`.
+- MCP `start` can now omit `corePath` to create a prelude-free language
+  session; MCP `play` can use `call: "Open(Player, Bars)"`.
+
 This document records the goals, scope, and constraints of the rewrite. It is the canonical reference for what changed, what was preserved, and what was deliberately deferred. The previous Python implementation lives at `deprecated/qualms/` and `deprecated/curses/` for reference.
 
 ## Why we are rewriting

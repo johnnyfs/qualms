@@ -10,6 +10,7 @@ import {
   mutation as mutationNs,
   play as playNs,
   query as queryNs,
+  language as languageNs,
 } from "@quealm/qualms";
 import type { SessionManager } from "./session.js";
 
@@ -21,7 +22,7 @@ const { playAction, PlayError } = playNs;
 // ──────── __start ────────
 
 export interface StartInput {
-  corePath: string;
+  corePath?: string;
   storyPaths?: string[];
 }
 
@@ -41,13 +42,26 @@ export interface StartOutput {
 }
 
 export function handleStart(manager: SessionManager, input: StartInput): StartOutput {
-  if (!input.corePath) {
-    throw new Error("corePath is required");
-  }
   const session = manager.start({
-    corePath: input.corePath,
+    ...(input.corePath ? { corePath: input.corePath } : {}),
     ...(input.storyPaths ? { storyPaths: input.storyPaths } : {}),
   });
+  if (session.mode === "language") {
+    return {
+      sessionId: session.id,
+      loaded: {
+        corePath: "",
+        storyPaths: [...session.storyPaths],
+        counts: {
+          traits: session.languageModel.traits.size,
+          relations: session.languageModel.relations.size,
+          actions: session.languageModel.actions.size,
+          kinds: 0,
+          rules: session.languageModel.rules.length,
+        },
+      },
+    };
+  }
   const def = session.definition;
   return {
     sessionId: session.id,
@@ -128,6 +142,9 @@ export class QueryError extends Error {
 
 export function handleQuery(manager: SessionManager, input: QueryInput): QueryOutput {
   const session = manager.get(input.sessionId);
+  if (session.mode !== "legacy") {
+    throw new QueryError("query is not wired for prelude-free language sessions yet", "evaluate");
+  }
 
   // Accept multi-statement input. Legacy single-statement bodies (bare `?- φ`
   // or bare comprehension) auto-wrap via parseQuery; if `parseStatements`
@@ -497,7 +514,8 @@ export function handleRollback(manager: SessionManager, input: RollbackInput): R
 
 export interface PlayInput {
   sessionId: string;
-  action: string;
+  action?: string;
+  call?: string;
   args?: Record<string, unknown>;
 }
 
@@ -510,6 +528,21 @@ export interface PlayOutput {
 
 export function handlePlay(manager: SessionManager, input: PlayInput): PlayOutput {
   const session = manager.get(input.sessionId);
+  if (session.mode === "language") {
+    if (!input.call) {
+      throw new PlayError("language sessions require `call`, e.g. `Go(Player, Outside)`", "missing_arg");
+    }
+    const result = languageNs.playLanguageCall(session.languageModel, input.call);
+    return {
+      action: input.call,
+      args: {},
+      events: [{ status: result.status, feedback: result.feedback, reasons: result.reasons }],
+      effectsApplied: 0,
+    };
+  }
+  if (!input.action) {
+    throw new PlayError("missing action", "missing_arg");
+  }
   const result = playAction(
     session.definition,
     session.state,

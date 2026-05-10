@@ -51,16 +51,17 @@ export function buildServer(options: BuildServerOptions = {}): {
     "start",
     {
       description:
-        "Load a core prelude (read-only) and zero or more story files into a new session. " +
-        "Returns a session id used by subsequent calls.",
+        "Start a session. With `corePath`, loads the legacy engine path during migration. " +
+        "Without `corePath`, starts the prelude-free language model and loads story files directly.",
       inputSchema: {
         corePath: z
           .string()
-          .describe("Filesystem path to the prelude YAML (e.g. qualms/prelude/core.qualms)."),
+          .optional()
+          .describe("Optional legacy prelude path. Omit for prelude-free language sessions."),
         storyPaths: z
           .array(z.string())
           .optional()
-          .describe("Optional list of story YAML paths to load on top of the prelude."),
+          .describe("Optional list of story `.qualms` files to load."),
       },
     },
     async (args) => {
@@ -289,12 +290,18 @@ export function buildServer(options: BuildServerOptions = {}): {
         "`+=`/`-=`/emit) to the live session_state. Returns emitted events. " +
         "No transaction needed — runtime mutations bypass the structural log. " +
         "Rules engine (before/during/after rule firing) is not implemented; " +
-        "only the action's own effects run.",
+        "only the action's own effects run. Prelude-free language sessions use " +
+        "`call` and return compact DSL feedback in the event payload.",
       inputSchema: {
         sessionId: z.string(),
         action: z
           .string()
+          .optional()
           .describe("Action id, e.g. \"Take\", \"Move\", \"Examine\"."),
+        call: z
+          .string()
+          .optional()
+          .describe("Prelude-free language call, e.g. `Go(Player, Outside)`."),
         args: z
           .record(z.string(), z.unknown())
           .optional()
@@ -309,7 +316,8 @@ export function buildServer(options: BuildServerOptions = {}): {
       try {
         const out = handlePlay(manager, {
           sessionId: args.sessionId,
-          action: args.action,
+          ...(args.action !== undefined ? { action: args.action } : {}),
+          ...(args.call !== undefined ? { call: args.call } : {}),
           ...(args.args !== undefined ? { args: args.args } : {}),
         });
         return {

@@ -12,6 +12,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 const __filename = fileURLToPath(import.meta.url);
 const REPO_ROOT = resolve(__filename, "../../../..");
 const PRELUDE_PATH = resolve(REPO_ROOT, "qualms/prelude/core.qualms");
+const TUTORIAL_PATH = resolve(REPO_ROOT, "qualms/specs/tutorial.qualms");
 const CLI_PATH = resolve(REPO_ROOT, "mcp/src/cli.ts");
 const TSX = resolve(REPO_ROOT, "mcp/node_modules/.bin/tsx");
 
@@ -212,5 +213,40 @@ describe("play acceptance: iterative mutate-and-play loop", () => {
       statements: { rows: { v: number }[] }[];
     };
     expect(qsc.statements[0]?.rows[0]?.v).toBe(7);
+  });
+});
+
+describe("play acceptance: prelude-free tutorial language", () => {
+  let client: Client;
+  let close: () => Promise<void>;
+  let sessionId: string;
+  beforeAll(async () => {
+    ({ client, close } = await startClient());
+    const r = await call(client, "start", { storyPaths: [TUTORIAL_PATH] });
+    expect(r.isError).not.toBe(true);
+    sessionId = (r.structuredContent as { sessionId: string }).sessionId;
+  });
+  afterAll(async () => {
+    await close();
+  });
+
+  it("returns compact DSL feedback for tutorial play failures and successes", async () => {
+    const locked = await call(client, "play", {
+      sessionId,
+      call: "Open(Player, Bars)",
+    });
+    expect(locked.isError).not.toBe(true);
+    expect((locked.structuredContent as { events: { feedback: string }[] }).events[0]).toMatchObject({
+      feedback: "fail { Locked(Bars); }",
+    });
+
+    const unlocked = await call(client, "play", {
+      sessionId,
+      call: "Unlock(Player, Bars, MasterKey)",
+    });
+    expect(unlocked.isError).not.toBe(true);
+    expect((unlocked.structuredContent as { events: { feedback: string }[] }).events[0]).toMatchObject({
+      feedback: "pass;",
+    });
   });
 });
