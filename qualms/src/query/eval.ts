@@ -58,7 +58,7 @@ function metaCtx(ctx: QueryContext): MetaContext {
 
 /** Resolve a Term given current bindings. Returns sentinel `UNBOUND` when not resolvable. */
 const UNBOUND = Symbol("unbound");
-type Resolved = Value | typeof UNBOUND;
+type Resolved = unknown | typeof UNBOUND;
 
 function resolveTerm(term: Term, env: Binding, ctx: QueryContext): Resolved {
   if (term.type === "value") return term.value;

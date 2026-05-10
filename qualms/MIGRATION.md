@@ -1,5 +1,33 @@
 # Qualms migration: Python → TypeScript
 
+## Current course change: prelude-free tutorial DSL
+
+The previous migration target made the prelude carry too much implied opinion:
+even a small "universal" module pushed the engine toward locations, text,
+names, display affordances, inventory, and lock semantics. The new target drops
+the prelude as a concept. A session starts from an empty story model plus any
+loaded story files; agents teach and evolve the model through the DSL, then use
+query and play to inspect behavior.
+
+The source of truth for the next language pass is
+`qualms/specs/tutorial.qualms`. It intentionally demonstrates higher-order
+engine concepts in story-authored language:
+
+- traits are marker capabilities, not field containers;
+- relations are the only mutable story state;
+- entities are ids with trait sets;
+- predicates are first-class callable definitions;
+- actions are guarded by `when` blocks and mutate via `set`;
+- `before` and `after` rules are part of the runtime call pipeline;
+- relation instances, such as `Path(Cell, Corridor)`, may be values in other
+  relations;
+- play feedback is compact DSL-shaped success or failure, not display text.
+
+This supersedes the "core prelude" parts of the plan below. Existing TypeScript
+transaction, query, MCP session, and test infrastructure should be reused, but
+the language/parser/runtime model now changes around the tutorial instead of
+around `qualms/prelude/core.qualms`.
+
 This document records the goals, scope, and constraints of the rewrite. It is the canonical reference for what changed, what was preserved, and what was deliberately deferred. The previous Python implementation lives at `deprecated/qualms/` and `deprecated/curses/` for reference.
 
 ## Why we are rewriting

@@ -1,0 +1,192 @@
+-- Tutorial fixture for the prelude-free Qualms language.
+-- This file is the target syntax for the redesign. It is not expected to load
+-- through the previous DSL v2 parser.
+
+-- (1) Minimal location
+-- Introduces: traits, relations, actions, entities, and the set statement.
+
+trait Actor
+trait Locatable
+trait Location
+
+relation At(Locatable, one Location)
+relation Path(Location, Location)
+
+action Go(actor: (Actor & Locatable) { At(actor, here) }, target: Location) {
+  when (Path(here, target)) {
+    set At(actor, target)
+  }
+}
+
+entity Cell { Location }
+entity Corridor { Location }
+entity Outside { Location }
+
+entity Player { Actor, Locatable }
+
+set {
+  Path(Cell, Corridor);
+  Path(Corridor, Cell);
+  Path(Corridor, Outside);
+  Path(Outside, Corridor);
+  At(Player, Cell);
+}
+
+-- (2) Extend with descriptions
+-- Introduces: predicates. Affinity between object and description is an
+-- interface concern; the story engine only reports success or failure.
+
+trait Describable
+
+predicate IsColocated(actor: (Actor & Locatable) { At(actor, here) }, target: Locatable) {
+  when (At(target, here)) {
+    pass;
+  }
+}
+
+action Examine(actor: Actor, target) {
+  when (At(actor, target) | IsColocated(actor, target)) {
+    pass;
+  }
+}
+
+entity Bars { Describable, Locatable }
+set {
+  At(Bars, Cell);
+}
+
+-- (3) Extend with portable items
+-- Introduces: after rules.
+
+trait Portable
+
+relation Carrying(Actor, Portable)
+
+action Take(actor: Actor, target: Portable) {
+  when (IsColocated(actor, target)) {
+    set Carrying(actor, target)
+  }
+}
+
+after Take(_, target: Locatable { At(target, here) }) {
+  set {
+    !At(target, here);
+  }
+}
+
+action Drop(actor: Actor, target: Portable) {
+  when (Carrying(actor, target)) {
+    set {
+      !Carrying(actor, target);
+    }
+  }
+}
+
+after Drop(actor: Locatable { At(actor, here) }, target: Locatable) {
+  set {
+    At(target, here);
+  }
+}
+
+-- (4) Extend with doors
+-- Introduces: before rules and relations between relation instances.
+
+trait Openable
+
+relation Opened(Openable)
+relation Gated(Path, one Openable)
+
+before Go(
+  actor: (Actor & Locatable) { At(actor, here) },
+  target: Location { Gated(Path(here, target), door) }
+) {
+  when (!Opened(door)) {
+    fail;
+  }
+}
+
+before IsColocated(
+  actor: (Actor & Locatable) { At(actor, here) },
+  target: Locatable
+) {
+  when (Gated(Path(here, _), door) & target == door) {
+    pass;
+  }
+}
+
+action Open(actor: Actor, door: Openable) {
+  when (IsColocated(actor, door)) {
+    set Opened(door)
+  }
+}
+
+before Open(_, door: Openable) {
+  when (Opened(door)) {
+    fail;
+  }
+}
+
+action Close(actor: Actor, door: Openable) {
+  when (IsColocated(actor, door)) {
+    set !Opened(door)
+  }
+}
+
+before Close(_, door: Openable) {
+  when (!Opened(door)) {
+    fail;
+  }
+}
+
+extend Bars { Openable }
+set {
+  !At(Bars, Cell);
+  Gated(Path(Cell, Corridor), Bars);
+  Gated(Path(Corridor, Cell), Bars);
+}
+
+-- (5) Extend doors to be lockable.
+
+trait Key
+trait Lockable
+
+relation Locked(Lockable)
+relation LockedWith(Lockable, Key)
+
+before Open(_, door: Lockable) {
+  when (Locked(door)) {
+    fail;
+  }
+}
+
+action Unlock(actor: Actor, door: Lockable, key: Key) {
+  when (IsColocated(actor, door) & LockedWith(door, key)) {
+    set !Locked(door)
+  }
+}
+
+before Unlock(_, door: Lockable, _) {
+  when (!Locked(door)) {
+    fail;
+  }
+}
+
+action Lock(actor: Actor, door: Lockable, key: Key) {
+  when (IsColocated(actor, door) & LockedWith(door, key)) {
+    set Locked(door)
+  }
+}
+
+before Lock(_, door: Lockable, _) {
+  when (Locked(door)) {
+    fail;
+  }
+}
+
+extend Bars { Lockable }
+entity MasterKey { Key }
+entity MakeshiftKey { Key }
+set {
+  Locked(Bars);
+  LockedWith(Bars, MasterKey);
+}
