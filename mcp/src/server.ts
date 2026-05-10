@@ -1,11 +1,3 @@
-/**
- * MCP server wiring — registers the lifecycle, query, and mutation tools on
- * an McpServer instance backed by a SessionManager. Tool names omit the
- * `__` prefix; the framework prepends `mcp__qualms__` at the wire level so
- * `start` is exposed as `mcp__qualms__start`. The CLI in cli.ts wires this
- * server to a stdio transport and starts it.
- */
-
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { z } from "zod";
@@ -51,38 +43,15 @@ export function buildServer(options: BuildServerOptions = {}): {
     "start",
     {
       description:
-        "Start a session. With `corePath`, loads the legacy engine path during migration. " +
-        "Without `corePath`, starts the prelude-free language model and loads story files directly.",
+        "Start a Qualms session using tutorial-era `.qualms` DSL files. No prelude or YAML story format is loaded.",
       inputSchema: {
-        corePath: z
-          .string()
-          .optional()
-          .describe("Optional legacy prelude path. Omit for prelude-free language sessions."),
         storyPaths: z
           .array(z.string())
           .optional()
-          .describe("Optional list of story `.qualms` files to load."),
+          .describe("Optional list of `.qualms` files written in the current tutorial DSL syntax."),
       },
     },
-    async (args) => {
-      try {
-        const out = handleStart(manager, {
-          corePath: args.corePath,
-          ...(args.storyPaths ? { storyPaths: args.storyPaths } : {}),
-        });
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(out, null, 2),
-            },
-          ],
-          structuredContent: out as unknown as Record<string, unknown>,
-        };
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+    async (args) => toolResult(() => handleStart(manager, args)),
   );
 
   server.registerTool(
@@ -93,274 +62,110 @@ export function buildServer(options: BuildServerOptions = {}): {
         sessionId: z.string(),
       },
     },
-    async (args) => {
-      try {
-        const out = handleQuit(manager, { sessionId: args.sessionId });
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(out) }],
-          structuredContent: out as unknown as Record<string, unknown>,
-        };
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+    async (args) => toolResult(() => handleQuit(manager, args)),
   );
 
   server.registerTool(
     "query",
     {
       description:
-        "Run one or more read-only DSL statements against the loaded definition+state. " +
-        "Accepts `query { vars | φ };`, `exists { φ };` (yes/no), `show <kind> <name>;`, " +
-        "and named-predicate definitions `name(p1, p2) :- φ;`. Multi-statement input " +
-        "(separated by `;`) returns one response per statement. Rejects `def`/`undef` " +
-        "(use `mutate`).",
+        "Inspect the loaded story model. Omit `expr` or pass `facts` for a summary; pass `show`, `show <kind>`, or `show <kind> <name>` for definitions; pass a DSL expression such as `At(actor, Cell)` or `Locked(Bars) & LockedWith(Bars, key)` for pattern results.",
       inputSchema: {
         sessionId: z.string(),
-        expr: z
-          .string()
-          .describe(
-            "DSL statement(s). Examples: `query { k | k : Kind & uses(k, \"Presentable\") };`, " +
-              "`exists { ∃ r : Relation. r.id = \"IsPlayer\" };`, `show trait Presentable;`. " +
-              "Legacy bare forms `?- φ` and `{ x | φ }` are auto-wrapped for backward compatibility.",
-          ),
+        expr: z.string().optional(),
       },
     },
-    async (args) => {
-      try {
-        const out = handleQuery(manager, { sessionId: args.sessionId, expr: args.expr });
-        return {
-          content: [
-            { type: "text" as const, text: JSON.stringify(out, null, 2) },
-          ],
-          structuredContent: out as unknown as Record<string, unknown>,
-        };
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+    async (args) => toolResult(() => handleQuery(manager, args)),
   );
 
   server.registerTool(
     "begin",
     {
       description:
-        "Open a structural transaction. Mutations apply in-place to the live " +
-        "definition + state so `query` mid-transaction sees pending changes; " +
-        "`rollback` restores the snapshot. One open transaction per session.",
+        "Open a transaction over the current story model. Mutations are visible immediately and can be rolled back or committed.",
       inputSchema: {
         sessionId: z.string(),
-        module: z
-          .enum(["game", "session"])
-          .describe(
-            "game: mutations land at the game module; `commit` writes the game " +
-              "slice to `targetPath` on disk. " +
-              "session: mutations land at the session module; `commit` is in-memory " +
-              "only this milestone (gameplay `save` lands later). " +
-              "prelude is read-only via MCP and rejected.",
-          ),
         targetPath: z
           .string()
           .optional()
-          .describe(
-            "Game-module only: target YAML file path for `commit`. Defaults to " +
-              "the single loaded story file when unambiguous.",
-          ),
+          .describe("Optional `.qualms` path to overwrite with normalized DSL on commit."),
       },
     },
-    async (args) => {
-      try {
-        const out = handleBegin(manager, {
-          sessionId: args.sessionId,
-          module: args.module,
-          ...(args.targetPath !== undefined ? { targetPath: args.targetPath } : {}),
-        });
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(out, null, 2) }],
-          structuredContent: out as unknown as Record<string, unknown>,
-        };
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+    async (args) => toolResult(() => handleBegin(manager, args)),
   );
 
   server.registerTool(
     "mutate",
     {
       description:
-        "Apply one or more mutation statements (def / undef / assert / retract / `:=`) " +
-        "to the open transaction. Multi-statement input (separated by `;`) applies in " +
-        "order and returns one ack per statement. Errors surface with category=parse for " +
-        "syntax issues, mutation-error categories for semantic ones. Rejects " +
-        "`query`/`exists`/`show` (use `query`).",
+        "Apply one or more tutorial DSL top-level statements to an open transaction. Examples include `trait`, `relation`, `action`, `predicate`, `before`, `after`, `entity`, `extend`, and `set`.",
       inputSchema: {
         sessionId: z.string(),
         transactionId: z.string(),
-        expr: z
-          .string()
-          .describe(
-            "Mutation statement(s). Examples: `def trait Combatant { hp: int = 10 };`, " +
-              "`def kind Foe: Combatant, Presentable;`, " +
-              "`def entity grunt: Foe { Presentable.name = \"Grunt\" };`, " +
-              "`assert IsPlayer(\"grunt\");`, `grunt.hp := 5;`, `undef trait Combatant;`.",
-          ),
+        expr: z.string().describe("A complete DSL program fragment in the current `.qualms` syntax."),
       },
     },
-    async (args) => {
-      try {
-        const out = handleMutate(manager, {
-          sessionId: args.sessionId,
-          transactionId: args.transactionId,
-          expr: args.expr,
-        });
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(out, null, 2) }],
-          structuredContent: out as unknown as Record<string, unknown>,
-        };
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+    async (args) => toolResult(() => handleMutate(manager, args)),
   );
 
   server.registerTool(
     "diff",
     {
       description:
-        "Report the mutations applied so far in the open transaction, plus a " +
-        "summary count of structural objects added/removed by category.",
+        "Report DSL snippets applied during the open transaction and model counts before/after.",
       inputSchema: {
         sessionId: z.string(),
         transactionId: z.string(),
       },
     },
-    async (args) => {
-      try {
-        const out = handleDiff(manager, {
-          sessionId: args.sessionId,
-          transactionId: args.transactionId,
-        });
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(out, null, 2) }],
-          structuredContent: out as unknown as Record<string, unknown>,
-        };
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+    async (args) => toolResult(() => handleDiff(manager, args)),
   );
 
   server.registerTool(
     "commit",
     {
       description:
-        "Finalize the open transaction. Game-module writes the game slice " +
-        "to the YAML file given at `begin` (response: persisted=true, targetPath). " +
-        "Session-module finalizes in memory only; persistence rides on gameplay " +
-        "`save` (response: persisted=false, reason=\"session-save-deferred\").",
+        "Finalize the open transaction. If a target path is available, writes the normalized `.qualms` story model.",
       inputSchema: {
         sessionId: z.string(),
         transactionId: z.string(),
       },
     },
-    async (args) => {
-      try {
-        const out = handleCommit(manager, {
-          sessionId: args.sessionId,
-          transactionId: args.transactionId,
-        });
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(out, null, 2) }],
-          structuredContent: out as unknown as Record<string, unknown>,
-        };
-      } catch (err) {
-        return errorResult(err);
-      }
+    async (args) => toolResult(() => handleCommit(manager, args)),
+  );
+
+  server.registerTool(
+    "rollback",
+    {
+      description: "Discard the open transaction and restore its snapshot.",
+      inputSchema: {
+        sessionId: z.string(),
+        transactionId: z.string(),
+      },
     },
+    async (args) => toolResult(() => handleRollback(manager, args)),
   );
 
   server.registerTool(
     "play",
     {
       description:
-        "Advance play one turn by invoking an action. Resolves the action, " +
-        "binds parameters from `args`, evaluates `requires` against current " +
-        "state, then applies the action's effects (assert/retract/`:=`/" +
-        "`+=`/`-=`/emit) to the live session_state. Returns emitted events. " +
-        "No transaction needed — runtime mutations bypass the structural log. " +
-        "Rules engine (before/during/after rule firing) is not implemented; " +
-        "only the action's own effects run. Prelude-free language sessions use " +
-        "`call` and return compact DSL feedback in the event payload.",
+        "Run an action call in the current DSL syntax, such as `Go(Player, Outside)`. Returns compact DSL feedback, e.g. `pass;` or `fail { !Path(Cell, Outside); }`.",
       inputSchema: {
         sessionId: z.string(),
-        action: z
-          .string()
-          .optional()
-          .describe("Action id, e.g. \"Take\", \"Move\", \"Examine\"."),
-        call: z
-          .string()
-          .optional()
-          .describe("Prelude-free language call, e.g. `Go(Player, Outside)`."),
-        args: z
-          .record(z.string(), z.unknown())
-          .optional()
-          .describe(
-            "Parameter bindings keyed by parameter name. Values are entity " +
-              "ids (strings) or primitive scalars. Missing parameters with " +
-              "defaults use their default; missing required parameters error.",
-          ),
+        call: z.string().describe("Action call in current DSL syntax."),
       },
     },
-    async (args) => {
-      try {
-        const out = handlePlay(manager, {
-          sessionId: args.sessionId,
-          ...(args.action !== undefined ? { action: args.action } : {}),
-          ...(args.call !== undefined ? { call: args.call } : {}),
-          ...(args.args !== undefined ? { args: args.args } : {}),
-        });
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(out, null, 2) }],
-          structuredContent: out as unknown as Record<string, unknown>,
-        };
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
-  );
-
-  server.registerTool(
-    "rollback",
-    {
-      description:
-        "Discard the open transaction's changes; restore the live def + state " +
-        "to the snapshot taken at `begin`.",
-      inputSchema: {
-        sessionId: z.string(),
-        transactionId: z.string(),
-      },
-    },
-    async (args) => {
-      try {
-        const out = handleRollback(manager, {
-          sessionId: args.sessionId,
-          transactionId: args.transactionId,
-        });
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(out, null, 2) }],
-          structuredContent: out as unknown as Record<string, unknown>,
-        };
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+    async (args) => toolResult(() => handlePlay(manager, args)),
   );
 
   return { server, manager };
 }
 
-export async function startServer(transport: Transport, options: BuildServerOptions = {}): Promise<{
+export async function startServer(
+  transport: Transport,
+  options: BuildServerOptions = {},
+): Promise<{
   server: McpServer;
   manager: SessionManager;
 }> {
@@ -369,17 +174,30 @@ export async function startServer(transport: Transport, options: BuildServerOpti
   return built;
 }
 
+function toolResult(fn: () => unknown): {
+  content: { type: "text"; text: string }[];
+  structuredContent: Record<string, unknown>;
+} | {
+  content: { type: "text"; text: string }[];
+  isError: true;
+} {
+  try {
+    const out = fn();
+    return {
+      content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
+      structuredContent: out as Record<string, unknown>,
+    };
+  } catch (err) {
+    return errorResult(err);
+  }
+}
+
 function errorResult(err: unknown): {
   content: { type: "text"; text: string }[];
   isError: true;
 } {
   let message: string;
-  if (err instanceof QueryError) {
-    const span = err.span ? ` (offset ${err.span.startOffset ?? "?"})` : "";
-    message = `[${err.category}] ${err.message}${span}`;
-  } else if (err instanceof MutationError) {
-    message = `[${err.category}] ${err.message}`;
-  } else if (err instanceof PlayError) {
+  if (err instanceof QueryError || err instanceof MutationError || err instanceof PlayError) {
     message = `[${err.category}] ${err.message}`;
   } else if (
     err instanceof TransactionNotFoundError ||
@@ -393,7 +211,7 @@ function errorResult(err: unknown): {
     message = String(err);
   }
   return {
-    content: [{ type: "text" as const, text: message }],
+    content: [{ type: "text", text: message }],
     isError: true,
   };
 }

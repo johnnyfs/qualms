@@ -69,6 +69,10 @@ export function parseRelationAtom(source: string): RelationAtom {
   return new Parser(tokenize(source)).parseRelationAtomDocument();
 }
 
+export function parseExpression(source: string): Expression {
+  return new Parser(tokenize(source)).parseExpressionDocument();
+}
+
 function tokenize(source: string): Token[] {
   const tokens: Token[] = [];
   let i = 0;
@@ -207,6 +211,13 @@ class Parser {
     this.skipSemis();
     this.expect("eof");
     return atom;
+  }
+
+  parseExpressionDocument(): Expression {
+    const expression = this.expression();
+    this.skipSemis();
+    this.expect("eof");
+    return expression;
   }
 
   private topLevelStatement(): TopLevelStatement {

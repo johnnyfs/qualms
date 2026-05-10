@@ -1,23 +1,9 @@
 #!/usr/bin/env node
-/**
- * CLI entry point for the qualms MCP server.
- *
- * Usage:
- *   qualms-mcp --core <path/to/core.qualms> [--story <path>]...
- *
- * The server reads/writes MCP messages on stdio. `--core` is required and
- * declares the protected prelude path (defaults to the migrated prelude when
- * not specified, but only if it exists at the conventional location).
- */
-
 import { existsSync } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { startServer } from "./server.js";
 
 interface ParsedArgs {
-  corePath?: string;
   storyPaths: string[];
   showHelp: boolean;
 }
@@ -25,39 +11,24 @@ interface ParsedArgs {
 function parseArgs(argv: string[]): ParsedArgs {
   const args: ParsedArgs = { storyPaths: [], showHelp: false };
   for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--core") {
-      args.corePath = argv[++i];
-    } else if (a === "--story") {
+    const arg = argv[i];
+    if (arg === "--story") {
       const next = argv[++i];
       if (next) args.storyPaths.push(next);
-    } else if (a === "--help" || a === "-h") {
+    } else if (arg === "--help" || arg === "-h") {
       args.showHelp = true;
     }
   }
   return args;
 }
 
-function defaultCorePath(): string | undefined {
-  // src/ is one level above the package root after compile; resolve relative to
-  // this file's directory and walk up to find prelude.
-  const here = dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    resolve(here, "../prelude/core.qualms"),
-    resolve(here, "../../qualms/prelude/core.qualms"),
-    resolve(here, "../../../qualms/prelude/core.qualms"),
-  ];
-  return candidates.find((p) => existsSync(p));
-}
-
 function printHelp(): void {
   process.stdout.write(
-    `qualms-mcp — MCP server for the Qualms engine\n\n` +
+    `qualms-mcp - MCP server for the Qualms tutorial DSL\n\n` +
       `Usage:\n` +
-      `  qualms-mcp --core <prelude.qualms> [--story <story.qualms>]...\n\n` +
+      `  qualms-mcp [--story <story.qualms>]...\n\n` +
       `Options:\n` +
-      `  --core   PATH   Path to the prelude (required if not auto-discoverable).\n` +
-      `  --story  PATH   Path to a story file. Repeatable.\n` +
+      `  --story  PATH   Optional story file path to advertise in startup logs. Sessions load files via the start tool.\n` +
       `  --help          Show this message.\n`,
   );
 }
@@ -68,29 +39,17 @@ async function main(): Promise<void> {
     printHelp();
     return;
   }
-  const corePath = args.corePath ?? defaultCorePath();
-  if (!corePath) {
-    process.stderr.write(
-      "qualms-mcp: --core is required (no default prelude found)\n",
-    );
-    printHelp();
-    process.exit(2);
+  for (const storyPath of args.storyPaths) {
+    if (!existsSync(storyPath)) {
+      process.stderr.write(`qualms-mcp: story path not found: ${storyPath}\n`);
+      process.exit(2);
+    }
   }
-  if (!existsSync(corePath)) {
-    process.stderr.write(`qualms-mcp: core path not found: ${corePath}\n`);
-    process.exit(2);
-  }
+
   const transport = new StdioServerTransport();
   await startServer(transport);
+  process.stderr.write(`qualms-mcp: ready (${args.storyPaths.length} story paths advertised)\n`);
 
-  // The server doesn't use --core/--story to auto-load; sessions are started
-  // by the client via the `start` tool. We surface the resolved path on stderr
-  // so operators know which prelude is available.
-  process.stderr.write(
-    `qualms-mcp: ready (prelude at ${corePath}, ${args.storyPaths.length} story files configured)\n`,
-  );
-
-  // Keep the process alive until the transport closes.
   process.on("SIGINT", () => {
     process.exit(0);
   });

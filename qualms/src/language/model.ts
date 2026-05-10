@@ -39,6 +39,18 @@ export class StoryModel {
   readonly entities = new Map<string, Set<string>>();
   private readonly facts = new Map<string, Fact>();
 
+  clone(): StoryModel {
+    const clone = new StoryModel();
+    for (const [id, trait] of this.traits) clone.traits.set(id, trait);
+    for (const [id, relation] of this.relations) clone.relations.set(id, relation);
+    for (const [id, predicate] of this.predicates) clone.predicates.set(id, predicate);
+    for (const [id, action] of this.actions) clone.actions.set(id, action);
+    clone.rules.push(...this.rules);
+    for (const [id, traits] of this.entities) clone.entities.set(id, new Set(traits));
+    for (const [key, fact] of this.facts) clone.facts.set(key, fact);
+    return clone;
+  }
+
   apply(program: Program): void {
     for (const statement of program.statements) {
       switch (statement.kind) {

@@ -23,9 +23,56 @@ import type {
   TypeExpr,
   WhenStatement,
 } from "./ast.js";
+import type { Fact, GroundTerm, StoryModel } from "./model.js";
 
 export function emitProgram(program: Program): string {
   return program.statements.map(emitTopLevelStatement).join("\n\n") + "\n";
+}
+
+export function emitStoryModel(model: StoryModel): string {
+  return emitProgram(programFromModel(model));
+}
+
+export function programFromModel(model: StoryModel): Program {
+  const statements: TopLevelStatement[] = [
+    ...model.traits.values(),
+    ...model.relations.values(),
+    ...model.predicates.values(),
+    ...model.actions.values(),
+    ...model.rules,
+  ];
+  for (const [id, traits] of model.entities) {
+    statements.push({ kind: "entity", id, traits: [...traits] });
+  }
+  const effects = model.listFacts().map(factToEffect);
+  if (effects.length > 0) statements.push({ kind: "set", effects });
+  return { statements };
+}
+
+function factToEffect(fact: Fact): SetEffect {
+  return {
+    polarity: "assert",
+    atom: {
+      relation: fact.relation,
+      args: fact.args.map(termFromGround),
+    },
+  };
+}
+
+function termFromGround(term: GroundTerm): Term {
+  switch (term.kind) {
+    case "id":
+      return { kind: "identifier", id: term.id };
+    case "string":
+      return { kind: "string", value: term.value };
+    case "number":
+      return { kind: "number", value: term.value };
+    case "relation":
+      return {
+        kind: "relationInstance",
+        atom: { relation: term.relation, args: term.args.map(termFromGround) },
+      };
+  }
 }
 
 export function emitTopLevelStatement(statement: TopLevelStatement): string {
@@ -176,4 +223,3 @@ function indent(text: string): string {
     .map((line) => `  ${line}`)
     .join("\n");
 }
-

@@ -1,5 +1,4 @@
 # Stories
 
-Story data lives here. The current source format is Qualms YAML.
-
-Each story directory should contain a `story.qualms.yaml` file.
+Active stories should be written as current-syntax `.qualms` files. The previous
+YAML stories and preludes were moved to `deprecated/typescript-legacy/stories/`.
