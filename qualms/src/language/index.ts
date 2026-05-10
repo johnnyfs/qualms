@@ -9,6 +9,9 @@ export {
   idTerm,
   loadStoryProgram,
   relationTerm,
+  termKey,
 } from "./model.js";
 export type { Fact, GroundTerm } from "./model.js";
-export { LanguageParseError, parseProgram } from "./parser.js";
+export { LanguageParseError, parseProgram, parseRelationAtom } from "./parser.js";
+export { languageRuntimeInternals, playLanguageCall } from "./runtime.js";
+export type { LanguagePlayResult } from "./runtime.js";

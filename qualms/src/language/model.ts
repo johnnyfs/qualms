@@ -81,6 +81,7 @@ export class StoryModel {
 
   assertFact(fact: Fact): void {
     this.requireRelation(fact.relation);
+    this.applyCardinality(fact);
     this.facts.set(factKey(fact), fact);
   }
 
@@ -136,6 +137,27 @@ export class StoryModel {
   private requireRelation(id: string): void {
     if (!this.relations.has(id)) throw new LanguageModelError(`unknown relation '${id}'`);
   }
+
+  private applyCardinality(fact: Fact): void {
+    const relation = this.relations.get(fact.relation);
+    if (!relation) return;
+    const oneIndexes = relation.parameters
+      .map((parameter, index) => (parameter.cardinality === "one" ? index : -1))
+      .filter((index) => index >= 0);
+    if (oneIndexes.length === 0) return;
+
+    for (const existing of this.listFacts(fact.relation)) {
+      let sameKey = true;
+      for (let i = 0; i < relation.parameters.length; i++) {
+        if (oneIndexes.includes(i)) continue;
+        if (termKey(existing.args[i]) !== termKey(fact.args[i])) {
+          sameKey = false;
+          break;
+        }
+      }
+      if (sameKey) this.facts.delete(factKey(existing));
+    }
+  }
 }
 
 export function loadStoryProgram(source: string | Program): StoryModel {
@@ -175,6 +197,10 @@ export function factKey(fact: Fact): string {
   return `${fact.relation}|${JSON.stringify(fact.args)}`;
 }
 
+export function termKey(term: GroundTerm | undefined): string {
+  return JSON.stringify(term);
+}
+
 export function idTerm(id: string): GroundTerm {
   return { kind: "id", id };
 }
@@ -182,4 +208,3 @@ export function idTerm(id: string): GroundTerm {
 export function relationTerm(relation: string, args: readonly GroundTerm[]): GroundTerm {
   return { kind: "relation", relation, args };
 }
-

@@ -65,6 +65,10 @@ export function parseProgram(source: string): Program {
   return new Parser(tokenize(source)).parseProgram();
 }
 
+export function parseRelationAtom(source: string): RelationAtom {
+  return new Parser(tokenize(source)).parseRelationAtomDocument();
+}
+
 function tokenize(source: string): Token[] {
   const tokens: Token[] = [];
   let i = 0;
@@ -196,6 +200,13 @@ class Parser {
       this.skipSemis();
     }
     return { statements };
+  }
+
+  parseRelationAtomDocument(): RelationAtom {
+    const atom = this.relationAtom();
+    this.skipSemis();
+    this.expect("eof");
+    return atom;
   }
 
   private topLevelStatement(): TopLevelStatement {
@@ -548,4 +559,3 @@ class Parser {
     });
   }
 }
-
