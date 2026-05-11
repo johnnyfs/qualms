@@ -59,6 +59,11 @@ describe("MCP play with tutorial-syntax stories", () => {
       status: "failed",
       feedback: "fail { Locked(Bars); }",
     });
+    // Walk the stage-9 conversation tree to receive the master key from
+    // the guard; only then can Unlock succeed.
+    await call(client, "play", { sessionId, call: "TalkAbout(Player, Guard, Whatever)" });
+    await call(client, "play", { sessionId, call: "TalkAbout(Player, Guard, Bribery)" });
+    await call(client, "play", { sessionId, call: "TalkAbout(Player, Guard, OfferAFavor)" });
     expect(
       (await call(client, "play", {
         sessionId,

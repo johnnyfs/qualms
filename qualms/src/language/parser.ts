@@ -228,6 +228,7 @@ class Parser {
     if (this.matchKeyword("predicate")) return this.callableStatement("predicate");
     if (this.matchKeyword("before")) return this.ruleStatement("before");
     if (this.matchKeyword("after")) return this.ruleStatement("after");
+    if (this.matchKeyword("on")) return this.ruleStatement("on");
     if (this.matchKeyword("entity")) return this.entityStatement();
     if (this.matchKeyword("extend")) return this.extendStatement();
     if (this.matchKeyword("set")) return this.setStatement();
@@ -277,7 +278,7 @@ class Parser {
     return { kind, id, parameters, body };
   }
 
-  private ruleStatement(phase: "before" | "after"): RuleStatement {
+  private ruleStatement(phase: "before" | "after" | "on"): RuleStatement {
     this.expectKeyword(phase);
     const target = this.identifier();
     const parameters = this.callParameters();
@@ -326,6 +327,17 @@ class Parser {
       return this.withConstraints({ wildcard: true, ...(type ? { type } : {}), constraints: [] });
     }
 
+    // Sugar: a bare PascalCase identifier in slot position (not followed by
+    // `:`) is treated as `_: <Identifier>`. Used to write rule parameters
+    // that match a specific entity (e.g. `Guard`) or a bare type (e.g.
+    // `Location`) without bothering to name the binding. Lowercase bare
+    // identifiers stay as untyped named parameters (e.g. `target` in the
+    // existing `Examine(actor: Actor, target)` shape).
+    if (this.atTypeIshIdent()) {
+      const type = this.typeExpr();
+      return this.withConstraints({ wildcard: true, type, constraints: [] });
+    }
+
     const name = this.identifier();
     let type: TypeExpr | undefined;
     if (this.consumeIf("colon")) type = this.typeExpr();
@@ -335,6 +347,15 @@ class Parser {
       ...(type ? { type } : {}),
       constraints: [],
     });
+  }
+
+  private atTypeIshIdent(): boolean {
+    const token = this.peek();
+    if (token.type !== "identifier") return false;
+    const first = token.image[0];
+    if (!first || first < "A" || first > "Z") return false;
+    const next = this.peekAhead(1);
+    return next.type !== "colon";
   }
 
   private withConstraints(pattern: ParameterPattern): ParameterPattern {
@@ -560,6 +581,10 @@ class Parser {
 
   private peek(): Token {
     return this.tokens[this.index] ?? this.tokens[this.tokens.length - 1]!;
+  }
+
+  private peekAhead(offset: number): Token {
+    return this.tokens[this.index + offset] ?? this.tokens[this.tokens.length - 1]!;
   }
 
   private previous(): Token {

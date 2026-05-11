@@ -23,11 +23,11 @@ describe("tutorial language model", () => {
 
     expect(model.traits.size).toBe(10);
     expect(model.relations.size).toBe(12);
-    expect(model.predicates.size).toBe(3);
+    expect(model.predicates.size).toBe(4);
     expect(model.actions.size).toBe(10);
-    expect(model.rules).toHaveLength(12);
-    expect(model.entities.size).toBe(19);
-    expect(model.listFacts()).toHaveLength(27);
+    expect(model.rules).toHaveLength(14);
+    expect(model.entities.size).toBe(20);
+    expect(model.listFacts()).toHaveLength(28);
     expect(model.hasFact("TalksAbout", [idTerm("Guard"), idTerm("Bribery")])).toBe(false);
     expect(model.hasFact("TalksAbout", [idTerm("Guard"), idTerm("Whatever")])).toBe(true);
 

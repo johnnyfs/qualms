@@ -45,7 +45,7 @@ export function playLanguageCall(model: StoryModel, call: string | RelationAtom)
 
   const args = atom.args.map(groundTermFromTerm);
   const effects: Effect[] = [];
-  const result = executeCallable(model, callable, args, "action", {}, effects);
+  const result = executeCallable(model, callable, args, "action", effects);
   return result.status === "passed"
     ? { status: "passed", feedback: "succeed;", reasons: [], effects }
     : failResult(result.reasons, effects);
@@ -69,24 +69,23 @@ function executeCallable(
   callable: CallableStatement,
   args: readonly GroundTerm[],
   mode: "action" | "predicate",
-  baseEnv: Env,
   effects: Effect[],
 ): BlockResult {
-  const bound = bindParameters(model, callable.parameters, args, baseEnv, effects);
+  const bound = bindParameters(model, callable.parameters, args, effects);
   if (bound.length === 0) {
     return {
       status: "failed",
-      env: baseEnv,
+      env: {},
       reasons: [`!${callable.id}(${args.map(emitGroundTerm).join(", ")})`],
     };
   }
 
   for (const env of bound) {
-    // Before-rules see only the caller-supplied baseEnv, not the action's
-    // parameter-bound env. The action's parameter names are internal to the
-    // body; rules re-bind the original positional args against their own
-    // patterns and must not inherit names from a sibling pattern shape.
-    const before = runRules(model, "before", callable.id, args, baseEnv, effects);
+    // Parameter scopes are fresh: rules attached to this callable do not
+    // inherit names from the caller's env, and after-rules do not inherit
+    // names from the body's env. Rule parameter constraints re-introduce
+    // any names they need.
+    const before = runRules(model, "before", callable.id, args, effects);
     if (before.status === "failed" && before.terminal === "fail") return before;
     if (before.status === "passed" && before.terminal === "succeed") return before;
 
@@ -99,7 +98,15 @@ function executeCallable(
     }
 
     if (mode === "action") {
-      const after = runRules(model, "after", callable.id, args, body.env, effects);
+      // `on` rules fire after a successful body and may preempt the action
+      // by failing. They are the right home for validation that depends on
+      // the action having got this far (e.g. checking carry-state for a
+      // chosen offer). The engine has no transactional rollback, so on-rules
+      // should fail before issuing any set-effects of their own.
+      const onPhase = runRules(model, "on", callable.id, args, effects);
+      if (onPhase.status === "failed" && onPhase.terminal === "fail") return onPhase;
+
+      const after = runRules(model, "after", callable.id, args, effects);
       if (after.status === "failed" && after.terminal === "fail") return after;
     }
     return body;
@@ -107,23 +114,22 @@ function executeCallable(
 
   return {
     status: "failed",
-    env: baseEnv,
+    env: {},
     reasons: [`!${callable.id}(${args.map(emitGroundTerm).join(", ")})`],
   };
 }
 
 function runRules(
   model: StoryModel,
-  phase: "before" | "after",
+  phase: "before" | "after" | "on",
   target: string,
   args: readonly GroundTerm[],
-  env: Env,
   effects: Effect[],
 ): BlockResult {
   const noMatchReasons: string[] = [];
   for (const rule of model.rules) {
     if (rule.phase !== phase || rule.target !== target) continue;
-    const bound = bindParameters(model, rule.parameters, args, env, effects);
+    const bound = bindParameters(model, rule.parameters, args, effects);
     for (const ruleEnv of bound) {
       const outcome = executeRuleBlock(model, rule, ruleEnv, effects);
       if (outcome.status === "failed" && outcome.terminal === "fail") return outcome;
@@ -137,7 +143,7 @@ function runRules(
       }
     }
   }
-  return { status: "no_match", env, reasons: noMatchReasons };
+  return { status: "no_match", env: {}, reasons: noMatchReasons };
 }
 
 function blockHasSucceed(block: Block): boolean {
@@ -156,11 +162,10 @@ function bindParameters(
   model: StoryModel,
   patterns: readonly ParameterPattern[],
   args: readonly GroundTerm[],
-  baseEnv: Env,
   effects: Effect[],
 ): Env[] {
   if (patterns.length !== args.length) return [];
-  let envs: Env[] = [{ ...baseEnv }];
+  let envs: Env[] = [{}];
   for (let i = 0; i < patterns.length; i++) {
     const pattern = patterns[i]!;
     const arg = args[i]!;
@@ -279,8 +284,10 @@ function evalRelation(model: StoryModel, atom: RelationAtom, env: Env, effects: 
   if (predicate) {
     const args = atom.args.map((term) => resolveTerm(term, env));
     if (args.some((arg) => arg === undefined)) return [];
-    const result = executeCallable(model, predicate, args as GroundTerm[], "predicate", env, effects);
-    return result.status === "passed" ? [result.env] : [];
+    const result = executeCallable(model, predicate, args as GroundTerm[], "predicate", effects);
+    // Predicate parameter names live in the predicate's own scope; the
+    // caller continues with the env it had before the call.
+    return result.status === "passed" ? [env] : [];
   }
 
   const out: Env[] = [];
@@ -388,6 +395,10 @@ function matchesType(model: StoryModel, value: GroundTerm, type: TypeExpr): bool
   if (model.relations.has(type.id)) {
     return value.kind === "relation" && value.relation === type.id;
   }
+  if (model.entities.has(type.id)) {
+    // Entity-literal slot: parameter only binds when the arg is this entity.
+    return value.kind === "id" && value.id === type.id;
+  }
   return false;
 }
 
@@ -402,7 +413,7 @@ function explainExpression(model: StoryModel, expression: Expression, env: Env):
       if (predicate) {
         const args = expression.atom.args.map((term) => resolveTerm(term, env));
         if (args.every((arg) => arg !== undefined)) {
-          const result = executeCallable(model, predicate, args as GroundTerm[], "predicate", env, discard);
+          const result = executeCallable(model, predicate, args as GroundTerm[], "predicate", discard);
           if (result.status === "failed" && result.reasons.length > 0) {
             return [...result.reasons];
           }

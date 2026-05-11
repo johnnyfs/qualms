@@ -13,6 +13,14 @@ describe("engine-tracked effects", () => {
   it("reports assert and retract effects from a passing action", () => {
     const model = loadStoryProgram(readFileSync(TUTORIAL_PATH, "utf-8"));
 
+    // Stage 9 moved the master key to the guard. Walk the conversation tree
+    // so the after-rule transfers it; the intervening calls have their own
+    // effects that we don't assert on here — the Unlock set below is the
+    // focus.
+    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)").status).toBe("passed");
+    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Bribery)").status).toBe("passed");
+    expect(playLanguageCall(model, "TalkAbout(Player, Guard, OfferAFavor)").status).toBe("passed");
+
     const unlock = playLanguageCall(model, "Unlock(Player, Bars, MasterKey)");
     expect(unlock.status).toBe("passed");
     expect(unlock.effects).toEqual([
