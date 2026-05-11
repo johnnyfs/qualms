@@ -27,7 +27,7 @@ The lexer produces the following token classes:
 | number      | `[0-9][0-9.]*` (parsed via JavaScript `Number`)     |
 | string      | `"..."`; backslash escapes the following character  |
 | punctuation | `(` `)` `{` `}` `,` `:` `;` `!` `&` \|`             |
-| operator    | `==`                                                |
+| operator    | `==` `=>`                                           |
 | eof         | implicit end-of-input sentinel                      |
 
 Whitespace (space, tab, CR, LF) is insignificant. A line comment starts with
@@ -44,9 +44,10 @@ matches them by image at fixed grammatical positions. Authors should avoid
 using these names for traits, relations, predicates, actions, or entities:
 
 ```
-action  after   before  entity  extend  fail    one
-predicate       relation        replace succeed
-set     trait   when    _
+action  after   assert  before  entity  extend  fact    fail
+failed  not     one     passed  play    predicate       query
+relation        replace succeed set      trait   validation
+when    _
 ```
 
 The identifier `Any` is not a keyword; it is a reserved trait/type name
@@ -69,6 +70,7 @@ TopLevel       ::= TraitDecl
                  | EntityDecl
                  | ExtendDecl
                  | SetStatement
+                 | ValidationDecl
 
 TraitDecl      ::= "trait" <id>
 RelationDecl   ::= "relation" <id> "(" [ RelationParam { "," RelationParam } ] ")"
@@ -98,6 +100,14 @@ WhenStmt       ::= "when" "(" Expr ")" Block
 SetStatement   ::= "set" SetEffect
                  | "set" "{" { SetEffect [ ";" ] } "}"
 SetEffect      ::= [ "!" ] RelationAtom
+
+ValidationDecl ::= "validation" <id> "{"
+                   { ValidationAssertion [ ";" ] }
+                   "}"
+ValidationAssertion
+               ::= "assert" [ "not" ] "fact" RelationAtom
+                 | "assert" [ "not" ] "query" Expr
+                 | "assert" "play" RelationAtom "=>" ( "passed" | "failed" )
 
 RelationAtom   ::= <id> "(" [ Term { "," Term } ] ")"
 
@@ -191,6 +201,8 @@ predicates are internal helpers callable from `when` clauses (§ 5.5).
 
 Both kinds share parameter pattern syntax (§ 4) and block body grammar (§ 5).
 The runtime distinguishes them by whether `after` rules fire (§ 5.3.4).
+Predicates are pure: a predicate body cannot contain `set`, and a rule
+attached to a predicate cannot contain `set`.
 
 By default, redeclaring a callable raises `LanguageModelError`. Prefixing
 the declaration with `replace` overrides the prior definition in place:
@@ -226,6 +238,9 @@ The grammar does not require the rule's parameter list to mirror the
 callable's parameter list one-for-one in name or type — only that the arity
 matches. Wildcards and renames are common.
 
+Rules must target an existing callable. `after` rules may target actions only;
+`before` rules may target actions or predicates.
+
 ### 3.5 `entity` and `extend`
 
 ```
@@ -260,6 +275,24 @@ asserts.
 
 All identifiers inside a top-level `set` must be ground (entity ids or
 literals). Wildcards and free variables are not legal here.
+
+### 3.7 `validation`
+
+```
+validation TutorialSmoke {
+  assert fact At(Player, Cell);
+  assert not query At(Player, Outside);
+  assert play Go(Player, Outside) => failed;
+}
+```
+
+Validation declarations define regression checks that can be run before
+committing authored mutations. They are part of the model but do not execute
+during load. A validation assertion may require a fact to be present or absent,
+an expression query to match or not match, or an action call to pass or fail.
+
+Validation `query` and `play` assertions are pure with respect to the live
+model. `play` validations run against a candidate clone and discard all effects.
 
 ---
 
@@ -558,6 +591,11 @@ argument is one of:
 Two facts are equal iff they have the same relation symbol and
 structurally equal argument lists.
 
+Every asserted or retracted fact must match the declared relation arity and
+argument types. Trait-typed arguments must name declared entities carrying that
+trait. Relation-typed arguments must be relation-instance ground terms whose
+inner relation tuple is itself well-formed.
+
 ### 6.2 Effects
 
 Effects are produced by `set` statements. They run synchronously against
@@ -573,9 +611,11 @@ relation '…'")`.
 
 Effects inside a callable body run during execution; they are visible to
 later body statements and to other rules invoked later in the same call.
-There is no rollback within a call — a `fail;` after a successful `set`
-leaves the asserted facts in place. (Atomicity across an entire call is
-provided externally by the MCP transaction layer; see `protocol.md` § 4.)
+Action calls are atomic: effects are staged against a candidate model and are
+committed to the live model only if the action body and all applicable `after`
+rules pass. A `fail;` after a successful `set`, including a failing `after`
+rule, rolls back every effect produced by that action attempt. Predicate and
+query evaluation is pure and cannot commit effects.
 
 ### 6.3 Cardinality enforcement
 
@@ -617,7 +657,22 @@ Where a value remains unbound, the emitter prints `_`.
 
 ---
 
-## 8. Static Errors
+## 8. Validation Result Encoding
+
+`runLanguageValidations(model)` returns:
+
+```ts
+{ status: "passed"; failures: [] }
+| { status: "failed"; failures: [{ validation, assertion, message }, ...] }
+```
+
+`validation` is the validation declaration id. `assertion` is a one-based index
+within that declaration. `message` is diagnostic text and is not the canonical
+data representation of the failed assertion.
+
+---
+
+## 9. Static Errors
 
 The model and parser raise structured errors:
 
@@ -626,6 +681,10 @@ The model and parser raise structured errors:
 | `LanguageParseError`   | Lexical or grammatical failures, with span.            |
 | `LanguageModelError`   | Semantic failures (duplicate decls, missing trait, etc.). |
 
+Semantic failures include unknown type names, invalid fact arity, invalid fact
+argument types, unknown rule targets, rule arity mismatches, `after` rules on
+predicates, and mutating predicates.
+
 These propagate out of `parseProgram` / `loadStoryProgram` and through
 the MCP layer as categorised `QueryError`, `MutationError`, or
 `PlayError` with a `category` of `"parse"`, `"evaluate"`, `"scope_error"`,
@@ -633,7 +692,7 @@ or `"missing_arg"`.
 
 ---
 
-## 9. Round-Tripping
+## 10. Round-Tripping
 
 The emitter (`emitProgram`, `emitStoryModel`) produces canonical DSL text
 from a `StoryModel`. The order is:
@@ -647,6 +706,7 @@ from a `StoryModel`. The order is:
    that includes the union of original traits and any extensions;
 7. a single trailing `set { … }` block containing all current facts as
    assertions.
+8. validations, in declaration order.
 
 `extend` is not emitted because it is folded into the entity's trait set.
 Retract effects are not emitted because the fact base is normalised to
@@ -655,4 +715,4 @@ positive assertions at commit time.
 A round-trip of a parsed program through the model and emitter is *not*
 expected to be byte-identical to the source. It is expected to be
 semantically equivalent (same declarations, same fact base, same entity
-trait sets).
+trait sets, same validation declarations).

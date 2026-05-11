@@ -98,7 +98,7 @@ sequenceDiagram
 ```
 
 `counts` covers `traits`, `relations`, `predicates`, `actions`, `rules`,
-`entities`, `facts`. Each `FactRecord` carries structured `args` plus a
+`validations`, `entities`, `facts`. Each `FactRecord` carries structured `args` plus a
 ready-to-print `text` form.
 
 ### 2.2 `query` — show mode
@@ -125,8 +125,8 @@ sequenceDiagram
 ```
 
 `targetKind` recognises any AST kind that the emitter produces:
-`trait`, `relation`, `predicate`, `action`, `rule`, `entity`, `set`. The
-sentinel value `"all"` is returned when `<kind>` is omitted.
+`trait`, `relation`, `predicate`, `action`, `rule`, `entity`, `set`, and
+`validation`. The sentinel value `"all"` is returned when `<kind>` is omitted.
 
 ### 2.3 `query` — expression mode
 
@@ -272,13 +272,18 @@ sequenceDiagram
   participant Manager
   participant Session
   participant Tx
+  participant Runtime
   participant Emitter
   participant FS as fs
 
   Client->>Server: commit { sessionId, transactionId }
   Server->>Manager: requireTransaction(sessionId, transactionId)
   Manager-->>Server: { session, tx }
-  alt tx.targetPath unset
+  Server->>Runtime: runLanguageValidations(session.model)
+  alt validations failed
+    Runtime-->>Server: { status: "failed", failures }
+    Server-->>Client: error "[scope_error] validation failed: ..."
+  else validations passed and tx.targetPath unset
     Server->>Manager: commit(sessionId, transactionId)
     Manager->>Session: transaction = null
     Manager-->>Server: { committed }
@@ -363,12 +368,12 @@ sequenceDiagram
   end
 ```
 
-`play` operates on the live model. If a transaction is open, the play
-sees its in-progress effects; `set` effects executed inside the action
-body persist into the live model and survive a subsequent `rollback`
-only if `rollback` is called *outside* the play — i.e. play mutations
-made within an open transaction can be reverted by rolling that
-transaction back.
+`play` reads the live model but executes atomically against a cloned candidate
+model. If the action body and applicable `after` rules pass, the returned
+effects are committed to the live model in order. If the body or an `after`
+rule fails, no staged effects are committed. If a transaction is open, committed
+play effects are still part of the live transaction state and can be reverted by
+rolling that transaction back.
 
 ### 4.1 Callable evaluation detail
 
@@ -424,7 +429,7 @@ is not an error).
 | Tool      | Error class            | Categories                       |
 | --------- | ---------------------- | -------------------------------- |
 | `query`   | `QueryError`           | `parse`, `evaluate`              |
-| `mutate`  | `MutationError`        | `parse`, `scope_error` (declared but not currently emitted) |
+| `mutate` / `commit` | `MutationError` | `parse`, `scope_error` |
 | `play`    | `PlayError`            | `parse`, `missing_arg`           |
 | any       | `SessionNotFoundError` | —                                |
 | any tx    | `TransactionNotFoundError` / `TransactionAlreadyOpenError` | — |
@@ -449,5 +454,7 @@ remaining errors only the message is included.
 - `commit` finalises the live model and optionally writes it to disk.
   Without `targetPath`, `commit` is functionally indistinguishable from
   "stop tracking, keep changes."
+- `commit` first runs all first-class validations. Failed validations block
+  commit and keep the transaction open.
 - `rollback` is the only way to undo mutations or play effects produced
   during the open transaction.

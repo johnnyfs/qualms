@@ -292,11 +292,10 @@ describe("tutorial language runtime", () => {
       model.hasFact("InConversation", [idTerm("Player"), idTerm("Guard"), idTerm("Bribery")]),
     ).toBe(true);
 
-    // Step one more level deep. Stage 9 attaches an `on` rule to
-    // OfferMoney that fails when the actor isn't carrying Money. The on-rule
-    // runs after the body and before the after-rule, so when it fails the
-    // after-rule never runs and InConversation is not advanced — the player
-    // stays at Bribery and can try a different offer.
+    // Step one more level deep. Stage 9 attaches an after-rule to OfferMoney
+    // that fails when the actor isn't carrying Money. Because actions are
+    // atomic, the conversation update is rolled back and the player stays at
+    // Bribery.
     expect(playLanguageCall(model, "TalkAbout(Player, Guard, OfferMoney)").status).toBe("failed");
     expect(
       model.hasFact("InConversation", [idTerm("Player"), idTerm("Guard"), idTerm("OfferMoney")]),
@@ -458,9 +457,9 @@ describe("tutorial language runtime", () => {
       feedback: "fail { !Carrying(Player, MasterKey); }",
     });
 
-    // Walk to the OfferMoney leaf: action body passes, after-rule does NOT
-    // run (the `on` rule fires first and fails for !Carrying(_, Money)), so
-    // InConversation does not advance past Bribery.
+    // Walk to the OfferMoney leaf: action body passes, but the failing
+    // after-rule rolls back the whole action, so InConversation does not
+    // advance past Bribery.
     expect(playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)").status).toBe("passed");
     expect(playLanguageCall(model, "TalkAbout(Player, Guard, Bribery)").status).toBe("passed");
     const moneyOffer = playLanguageCall(model, "TalkAbout(Player, Guard, OfferMoney)");
@@ -493,9 +492,9 @@ describe("tutorial language runtime", () => {
 
       action Punch(a: Actor, t: Target) { succeed; }
 
-      -- Sugar: bare 'Bob' in the third slot is desugared to '_: Bob' and
+      -- Sugar: bare 'Bob' in the second slot is desugared to '_: Bob' and
       -- only fires for the entity Bob.
-      on Punch(a: Actor, Bob) {
+      after Punch(a: Actor, Bob) {
         when (a == Alice) { fail; }
       }
 
@@ -504,10 +503,10 @@ describe("tutorial language runtime", () => {
       entity Carol { Target }
     `);
 
-    // Alice punching Bob: the `on` rule binds (Bob slot matches), when
+    // Alice punching Bob: the after-rule binds (Bob slot matches), when
     // (a==Alice) holds, action fails.
     expect(playLanguageCall(model, "Punch(Alice, Bob)").status).toBe("failed");
-    // Alice punching Carol: the `on` rule's parameter constraint fails to
+    // Alice punching Carol: the after-rule's parameter constraint fails to
     // bind (Carol != Bob), so the rule doesn't fire.
     expect(playLanguageCall(model, "Punch(Alice, Carol)").status).toBe("passed");
   });
@@ -522,7 +521,7 @@ describe("tutorial language runtime", () => {
       action Try(a: Actor, t: Item) { succeed; }
 
       -- Sugar: bare 'Item' in the second slot desugars to '_: Item'.
-      on Try(Actor, Item) {
+      after Try(Actor, Item) {
         fail;
       }
 
@@ -534,11 +533,11 @@ describe("tutorial language runtime", () => {
       }
     `);
 
-    // Both args match their bare type slots → on-rule fires → action fails.
+    // Both args match their bare type slots, so the after-rule fires and the action fails.
     expect(playLanguageCall(model, "Try(Player, Trinket)").status).toBe("failed");
   });
 
-  it("`on` rule fires after a successful action body and can preempt with fail", () => {
+  it("after rule can fail after a successful action body and roll it back", () => {
     const model = loadStoryProgram(`
       trait Actor
       trait Item
@@ -550,7 +549,7 @@ describe("tutorial language runtime", () => {
         when (Holds(a, t)) { succeed; }
       }
 
-      on Try(a: Actor, t: Item) {
+      after Try(a: Actor, t: Item) {
         when (!Marked(t)) { fail; }
       }
 
@@ -562,12 +561,12 @@ describe("tutorial language runtime", () => {
       }
     `);
 
-    // Action body would pass (Holds), but the `on` rule fires after and
+    // Action body would pass (Holds), but the after-rule fires after and
     // fails because Trinket isn't Marked.
     const blocked = playLanguageCall(model, "Try(Player, Trinket)");
     expect(blocked.status).toBe("failed");
 
-    // Mark the trinket; now the `on` rule's when no longer matches, so the
+    // Mark the trinket; now the after-rule's when no longer matches, so the
     // rule doesn't fire and the action passes through.
     model.assertFact({ relation: "Marked", args: [idTerm("Trinket")] });
     expect(playLanguageCall(model, "Try(Player, Trinket)").status).toBe("passed");

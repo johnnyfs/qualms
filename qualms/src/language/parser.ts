@@ -238,7 +238,6 @@ class Parser {
     if (this.matchKeyword("predicate")) return this.callableStatement("predicate");
     if (this.matchKeyword("before")) return this.ruleStatement("before");
     if (this.matchKeyword("after")) return this.ruleStatement("after");
-    if (this.matchKeyword("on")) return this.ruleStatement("on");
     if (this.matchKeyword("entity")) return this.entityStatement();
     if (this.matchKeyword("extend")) return this.extendStatement();
     if (this.matchKeyword("set")) return this.setStatement();
@@ -289,7 +288,7 @@ class Parser {
     return { kind, id, parameters, body };
   }
 
-  private ruleStatement(phase: "before" | "after" | "on"): RuleStatement {
+  private ruleStatement(phase: "before" | "after"): RuleStatement {
     this.expectKeyword(phase);
     const target = this.identifier();
     const parameters = this.callParameters();

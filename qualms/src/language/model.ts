@@ -253,7 +253,7 @@ export class StoryModel {
       return;
     }
     if (type.id === "Any") return;
-    if (this.traits.has(type.id) || this.relations.has(type.id)) return;
+    if (this.traits.has(type.id) || this.relations.has(type.id) || this.entities.has(type.id)) return;
     throw new LanguageModelError(`unknown type '${type.id}'`);
   }
 

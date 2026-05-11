@@ -18,6 +18,7 @@ no longer normative.
 | [`language.md`](./language.md)            | Lexical structure, grammar (EBNF), declarations, parameter patterns, execution model, world-state semantics, errors, round-tripping. |
 | [`engine-model.md`](./engine-model.md)    | UML class diagrams for AST, `StoryModel`, runtime helpers, MCP session/tool layers, and ownership summary. |
 | [`protocol.md`](./protocol.md)            | UML sequence diagrams for every registered MCP tool (`start`, `quit`, `query`, `begin`, `mutate`, `diff`, `commit`, `rollback`, `play`) and the error taxonomy. |
+| [`portable-ir.md`](./portable-ir.md)      | Language-neutral AST, world, fact/effect, runtime operation, and host adapter contract for reimplementations. |
 
 ## Conventions
 
@@ -67,12 +68,11 @@ roughly priority for the spec author. Tick items off as features land.
 
 ### Documentation-only work
 
-- [ ] **Concrete error taxonomy table.** Cross-reference every thrown
+- [x] **Concrete error taxonomy table.** Cross-reference every thrown
       error in `qualms/src/language/` and `mcp/src/` against the table
-      in `protocol.md` § 5. `MutationError` declares a `scope_error`
-      category that is currently never thrown — confirm whether to
-      remove it or wire it up.
-- [ ] **Conformance suite spec.** Promote `stories/tutorial/tutorial.qualms`
+      in `protocol.md` § 5. `scope_error` is used for validation-gated
+      commit failures.
+- [x] **Conformance suite spec.** Promote `stories/tutorial/tutorial.qualms`
       to a normative conformance fixture: enumerate the section-by-section
       capabilities it exercises and map each to grammar/runtime sections.
 - [ ] **Play-feedback grammar.** The current `fail { reason; reason; }`
