@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "qualms": {
+      "type": "stdio",
+      "command": "mcp/node_modules/.bin/tsx",
+      "args": [
+        "mcp/src/cli.ts",
+        "--core",
+        "qualms/prelude/core.qualms"
+      ],
+      "env": {}
+    }
+  }
+}

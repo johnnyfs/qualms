@@ -1,0 +1,340 @@
+-- Tutorial fixture for the prelude-free Qualms language.
+-- This file is the target syntax for the redesign. It is not expected to load
+-- through the previous DSL v2 parser.
+
+-- (1) Minimal location
+-- Introduces: traits, relations, actions, entities, and the set statement.
+
+trait Actor
+trait Locatable
+trait Location
+
+relation At(Locatable, one Location)
+relation Path(Location, Location)
+
+action Go(actor: (Actor & Locatable) { At(actor, here) }, target: Location) {
+  when (Path(here, target)) {
+    set At(actor, target)
+  }
+}
+
+entity Cell { Location }
+entity Corridor { Location }
+entity Outside { Location }
+
+entity Player { Actor, Locatable }
+
+set {
+  Path(Cell, Corridor);
+  Path(Corridor, Cell);
+  Path(Corridor, Outside);
+  Path(Outside, Corridor);
+  At(Player, Cell);
+}
+
+-- (2) Extend with descriptions
+-- Introduces: predicates. Affinity between object and description is an
+-- interface concern; the story engine only reports success or failure.
+
+trait Describable
+
+predicate IsColocated(actor: (Actor & Locatable) { At(actor, here) }, target: Locatable) {
+  when (At(target, here)) {
+    pass;
+  }
+}
+
+action Examine(actor: Actor, target) {
+  when (At(actor, target) | IsColocated(actor, target)) {
+    pass;
+  }
+}
+
+entity Bars { Describable, Locatable }
+set {
+  At(Bars, Cell);
+}
+
+-- (3) Extend with portable items
+-- Introduces: after rules.
+
+trait Portable
+
+relation Carrying(Actor, Portable)
+
+action Take(actor: Actor, target: Portable) {
+  when (IsColocated(actor, target)) {
+    set Carrying(actor, target)
+  }
+}
+
+after Take(_, target: Locatable { At(target, here) }) {
+  set {
+    !At(target, here);
+  }
+}
+
+action Drop(actor: Actor, target: Portable) {
+  when (Carrying(actor, target)) {
+    set {
+      !Carrying(actor, target);
+    }
+  }
+}
+
+after Drop(actor: Locatable { At(actor, here) }, target: Locatable) {
+  set {
+    At(target, here);
+  }
+}
+
+entity BoneShard { Portable, Describable, Locatable }
+set {
+  At(BoneShard, Cell);
+}
+
+-- (4) Extend with doors
+-- Introduces: before rules and relations between relation instances.
+
+trait Openable
+
+relation Opened(Openable)
+relation Gated(Path, one Openable)
+
+before Go(
+  actor: (Actor & Locatable) { At(actor, here) },
+  target: Location { Gated(Path(here, target), door) }
+) {
+  when (!Opened(door)) {
+    fail;
+  }
+}
+
+before IsColocated(
+  actor: (Actor & Locatable) { At(actor, here) },
+  target: Locatable
+) {
+  when (Gated(Path(here, _), door) & target == door) {
+    pass;
+  }
+}
+
+action Open(actor: Actor, door: Openable) {
+  when (IsColocated(actor, door)) {
+    set Opened(door)
+  }
+}
+
+before Open(_, door: Openable) {
+  when (Opened(door)) {
+    fail;
+  }
+}
+
+action Close(actor: Actor, door: Openable) {
+  when (IsColocated(actor, door)) {
+    set !Opened(door)
+  }
+}
+
+before Close(_, door: Openable) {
+  when (!Opened(door)) {
+    fail;
+  }
+}
+
+extend Bars { Openable }
+set {
+  !At(Bars, Cell);
+  Gated(Path(Cell, Corridor), Bars);
+  Gated(Path(Corridor, Cell), Bars);
+}
+
+-- (5) Extend doors to be lockable.
+
+trait Key
+trait Lockable
+
+relation Locked(Lockable)
+relation LockedWith(Lockable, Key)
+
+before Open(_, door: Lockable) {
+  when (Locked(door)) {
+    fail;
+  }
+}
+
+action Unlock(actor: Actor, door: Lockable, key: Key) {
+  when (IsColocated(actor, door) & LockedWith(door, key)) {
+    set !Locked(door)
+  }
+}
+
+before Unlock(_, door: Lockable, _) {
+  when (!Locked(door)) {
+    fail;
+  }
+}
+
+action Lock(actor: Actor, door: Lockable, key: Key) {
+  when (IsColocated(actor, door) & LockedWith(door, key)) {
+    set Locked(door)
+  }
+}
+
+before Lock(_, door: Lockable, _) {
+  when (Locked(door)) {
+    fail;
+  }
+}
+
+extend Bars { Lockable }
+entity MasterKey { Key }
+entity MakeshiftKey { Key }
+set {
+  Locked(Bars);
+  LockedWith(Bars, MasterKey);
+}
+
+-- (6) Visibility
+-- Introduces: the `Any` built-in type, the `replace` keyword for overriding
+-- an earlier action, predicates extended by before-rules, and adjacency
+-- encoded in parameter constraints. Anything not declared Transparent is
+-- opaque by default.
+
+relation Transparent(Any)
+relation ConveysVisibility(Path)
+
+predicate IsVisibleTo(actor: Actor, target) {
+  when (At(actor, target) | IsColocated(actor, target) | Carrying(actor, target)) {
+    pass;
+  }
+}
+
+predicate Opaque(door: Openable) {
+  when (!Transparent(door) & !Opened(door)) {
+    pass;
+  }
+}
+
+-- A target visible across a path the actor can see along, unless an opaque
+-- closed door gates that path. The parameter constraints encode adjacency;
+-- the when clause tests only the visibility-specific rules, so a failure
+-- here describes why the visibility rules failed.
+before IsVisibleTo(
+  actor: Actor { At(actor, here) },
+  target: Locatable { At(target, location) & Path(here, location) }
+) {
+  when (
+    ConveysVisibility(Path(here, location)) &
+    !(Gated(Path(here, location), door) & Opaque(door))
+  ) {
+    pass;
+  }
+}
+
+-- Examine now routes through IsVisibleTo, so visibility actually gates it.
+replace action Examine(actor: Actor, target) {
+  when (IsVisibleTo(actor, target)) {
+    pass;
+  }
+}
+
+entity Guard { Locatable, Describable }
+entity Closet { Location, Describable }
+entity ClosetDoor { Openable, Locatable, Describable }
+entity Mop { Portable, Describable, Locatable }
+
+set {
+  ConveysVisibility(Path(Cell, Corridor));
+  ConveysVisibility(Path(Corridor, Cell));
+  ConveysVisibility(Path(Corridor, Closet));
+  ConveysVisibility(Path(Closet, Corridor));
+  Transparent(Bars);
+  Path(Corridor, Closet);
+  Path(Closet, Corridor);
+  Gated(Path(Corridor, Closet), ClosetDoor);
+  Gated(Path(Closet, Corridor), ClosetDoor);
+  At(Guard, Corridor);
+  At(Mop, Closet);
+}
+
+-- (7) Simple conversation.
+-- Introduces: actions with multiple typed arguments. Conversation reach is
+-- decided by IsVisibleTo (section 6) — no separate before-rule needed; the
+-- Guard in the Corridor is reachable from the Cell because the Bars are
+-- transparent and the Cell↔Corridor path conveys visibility.
+
+trait Speaker
+trait Topic
+
+relation TalksAbout(Speaker, Topic)
+
+action TalkAbout(actor: Actor, speaker: Speaker, topic: Topic) {
+  when (IsVisibleTo(actor, speaker) & TalksAbout(speaker, topic)) {
+    pass;
+  }
+}
+
+extend Guard { Speaker }
+entity Bribery { Topic }
+entity Checkers { Topic }
+
+set {
+  TalksAbout(Guard, Bribery);
+}
+
+-- (8) Extend to conversation trees.
+-- Introduces: a `one`-cardinality state relation (InConversation) tracking the
+-- current conversation topic per (Actor, Speaker), a `LeadsTo` adjacency over
+-- topics, and a before-rule whose parameter constraint binds the current
+-- topic — making the rule fire only when a conversation is already in
+-- progress. Top-level topics (those TalksAbout) still pass through the (7)
+-- action body; sub-topics short-circuit here and advance the conversation.
+
+relation InConversation(Actor, Speaker, one Topic)
+relation LeadsTo(Speaker, Topic, Topic)
+
+-- Note: the fresh variable is named `current` (not `topic`) because the
+-- enclosing action TalkAbout already binds `topic` to its third argument;
+-- reusing the name would shadow it and the constraint would never find a
+-- matching InConversation fact.
+before TalkAbout(
+  actor: Actor,
+  speaker: Speaker { InConversation(actor, speaker, current) },
+  subTopic: Topic
+) {
+  when (IsVisibleTo(actor, speaker) & LeadsTo(speaker, current, subTopic)) {
+    set InConversation(actor, speaker, subTopic);
+    pass;
+  }
+}
+
+-- Entry case: a top-level TalkAbout passed (7)'s body; record the current
+-- topic. Sub-topic walks set InConversation inline in the before rule above,
+-- so the `one Topic` cardinality on InConversation handles displacement.
+after TalkAbout(actor: Actor, speaker: Speaker, topic: Topic) {
+  set InConversation(actor, speaker, topic);
+}
+
+action StopTalking(actor: Actor, speaker: Speaker) {
+  when (InConversation(actor, speaker, topic)) {
+    set !InConversation(actor, speaker, topic);
+  }
+}
+
+entity Whatever { Topic }
+entity Weather { Topic }
+entity OfferMoney { Topic }
+entity OfferAFavor { Topic }
+entity BriberyIsWrong { Topic }
+
+set {
+  !TalksAbout(Guard, Bribery);
+  TalksAbout(Guard, Whatever);
+  LeadsTo(Guard, Whatever, Bribery);
+  LeadsTo(Guard, Whatever, Weather);
+  LeadsTo(Guard, Bribery, OfferMoney);
+  LeadsTo(Guard, Bribery, OfferAFavor);
+  LeadsTo(Guard, Bribery, BriberyIsWrong);
+}

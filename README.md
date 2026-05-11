@@ -1,144 +1,57 @@
 # Qualms
 
-Qualms is a prototype for a rules-driven story engine and a nova-like game built on top of it. The long-term goal is to define a compact declarative model for game rules that can be projected into different genres, interfaces, and implementations while preserving the same core behavior.
+Qualms is now centered on the prelude-free tutorial DSL in `stories/tutorial/tutorial.qualms`.
+The active implementation is the TypeScript language package plus an MCP server that
+loads, mutates, queries, and plays stories written in that syntax.
 
-The current playable game is still Dark Qualms: a story-first bounty-hunter prototype with a maintained prompt CLI. The maintained story source is now `story.qualms.yaml`; the CLI loads and edits that YAML file directly. The YAML schema uses genre-agnostic primitives: entities, traits, relations, actions, rules, and effects/assertions. Genre-specific concepts such as systems, orbitals, ships, people, inventory, and travel are expressed by authored preludes and story content rather than hard-coded as engine categories.
+The old Python/YAML prototype, old TypeScript engine, old examples, and old story
+fixtures have been moved under `deprecated/` for reference. They are no longer part
+of the supported runtime or test surface.
 
-## Specs
+## Active Layout
 
-Technical direction now lives in `specs/`:
+- `qualms/src/language/`: parser, model, emitter, and runtime for the current DSL.
+- `stories/tutorial/tutorial.qualms`: conformance-style tutorial fixture for the current DSL features.
+- `qualms/test/`: language parser/model/runtime tests.
+- `mcp/src/`: MCP lifecycle, query, transaction, mutate, commit, rollback, and play tools for current-syntax `.qualms` stories.
+- `mcp/test/`: direct and subprocess MCP tests.
+- `deprecated/`: previous prototypes, YAML assets, old examples, old docs, and old tests.
 
-- `specs/rules-engine.md`: runtime model, UML-style class/interface sketch, and action resolution sequence.
-- `specs/story-yaml-schema.md`: rigorous YAML schema specification for engine definitions, prelude definitions, and story content.
-- `specs/runtime-roadmap.md`: next implementation steps for tightening the YAML-driven runtime and editor.
+## DSL Shape
 
-`story_declarative.txt` is an older design sketch. It is useful context, but it currently mixes engine primitives, nova-specific content, and implementation notes more than the new specs should.
+The current `.qualms` syntax supports:
 
-## Layout
+- `trait`, `relation`, `predicate`, `action`, `before`, `after`, `entity`, `extend`, and `set`
+- pattern-constrained parameters such as `actor: (Actor & Locatable) { At(actor, here) }`
+- relation-valued terms such as `Gated(Path(Cell, Corridor), Bars)`
+- boolean conditions with `!`, `&`, `|`, and `==`
+- compact play feedback such as `pass;` and `fail { Locked(Bars); }`
 
-- `specs/`: technical design documents for the rules engine and future YAML schema.
-- `stories/`: active story data. The current story is `stories/stellar/story.qualms.yaml`.
-- `curses/`: maintained text interface for playing and editing the story graph. The default interface is now prompt-based; the older curses box UI remains available with `--curses`.
-- `godot/`: paused 2D orbital-flight prototype; kept for possible future interface work.
-- `examples/`: valid YAML sample story datasets kept for reference.
+## Development
 
-The current story model defines systems, star types, graph hops, orbitals (`Planet`, `Moon`, `Station`), recursive local destinations, objects that support interactions such as examine, take, or use, NPCs that support examine and talk, destination sequences, and simple fact-gated before rules.
-
-## Run
-
-From the project root:
-
-```sh
-./run.sh
-```
-
-Run with the in-game editor exposed:
+Install dependencies:
 
 ```sh
-./run-dev.sh
+pnpm install
 ```
 
-Both scripts use the prompt CLI. By default they load:
+Run tests:
 
 ```sh
-stories/stellar/story.qualms.yaml
+pnpm -r test
 ```
 
-Run against another story directory:
+Run type checks:
 
 ```sh
-./run.sh ./stories/stellar
+pnpm -r typecheck
 ```
 
-The game reads and writes `story.qualms.yaml` inside that directory. Sample stories can be run by passing their directory:
+Run the MCP server:
 
 ```sh
-./run.sh ./examples/blank
+pnpm --filter @quealm/mcp start
 ```
 
-If the YAML data path is missing or empty, the game creates a blank YAML world with one empty system so you can start authoring in-game.
-
-Stories can optionally define `start_location` with a starting orbital and destination ID path. The current story starts docked at Mining Colony 5 on Blemish.
-
-Validate story data without launching curses:
-
-```sh
-./run.sh --validate
-./run.sh ./examples/sol-proof --validate
-```
-
-Dump the defined narrative surface:
-
-```sh
-./run.sh --dump
-```
-
-Sync CLI dependencies when needed:
-
-```sh
-uv sync
-```
-
-Python dependencies are managed by `uv` through `pyproject.toml` and `uv.lock`. The run scripts use `uv run`, so they will create or update the local `.venv` automatically. The prompt UI uses `prompt_toolkit` when installed, including command history, tab completion, and common line-editing keys. If it is missing, the game falls back to basic `input()`.
-
-## Controls
-
-- Number, or commands like `go 1`: travel to a destination or choose a local destination
-- `I`: open inventory
-- `L`: leave system from the system screen; land from orbit or station approach
-- `T`: take off from the docked destination or return to the system destination list from orbit
-- `F`: refuel from inside a boarded ship when an active fueling station is available
-- `B`: back one level in a local destination graph
-- `M`: show the local map
-- `Q`: open the main menu
-
-The prompt also accepts command words such as `inventory`, `menu`, `back`, `land`, `take off`, `board`, `refuel`, `save`, `restore`, and `quit`.
-
-The main menu provides Continue, New Game, Save, Restore, and Quit. Save and restore use JSON snapshots of runtime state. Press Enter at either filename prompt to reuse the last filename, or the default save path if none has been used yet.
-
-## Editor Mode
-
-`./run-dev.sh` enables editor commands below the game view. These commands are hidden and disabled in normal play.
-
-`A` means:
-
-- System screen: add an orbital by type (`Planet`, `Moon`, `Station`) with a name and description.
-- Leave-system screen: add a linked system by compass direction, name, and description.
-- Destination screen: add a child destination under the current destination.
-- Inside a destination, `A` opens a menu: add destination, add object, or add NPC.
-- Inside a destination, `D` deletes a local detail: an object, NPC, or child destination.
-- `R` reloads story data from disk while preserving the current location and in-memory state.
-
-`D` also deletes orbitals from the system screen. Moons block deletion of their parent until the child orbital is deleted.
-
-`E` means:
-
-- System screen: edit the current system name and description.
-- Orbiting/approaching screen: edit the current orbital name and description.
-- Destination description screen: edit that destination name and description.
-
-## Current Story Data
-
-The YAML story imports `stories/prelude/nova-qualms.qualms.yaml`, which imports the core prelude. Story content is authored as entities, trait field values, initial relation assertions, facts, and local rules. The curses UI projects that declarative model into its menu views while using the rules runtime for action resolution.
-
-The loader validates the YAML schema, compiles preludes and story content into the runtime definition, then validates nova-like constraints such as duplicate IDs, moon parents, reciprocal hops, hop distance, and at most 9 choices per menu.
-
-Inventory opens with `I`. Inventory items can be examined with `X`; equippable items define an `equipment_slot` and can be equipped with `E`, replacing any item already in that slot. Rules can test equipment slots with facts like `equipped:slot:Exosuit`.
-
-Systems define graph data through trait fields:
-
-```yaml
-- id: sol-proof
-  kind: System
-  fields:
-    Presentable:
-      name: Sol Proof
-      description: Old money, crowded ports, and licensed violence.
-    StarSystem:
-      star_type: G-type main sequence
-      x: 0
-      y: 0
-      hops: [barnard-gate, sirius-wake]
-```
-
-Hop links must be reciprocal, must point to known systems, and must stay under the current short-hop limit.
+MCP clients start sessions by calling `start` with `storyPaths` that point to
+current-syntax `.qualms` files.

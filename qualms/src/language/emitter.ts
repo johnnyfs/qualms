@@ -1,0 +1,226 @@
+import type {
+  BinaryExpression,
+  Block,
+  BodyStatement,
+  CallableStatement,
+  EntityStatement,
+  EqualityExpression,
+  Expression,
+  ExtendStatement,
+  NotExpression,
+  ParameterPattern,
+  Program,
+  RelationAtom,
+  RelationExpression,
+  RelationParameter,
+  RelationStatement,
+  RuleStatement,
+  SetEffect,
+  SetStatement,
+  Term,
+  TopLevelStatement,
+  TraitStatement,
+  TypeExpr,
+  WhenStatement,
+} from "./ast.js";
+import type { Fact, GroundTerm, StoryModel } from "./model.js";
+
+export function emitProgram(program: Program): string {
+  return program.statements.map(emitTopLevelStatement).join("\n\n") + "\n";
+}
+
+export function emitStoryModel(model: StoryModel): string {
+  return emitProgram(programFromModel(model));
+}
+
+export function programFromModel(model: StoryModel): Program {
+  const statements: TopLevelStatement[] = [
+    ...model.traits.values(),
+    ...model.relations.values(),
+    ...model.predicates.values(),
+    ...model.actions.values(),
+    ...model.rules,
+  ];
+  for (const [id, traits] of model.entities) {
+    statements.push({ kind: "entity", id, traits: [...traits] });
+  }
+  const effects = model.listFacts().map(factToEffect);
+  if (effects.length > 0) statements.push({ kind: "set", effects });
+  return { statements };
+}
+
+function factToEffect(fact: Fact): SetEffect {
+  return {
+    polarity: "assert",
+    atom: {
+      relation: fact.relation,
+      args: fact.args.map(termFromGround),
+    },
+  };
+}
+
+function termFromGround(term: GroundTerm): Term {
+  switch (term.kind) {
+    case "id":
+      return { kind: "identifier", id: term.id };
+    case "string":
+      return { kind: "string", value: term.value };
+    case "number":
+      return { kind: "number", value: term.value };
+    case "relation":
+      return {
+        kind: "relationInstance",
+        atom: { relation: term.relation, args: term.args.map(termFromGround) },
+      };
+  }
+}
+
+export function emitTopLevelStatement(statement: TopLevelStatement): string {
+  switch (statement.kind) {
+    case "trait":
+      return emitTrait(statement);
+    case "relation":
+      return emitRelation(statement);
+    case "predicate":
+    case "action":
+      return emitCallable(statement);
+    case "rule":
+      return emitRule(statement);
+    case "entity":
+      return emitEntity(statement);
+    case "extend":
+      return emitExtend(statement);
+    case "set":
+      return emitSet(statement);
+  }
+}
+
+function emitTrait(statement: TraitStatement): string {
+  return `trait ${statement.id}`;
+}
+
+function emitRelation(statement: RelationStatement): string {
+  return `relation ${statement.id}(${statement.parameters.map(emitRelationParameter).join(", ")})`;
+}
+
+function emitRelationParameter(parameter: RelationParameter): string {
+  return `${parameter.cardinality ? `${parameter.cardinality} ` : ""}${emitTypeExpr(parameter.type)}`;
+}
+
+function emitCallable(statement: CallableStatement): string {
+  const prefix = statement.replace ? "replace " : "";
+  return `${prefix}${statement.kind} ${statement.id}(${statement.parameters.map(emitParameter).join(", ")}) ${emitBlock(statement.body)}`;
+}
+
+function emitRule(statement: RuleStatement): string {
+  return `${statement.phase} ${statement.target}(${statement.parameters.map(emitParameter).join(", ")}) ${emitBlock(statement.body)}`;
+}
+
+function emitEntity(statement: EntityStatement): string {
+  return `entity ${statement.id} { ${statement.traits.join(", ")} }`;
+}
+
+function emitExtend(statement: ExtendStatement): string {
+  return `extend ${statement.id} { ${statement.traits.join(", ")} }`;
+}
+
+function emitParameter(parameter: ParameterPattern): string {
+  const head = parameter.wildcard ? "_" : parameter.name ?? "_";
+  const type = parameter.type ? `: ${emitTypeExpr(parameter.type)}` : "";
+  const constraints =
+    parameter.constraints.length > 0
+      ? ` { ${parameter.constraints.map(emitExpression).join("; ")} }`
+      : "";
+  return `${head}${type}${constraints}`;
+}
+
+function emitBlock(block: Block): string {
+  if (block.statements.length === 0) return "{}";
+  return `{\n${block.statements.map((statement) => indent(emitBodyStatement(statement))).join("\n")}\n}`;
+}
+
+function emitBodyStatement(statement: BodyStatement): string {
+  switch (statement.kind) {
+    case "when":
+      return emitWhen(statement);
+    case "set":
+      return emitSet(statement);
+    case "pass":
+      return "pass;";
+    case "fail":
+      return "fail;";
+  }
+}
+
+function emitWhen(statement: WhenStatement): string {
+  return `when (${emitExpression(statement.condition)}) ${emitBlock(statement.body)}`;
+}
+
+function emitSet(statement: SetStatement): string {
+  if (statement.effects.length === 1) return `set ${emitSetEffect(statement.effects[0]!)}`;
+  return `set {\n${statement.effects.map((effect) => indent(`${emitSetEffect(effect)};`)).join("\n")}\n}`;
+}
+
+function emitSetEffect(effect: SetEffect): string {
+  return `${effect.polarity === "retract" ? "!" : ""}${emitRelationAtom(effect.atom)}`;
+}
+
+function emitExpression(expression: Expression): string {
+  switch (expression.kind) {
+    case "relation":
+      return emitRelationExpression(expression);
+    case "not":
+      return emitNotExpression(expression);
+    case "binary":
+      return emitBinaryExpression(expression);
+    case "equal":
+      return emitEqualityExpression(expression);
+  }
+}
+
+function emitRelationExpression(expression: RelationExpression): string {
+  return emitRelationAtom(expression.atom);
+}
+
+function emitNotExpression(expression: NotExpression): string {
+  return `!${emitExpression(expression.operand)}`;
+}
+
+function emitBinaryExpression(expression: BinaryExpression): string {
+  return `${emitExpression(expression.left)} ${expression.op} ${emitExpression(expression.right)}`;
+}
+
+function emitEqualityExpression(expression: EqualityExpression): string {
+  return `${emitTerm(expression.left)} == ${emitTerm(expression.right)}`;
+}
+
+function emitRelationAtom(atom: RelationAtom): string {
+  return `${atom.relation}(${atom.args.map(emitTerm).join(", ")})`;
+}
+
+function emitTerm(term: Term): string {
+  switch (term.kind) {
+    case "identifier":
+      return term.id;
+    case "wildcard":
+      return "_";
+    case "string":
+      return JSON.stringify(term.value);
+    case "number":
+      return String(term.value);
+    case "relationInstance":
+      return emitRelationAtom(term.atom);
+  }
+}
+
+function emitTypeExpr(type: TypeExpr): string {
+  if (type.kind === "named") return type.id;
+  return `(${type.types.map(emitTypeExpr).join(" & ")})`;
+}
+
+function indent(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => `  ${line}`)
+    .join("\n");
+}

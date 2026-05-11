@@ -1,0 +1,70 @@
+export type {
+  ActionDefSpec,
+  ActionPatternSpec,
+  Effect,
+  EntityDefSpec,
+  Expression,
+  FieldDefSpec,
+  IntrospectionRelation,
+  KindDefSpec,
+  MetaType,
+  MutationStatement,
+  NamedPredicate,
+  ParameterDefSpec,
+  Query,
+  RelationDefSpec,
+  RuleDefSpec,
+  RulebookDefSpec,
+  Term,
+  TraitAttachmentSpec,
+  TraitDefSpec,
+  TraitGrantSpec,
+  TraitFilter,
+  UndefTargetKind,
+  Value,
+} from "./ast.js";
+export {
+  INTROSPECTION_RELATIONS,
+  META_TYPES,
+  UNDEF_TARGET_KINDS,
+  isIntrospectionRelation,
+  isMetaType,
+  isUndefTargetKind,
+} from "./ast.js";
+export {
+  TRUE,
+  FALSE,
+  and,
+  or,
+  not,
+  exists,
+  forall,
+  rel,
+  traitOf,
+  eq,
+  neq,
+  regex,
+  like,
+  path,
+  inSet,
+  query,
+  yesNo,
+  namedPredicate,
+  v,
+  c,
+  f,
+} from "./builders.js";
+export type { PathOptions } from "./builders.js";
+export type { Binding, QueryContext, QueryResult } from "./eval.js";
+export { evaluate, makeContext, runQuery } from "./eval.js";
+export type { Statement } from "./parser.js";
+export {
+  ParseError,
+  parseExpression,
+  parseNamedPredicate,
+  parseQuery,
+  parseStatement,
+  parseStatements,
+  tokenize,
+} from "./parser.js";
+export { substituteEffect, substituteTerm } from "./substitute.js";

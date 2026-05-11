@@ -1,0 +1,142 @@
+# Core prelude (DSL v2).
+#
+# Type convention:
+#   - lowercase identifiers (str, int, bool) are primitives.
+#   - PascalCase identifiers (Location, Actor, Item) are entity-references.
+#   - Nullable suffix `?` (e.g. `Location?`) for optional entity refs.
+#
+# Differences from the legacy YAML form are recorded in qualms/MIGRATION.md:
+#   + IsPlayer(actor) top-level relation — universal "who is the player".
+#   + Item kind (Presentable + Relocatable) — near-universal authoring need.
+#   - SequenceComplete relation removed — orphaned legacy memory mechanic.
+#   - Aboard relation removed; CanTouch derives from At + CarriedBy alone.
+#   - Visited relation + core-memory rulebook removed; story-level memory
+#     belongs in story files, not the universal prelude.
+#   - persistence: current/remembered/both collapsed; relations are stored
+#     by default and derived when a `get` body is present.
+
+def trait Presentable {
+  name: str = "";
+  description: str = "";
+  examine_description: str = "";
+}
+
+def trait Actor {}
+
+def trait Location {
+  def relation Path(source: Location, target: Location) {};
+}
+
+def trait Relocatable {
+  location: Location? = null;
+  def relation At(subject: Relocatable, location: Location) {
+    get: subject.location = location;
+    set: [ subject.location := location; ];
+  };
+  def action Move(actor: Actor? = null, subject: Relocatable, destination: Location) {
+    requires: Path(subject.location, destination) & not Locked(subject.location);
+    effects: [ assert At(subject, destination); ];
+  };
+}
+
+def trait Scope {
+  def relation CanTouch(actor: Actor, target: Relocatable) {
+    get: ((actor : Relocatable & target.location = actor.Relocatable.location)
+            | CarriedBy(actor, target));
+  };
+  def relation CanSee(actor: Actor, target: Relocatable) {
+    get: CanTouch(actor, target);
+  };
+}
+
+def trait Container {
+  contents: set<Relocatable> = {};
+  def relation Contains(container: Container, item: Relocatable) {
+    get: item in container.contents;
+    set: [ container.contents += item; ];
+  };
+}
+
+def trait Portable {
+  def action Take(actor: Actor, item: Portable) {
+    requires: CanTouch(actor, item);
+    effects: [ assert CarriedBy(actor, item); ];
+  };
+  def action Drop(actor: Actor, item: Portable, destination: Location) {
+    requires: true;
+    effects: [ assert At(item, destination); ];
+  };
+}
+
+def trait Usable {
+  def action Use(actor: Actor, source: Usable, target: Entity? = null) {
+    requires: CarriedBy(actor, source);
+    effects: [ retract Locked(target); emit { text: "You apply the source to the target." }; ];
+  };
+}
+
+def trait Equipment {
+  slot: str = "";
+  equipped_by: Actor? = null;
+  def relation Equipped(actor: Actor, item: Equipment) {
+    get: item.equipped_by = actor;
+    set: [ item.equipped_by := actor; ];
+  };
+  def action Equip(actor: Actor, item: Equipment) {
+    requires: true;
+    effects: [ assert Equipped(actor, item); ];
+  };
+  def action Unequip(actor: Actor, item: Equipment) {
+    requires: true;
+    effects: [ item.equipped_by := null; ];
+  };
+}
+
+def trait Ownable {
+  owner: Actor? = null;
+  def relation OwnedBy(item: Ownable, actor: Actor) {
+    get: item.owner = actor;
+    set: [ item.owner := actor; ];
+  };
+}
+
+def relation CarriedBy(actor: Actor, item: Relocatable) {
+  get: At(item, actor);
+  set: [ assert At(item, actor); ];
+}
+
+def relation Named(entity: Presentable, name: str) {
+  get: entity.name = name;
+}
+
+def relation Visible(entity: Entity) {
+  get: true;
+}
+
+# Universal "who is the player" entry point. Stories assert IsPlayer(<actor-id>)
+# at start; the player view and any player-anchored rules read from this.
+def relation IsPlayer(actor: Actor) {}
+
+# Generic lock state on a location. Stored relation; asserted by stories,
+# retracted by `Use` (default semantics). Move requires `not Locked(source)`.
+def relation Locked(location: Location) {}
+
+def action Name(actor: Actor? = null, target: Presentable) {
+  requires: true;
+  effects: [ emit { text: target.name }; ];
+}
+
+def action Examine(actor: Actor? = null, target: Presentable) {
+  requires: (actor = null | CanSee(actor, target));
+  effects: [ emit { text: target.description }; ];
+}
+
+def action Enter(actor: Actor, destination: Location) {
+  requires: true;
+  effects: [ assert At(actor, destination); ];
+}
+
+def kind Thing: Presentable;
+def kind Place: Presentable, Location, Container;
+def kind Person: Presentable, Actor, Location, Container, Relocatable;
+def kind Item: Presentable, Relocatable;
