@@ -21,6 +21,8 @@ import type {
   TopLevelStatement,
   TraitStatement,
   TypeExpr,
+  ValidationAssertion,
+  ValidationStatement,
   WhenStatement,
 } from "./ast.js";
 import type { Fact, GroundTerm, StoryModel } from "./model.js";
@@ -53,6 +55,7 @@ export function programFromModel(model: StoryModel): Program {
   }
   const effects = model.listFacts().map(factToEffect);
   if (effects.length > 0) statements.push({ kind: "set", effects });
+  statements.push(...model.validations.values());
   return { statements };
 }
 
@@ -99,6 +102,8 @@ export function emitTopLevelStatement(statement: TopLevelStatement): string {
       return emitExtend(statement);
     case "set":
       return emitSet(statement);
+    case "validation":
+      return emitValidation(statement);
   }
 }
 
@@ -129,6 +134,22 @@ function emitEntity(statement: EntityStatement): string {
 
 function emitExtend(statement: ExtendStatement): string {
   return `extend ${statement.id} { ${statement.traits.join(", ")} }`;
+}
+
+function emitValidation(statement: ValidationStatement): string {
+  if (statement.assertions.length === 0) return `validation ${statement.id} {}`;
+  return `validation ${statement.id} {\n${statement.assertions.map((assertion) => indent(emitValidationAssertion(assertion))).join("\n")}\n}`;
+}
+
+function emitValidationAssertion(assertion: ValidationAssertion): string {
+  switch (assertion.kind) {
+    case "fact":
+      return `assert ${assertion.negate ? "not " : ""}fact ${emitRelationAtom(assertion.atom)};`;
+    case "query":
+      return `assert ${assertion.negate ? "not " : ""}query ${emitExpression(assertion.expression)};`;
+    case "play":
+      return `assert play ${emitRelationAtom(assertion.atom)} => ${assertion.expected};`;
+  }
 }
 
 function emitParameter(parameter: ParameterPattern): string {

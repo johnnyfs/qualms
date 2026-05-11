@@ -245,7 +245,7 @@ replace action Examine(actor: Actor, target) {
   }
 }
 
-entity Guard { Locatable, Describable }
+entity Guard { Actor, Locatable, Describable }
 entity Closet { Location, Describable }
 entity ClosetDoor { Openable, Locatable, Describable }
 entity Mop { Portable, Describable, Locatable }
@@ -356,19 +356,15 @@ set {
 }
 
 -- (9) Reactions to conversation.
--- Introduces: the `on` rule, which fires after an action's body succeeds
--- and can preempt the action by failing; the entity-literal sugar for
--- parameter slots (`Guard`, `OfferMoney`); and a state transfer via an
--- after-rule (the guard hands over the master key). Reactions are not
--- first-class actors — they are rules attached to actions.
+-- Introduces: entity-literal sugar for parameter slots (`Guard`,
+-- `OfferMoney`) and after-rules that either preempt the action by failing or
+-- commit consequences. Because actions are atomic, a failing after-rule rolls
+-- back the TalkAbout action and any earlier after-rule effects.
 
 entity Money { Portable, Locatable }
 
--- Offering money requires the actor to actually have some. The on-rule
--- fires after the talk body and after-rule succeed; failing here rolls
--- the conversation back at the engine boundary (the InConversation update
--- still applies — there is no transactional rollback today).
-on TalkAbout(actor: Actor, Guard, OfferMoney) {
+-- Offering money requires the actor to actually have some.
+after TalkAbout(actor: Actor, Guard, OfferMoney) {
   when (!Carrying(actor, Money)) {
     fail;
   }
@@ -388,4 +384,16 @@ set {
   -- the world, so offering it fails.
   !At(MasterKey, Cell);
   Carrying(Guard, MasterKey);
+}
+
+-- (10) Regression validations.
+-- Introduces: first-class validation declarations. These assertions are meant
+-- to be run before committing authored mutations so that core story guarantees
+-- remain intact.
+
+validation TutorialSmoke {
+  assert fact At(Player, Cell);
+  assert not fact At(Player, Outside);
+  assert query Locked(Bars);
+  assert play Go(Player, Outside) => failed;
 }

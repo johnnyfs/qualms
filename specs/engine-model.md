@@ -71,6 +71,19 @@ classDiagram
     +effects: SetEffect[]
   }
 
+  class ValidationStatement {
+    +kind: "validation"
+    +id: string
+    +assertions: ValidationAssertion[]
+  }
+
+  class ValidationAssertion {
+    <<union>>
+    FactValidationAssertion
+    QueryValidationAssertion
+    PlayValidationAssertion
+  }
+
   class SetEffect {
     +polarity: "assert" | "retract"
     +atom: RelationAtom
@@ -98,7 +111,7 @@ classDiagram
     <<union>>
     WhenStatement
     SetStatement
-    PassStatement
+    SucceedStatement
     FailStatement
   }
 
@@ -133,6 +146,7 @@ classDiagram
   Program --> "*" EntityStatement
   Program --> "*" ExtendStatement
   Program --> "*" SetStatement
+  Program --> "*" ValidationStatement
   RelationStatement --> "*" RelationParameter
   RelationParameter --> "1" TypeExpr
   CallableStatement --> "*" ParameterPattern
@@ -143,6 +157,7 @@ classDiagram
   ParameterPattern --> "*" Expression
   SetStatement --> "*" SetEffect
   SetEffect --> "1" RelationAtom
+  ValidationStatement --> "*" ValidationAssertion
   Block --> "*" BodyStatement
   WhenStatement --> "1" Expression
   WhenStatement --> "1" Block
@@ -172,9 +187,10 @@ classDiagram
     +predicates: Map~string, CallableStatement~
     +actions: Map~string, CallableStatement~
     +rules: RuleStatement[]
+    +validations: Map~string, ValidationStatement~
     +entities: Map~string, Set~string~~
     -facts: Map~string, Fact~
-    +apply(program: Program) void
+    +apply(program: Program) Effect[]
     +clone() StoryModel
     +hasFact(relation, args) boolean
     +listFacts(relation?) Fact[]
@@ -220,6 +236,8 @@ Invariants:
 - `entities` keys are unique. `extend` mutates the trait set in place
   (additive only).
 - `facts` is keyed by `factKey(fact)` (`relation|JSON(args)`).
+- `validations` keys are unique and declaration-order preserving. They do
+  not execute during load; they run through `runLanguageValidations`.
 - `clone()` produces a deep-enough copy for transaction snapshots: a
   fresh `StoryModel` with new `Map`/`Set` containers, sharing AST nodes
   by reference. This is provisional — see
@@ -245,6 +263,18 @@ classDiagram
     +status: "passed" | "failed"
     +feedback: string
     +reasons: string[]
+    +effects: Effect[]
+  }
+
+  class LanguageValidationResult {
+    +status: "passed" | "failed"
+    +failures: LanguageValidationFailure[]
+  }
+
+  class LanguageValidationFailure {
+    +validation: string
+    +assertion: number
+    +message: string
   }
 
   class BlockResult {
@@ -266,7 +296,13 @@ classDiagram
 
 `BlockResult` is the internal contract returned by every body-statement
 and rule evaluator. It is not exported. `LanguagePlayResult` is the
-external shape returned by `playLanguageCall`.
+external shape returned by `playLanguageCall`. Action execution is staged on
+a cloned `StoryModel`; the returned `effects` are committed to the live model
+only after the action body and all applicable `after` rules pass.
+
+`LanguageValidationResult` is the external shape returned by
+`runLanguageValidations`. Validation play assertions use a cloned model and
+discard their effects.
 
 ---
 

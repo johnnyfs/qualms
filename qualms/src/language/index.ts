@@ -19,5 +19,14 @@ export {
 } from "./model.js";
 export type { Effect, Fact, GroundTerm } from "./model.js";
 export { LanguageParseError, parseExpression, parseProgram, parseRelationAtom } from "./parser.js";
-export { evalLanguageAtom, languageRuntimeInternals, playLanguageCall } from "./runtime.js";
-export type { LanguagePlayResult } from "./runtime.js";
+export {
+  evalLanguageAtom,
+  languageRuntimeInternals,
+  playLanguageCall,
+  runLanguageValidations,
+} from "./runtime.js";
+export type {
+  LanguagePlayResult,
+  LanguageValidationFailure,
+  LanguageValidationResult,
+} from "./runtime.js";

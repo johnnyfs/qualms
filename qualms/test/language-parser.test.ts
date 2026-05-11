@@ -22,6 +22,7 @@ describe("tutorial language parser", () => {
     expect(program.statements.filter((s) => s.kind === "entity")).toHaveLength(20);
     expect(program.statements.filter((s) => s.kind === "extend")).toHaveLength(3);
     expect(program.statements.filter((s) => s.kind === "set")).toHaveLength(9);
+    expect(program.statements.filter((s) => s.kind === "validation")).toHaveLength(1);
   });
 
   it("parses constrained action parameters", () => {

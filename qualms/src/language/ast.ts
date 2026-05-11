@@ -9,7 +9,8 @@ export type TopLevelStatement =
   | RuleStatement
   | EntityStatement
   | ExtendStatement
-  | SetStatement;
+  | SetStatement
+  | ValidationStatement;
 
 export interface TraitStatement {
   readonly kind: "trait";
@@ -37,7 +38,7 @@ export interface CallableStatement {
 
 export interface RuleStatement {
   readonly kind: "rule";
-  readonly phase: "before" | "after" | "on";
+  readonly phase: "before" | "after";
   readonly target: string;
   readonly parameters: readonly ParameterPattern[];
   readonly body: Block;
@@ -58,6 +59,35 @@ export interface ExtendStatement {
 export interface SetStatement {
   readonly kind: "set";
   readonly effects: readonly SetEffect[];
+}
+
+export interface ValidationStatement {
+  readonly kind: "validation";
+  readonly id: string;
+  readonly assertions: readonly ValidationAssertion[];
+}
+
+export type ValidationAssertion =
+  | FactValidationAssertion
+  | QueryValidationAssertion
+  | PlayValidationAssertion;
+
+export interface FactValidationAssertion {
+  readonly kind: "fact";
+  readonly negate: boolean;
+  readonly atom: RelationAtom;
+}
+
+export interface QueryValidationAssertion {
+  readonly kind: "query";
+  readonly negate: boolean;
+  readonly expression: Expression;
+}
+
+export interface PlayValidationAssertion {
+  readonly kind: "play";
+  readonly atom: RelationAtom;
+  readonly expected: "passed" | "failed";
 }
 
 export interface Block {
@@ -136,4 +166,3 @@ export type Term =
   | { readonly kind: "string"; readonly value: string }
   | { readonly kind: "number"; readonly value: number }
   | { readonly kind: "relationInstance"; readonly atom: RelationAtom };
-
