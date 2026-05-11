@@ -1,4 +1,6 @@
 import type {
+  Block,
+  BodyStatement,
   CallableStatement,
   EntityStatement,
   ExtendStatement,
@@ -73,6 +75,7 @@ export class StoryModel {
           this.addCallable(this.actions, statement, "action");
           break;
         case "rule":
+          this.validateRulePurity(statement);
           this.rules.push(statement);
           break;
         case "entity":
@@ -155,6 +158,9 @@ export class StoryModel {
     statement: CallableStatement,
     kind: string,
   ): void {
+    if (kind === "predicate" && blockContainsSet(statement.body)) {
+      throw new LanguageModelError(`predicate '${statement.id}' cannot contain set effects`);
+    }
     if (statement.replace) {
       if (!map.has(statement.id)) {
         throw new LanguageModelError(
@@ -165,6 +171,15 @@ export class StoryModel {
       return;
     }
     this.addUnique(map, statement.id, statement, kind);
+  }
+
+  private validateRulePurity(statement: RuleStatement): void {
+    if (!this.predicates.has(statement.target)) return;
+    if (blockContainsSet(statement.body)) {
+      throw new LanguageModelError(
+        `rule for predicate '${statement.target}' cannot contain set effects`,
+      );
+    }
   }
 
   private requireTrait(id: string): void {
@@ -244,4 +259,14 @@ export function idTerm(id: string): GroundTerm {
 
 export function relationTerm(relation: string, args: readonly GroundTerm[]): GroundTerm {
   return { kind: "relation", relation, args };
+}
+
+function blockContainsSet(block: Block): boolean {
+  return block.statements.some(statementContainsSet);
+}
+
+function statementContainsSet(statement: BodyStatement): boolean {
+  if (statement.kind === "set") return true;
+  if (statement.kind === "when") return blockContainsSet(statement.body);
+  return false;
 }
