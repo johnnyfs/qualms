@@ -88,6 +88,11 @@ after Drop(actor: Locatable { At(actor, here) }, target: Locatable) {
   }
 }
 
+entity BoneShard { Portable, Describable, Locatable }
+set {
+  At(BoneShard, Cell);
+}
+
 -- (4) Extend with doors
 -- Introduces: before rules and relations between relation instances.
 
@@ -191,9 +196,74 @@ set {
   LockedWith(Bars, MasterKey);
 }
 
+-- (6) Visibility
+-- Introduces: the `Any` built-in type, the `replace` keyword for overriding
+-- an earlier action, predicates extended by before-rules, and adjacency
+-- encoded in parameter constraints. Anything not declared Transparent is
+-- opaque by default.
+
+relation Transparent(Any)
+relation ConveysVisibility(Path)
+
+predicate IsVisibleTo(actor: Actor, target) {
+  when (At(actor, target) | IsColocated(actor, target) | Carrying(actor, target)) {
+    pass;
+  }
+}
+
+predicate Opaque(door: Openable) {
+  when (!Transparent(door) & !Opened(door)) {
+    pass;
+  }
+}
+
+-- A target visible across a path the actor can see along, unless an opaque
+-- closed door gates that path. The parameter constraints encode adjacency;
+-- the when clause tests only the visibility-specific rules, so a failure
+-- here describes why the visibility rules failed.
+before IsVisibleTo(
+  actor: Actor { At(actor, here) },
+  target: Locatable { At(target, location) & Path(here, location) }
+) {
+  when (
+    ConveysVisibility(Path(here, location)) &
+    !(Gated(Path(here, location), door) & Opaque(door))
+  ) {
+    pass;
+  }
+}
+
+-- Examine now routes through IsVisibleTo, so visibility actually gates it.
+replace action Examine(actor: Actor, target) {
+  when (IsVisibleTo(actor, target)) {
+    pass;
+  }
+}
+
+entity Guard { Locatable, Describable }
+entity Closet { Location, Describable }
+entity ClosetDoor { Openable, Locatable, Describable }
+entity Mop { Portable, Describable, Locatable }
+
+set {
+  ConveysVisibility(Path(Cell, Corridor));
+  ConveysVisibility(Path(Corridor, Cell));
+  ConveysVisibility(Path(Corridor, Closet));
+  ConveysVisibility(Path(Closet, Corridor));
+  Transparent(Bars);
+  Path(Corridor, Closet);
+  Path(Closet, Corridor);
+  Gated(Path(Corridor, Closet), ClosetDoor);
+  Gated(Path(Closet, Corridor), ClosetDoor);
+  At(Guard, Corridor);
+  At(Mop, Closet);
+}
+
 -- (7) Simple conversation.
--- Introduces: actions with multiple typed arguments, and overriding a
--- predicate (IsColocated) for a specific entity via parameter equality.
+-- Introduces: actions with multiple typed arguments. Conversation reach is
+-- decided by IsVisibleTo (section 6) — no separate before-rule needed; the
+-- Guard in the Corridor is reachable from the Cell because the Bars are
+-- transparent and the Cell↔Corridor path conveys visibility.
 
 trait Speaker
 trait Topic
@@ -201,38 +271,15 @@ trait Topic
 relation TalksAbout(Speaker, Topic)
 
 action TalkAbout(actor: Actor, speaker: Speaker, topic: Topic) {
-  when (TalksAbout(speaker, topic)) {
+  when (IsVisibleTo(actor, speaker) & TalksAbout(speaker, topic)) {
     pass;
   }
 }
 
--- Keep colocation a separate concern from Talking.
-before TalkAbout(
-  actor: (Actor & Locatable) { At(actor, here) },
-  speaker: Locatable,
-  _
-) {
-  when (!IsColocated(actor, speaker)) {
-    fail;
-  }
-}
-
-entity Guard { Speaker, Locatable }
+extend Guard { Speaker }
 entity Bribery { Topic }
 entity Checkers { Topic }
 
 set {
-  At(Guard, Corridor);
   TalksAbout(Guard, Bribery);
-}
-
--- Talking to the guard "through the bars" works: when the actor is in the
--- Cell and the target is the Guard, IsColocated short-circuits to pass.
-before IsColocated(
-  actor: (Actor & Locatable) { At(actor, here) },
-  target: Locatable { target == Guard }
-) {
-  when (here == Cell) {
-    pass;
-  }
 }
