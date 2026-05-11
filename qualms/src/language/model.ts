@@ -6,11 +6,13 @@ import type {
   ExtendStatement,
   Program,
   RelationAtom,
+  RelationParameter,
   RelationStatement,
   RuleStatement,
   SetEffect,
   Term,
   TraitStatement,
+  TypeExpr,
 } from "./ast.js";
 import { parseProgram } from "./parser.js";
 
@@ -66,6 +68,7 @@ export class StoryModel {
           this.addUnique(this.traits, statement.id, statement, "trait");
           break;
         case "relation":
+          this.validateRelation(statement);
           this.addUnique(this.relations, statement.id, statement, "relation");
           break;
         case "predicate":
@@ -75,6 +78,7 @@ export class StoryModel {
           this.addCallable(this.actions, statement, "action");
           break;
         case "rule":
+          this.validateRule(statement);
           this.validateRulePurity(statement);
           this.rules.push(statement);
           break;
@@ -102,13 +106,13 @@ export class StoryModel {
   }
 
   assertFact(fact: Fact): void {
-    this.requireRelation(fact.relation);
+    this.validateFact(fact);
     this.applyCardinality(fact);
     this.facts.set(factKey(fact), fact);
   }
 
   retractFact(fact: Fact): void {
-    this.requireRelation(fact.relation);
+    this.validateFact(fact);
     this.facts.delete(factKey(fact));
   }
 
@@ -158,6 +162,7 @@ export class StoryModel {
     statement: CallableStatement,
     kind: string,
   ): void {
+    this.validateCallableTypes(statement);
     if (kind === "predicate" && blockContainsSet(statement.body)) {
       throw new LanguageModelError(`predicate '${statement.id}' cannot contain set effects`);
     }
@@ -180,6 +185,92 @@ export class StoryModel {
         `rule for predicate '${statement.target}' cannot contain set effects`,
       );
     }
+  }
+
+  private validateRelation(statement: RelationStatement): void {
+    for (const parameter of statement.parameters) {
+      this.validateRelationParameter(parameter);
+    }
+  }
+
+  private validateRelationParameter(parameter: RelationParameter): void {
+    this.validateTypeExpr(parameter.type);
+  }
+
+  private validateCallableTypes(statement: CallableStatement): void {
+    for (const parameter of statement.parameters) {
+      if (parameter.type) this.validateTypeExpr(parameter.type);
+    }
+  }
+
+  private validateRule(statement: RuleStatement): void {
+    const targetAction = this.actions.get(statement.target);
+    const targetPredicate = this.predicates.get(statement.target);
+    const target = targetAction ?? targetPredicate;
+    if (!target) throw new LanguageModelError(`unknown rule target '${statement.target}'`);
+    if (statement.phase === "after" && targetPredicate) {
+      throw new LanguageModelError(`after rule cannot target predicate '${statement.target}'`);
+    }
+    if (target.parameters.length !== statement.parameters.length) {
+      throw new LanguageModelError(
+        `rule for '${statement.target}' has arity ${statement.parameters.length}, expected ${target.parameters.length}`,
+      );
+    }
+    for (const parameter of statement.parameters) {
+      if (parameter.type) this.validateTypeExpr(parameter.type);
+    }
+  }
+
+  private validateTypeExpr(type: TypeExpr): void {
+    if (type.kind === "intersection") {
+      for (const inner of type.types) this.validateTypeExpr(inner);
+      return;
+    }
+    if (type.id === "Any") return;
+    if (this.traits.has(type.id) || this.relations.has(type.id)) return;
+    throw new LanguageModelError(`unknown type '${type.id}'`);
+  }
+
+  private validateFact(fact: Fact): void {
+    const relation = this.relations.get(fact.relation);
+    if (!relation) throw new LanguageModelError(`unknown relation '${fact.relation}'`);
+    if (fact.args.length !== relation.parameters.length) {
+      throw new LanguageModelError(
+        `relation '${fact.relation}' expects ${relation.parameters.length} args, got ${fact.args.length}`,
+      );
+    }
+    for (let i = 0; i < relation.parameters.length; i++) {
+      const expected = relation.parameters[i]!.type;
+      const actual = fact.args[i]!;
+      if (!this.groundTermMatchesType(actual, expected)) {
+        throw new LanguageModelError(
+          `relation '${fact.relation}' arg ${i + 1} expected ${emitTypeExpr(expected)}, got ${emitGroundTermForError(actual)}`,
+        );
+      }
+    }
+  }
+
+  private groundTermMatchesType(value: GroundTerm, type: TypeExpr): boolean {
+    if (type.kind === "intersection") {
+      return type.types.every((inner) => this.groundTermMatchesType(value, inner));
+    }
+    if (type.id === "Any") return this.groundTermIsValid(value);
+    if (this.traits.has(type.id)) {
+      return value.kind === "id" && this.entities.get(value.id)?.has(type.id) === true;
+    }
+    if (this.relations.has(type.id)) {
+      if (value.kind !== "relation" || value.relation !== type.id) return false;
+      this.validateFact({ relation: value.relation, args: value.args });
+      return true;
+    }
+    return false;
+  }
+
+  private groundTermIsValid(value: GroundTerm): boolean {
+    if (value.kind === "relation") {
+      this.validateFact({ relation: value.relation, args: value.args });
+    }
+    return true;
   }
 
   private requireTrait(id: string): void {
@@ -269,4 +360,22 @@ function statementContainsSet(statement: BodyStatement): boolean {
   if (statement.kind === "set") return true;
   if (statement.kind === "when") return blockContainsSet(statement.body);
   return false;
+}
+
+function emitTypeExpr(type: TypeExpr): string {
+  if (type.kind === "named") return type.id;
+  return `(${type.types.map(emitTypeExpr).join(" & ")})`;
+}
+
+function emitGroundTermForError(term: GroundTerm): string {
+  switch (term.kind) {
+    case "id":
+      return term.id;
+    case "string":
+      return JSON.stringify(term.value);
+    case "number":
+      return String(term.value);
+    case "relation":
+      return `${term.relation}(${term.args.map(emitGroundTermForError).join(", ")})`;
+  }
 }
