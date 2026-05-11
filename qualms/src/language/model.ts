@@ -3,6 +3,7 @@ import type {
   BodyStatement,
   CallableStatement,
   EntityStatement,
+  ExternPredicateStatement,
   ExtendStatement,
   Program,
   RelationAtom,
@@ -43,6 +44,7 @@ export class LanguageModelError extends Error {
 export class StoryModel {
   readonly traits = new Map<string, TraitStatement>();
   readonly relations = new Map<string, RelationStatement>();
+  readonly externalPredicates = new Map<string, ExternPredicateStatement>();
   readonly predicates = new Map<string, CallableStatement>();
   readonly actions = new Map<string, CallableStatement>();
   readonly rules: RuleStatement[] = [];
@@ -54,6 +56,7 @@ export class StoryModel {
     const clone = new StoryModel();
     for (const [id, trait] of this.traits) clone.traits.set(id, trait);
     for (const [id, relation] of this.relations) clone.relations.set(id, relation);
+    for (const [id, predicate] of this.externalPredicates) clone.externalPredicates.set(id, predicate);
     for (const [id, predicate] of this.predicates) clone.predicates.set(id, predicate);
     for (const [id, action] of this.actions) clone.actions.set(id, action);
     clone.rules.push(...this.rules);
@@ -73,6 +76,9 @@ export class StoryModel {
         case "relation":
           this.validateRelation(statement);
           this.addUnique(this.relations, statement.id, statement, "relation");
+          break;
+        case "externPredicate":
+          this.addExternPredicate(statement);
           break;
         case "predicate":
           this.addCallable(this.predicates, statement, "predicate");
@@ -184,6 +190,14 @@ export class StoryModel {
     this.addUnique(map, statement.id, statement, kind);
   }
 
+  private addExternPredicate(statement: ExternPredicateStatement): void {
+    this.validateCallableTypes(statement);
+    if (this.predicates.has(statement.id) || this.actions.has(statement.id)) {
+      throw new LanguageModelError(`duplicate callable '${statement.id}'`);
+    }
+    this.addUnique(this.externalPredicates, statement.id, statement, "external predicate");
+  }
+
   private validateRulePurity(statement: RuleStatement): void {
     if (!this.predicates.has(statement.target)) return;
     if (blockContainsImpureStatement(statement.body)) {
@@ -240,7 +254,7 @@ export class StoryModel {
     this.validateTypeExpr(parameter.type);
   }
 
-  private validateCallableTypes(statement: CallableStatement): void {
+  private validateCallableTypes(statement: { readonly parameters: readonly { readonly type?: TypeExpr }[] }): void {
     for (const parameter of statement.parameters) {
       if (parameter.type) this.validateTypeExpr(parameter.type);
     }

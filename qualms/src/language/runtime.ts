@@ -45,6 +45,19 @@ export interface LanguageFailure {
   readonly callable?: string;
 }
 
+export interface LanguageHostPredicateCall {
+  readonly predicate: string;
+  readonly args: readonly GroundTerm[];
+}
+
+export interface LanguageHostAdapter {
+  readonly evalPredicate: (call: LanguageHostPredicateCall) => boolean;
+}
+
+export interface LanguageRuntimeOptions {
+  readonly host?: LanguageHostAdapter;
+}
+
 export interface LanguageValidationFailure {
   readonly validation: string;
   readonly assertion: number;
@@ -64,7 +77,11 @@ interface BlockResult {
   readonly callable?: string;
 }
 
-export function playLanguageCall(model: StoryModel, call: string | RelationAtom): LanguagePlayResult {
+export function playLanguageCall(
+  model: StoryModel,
+  call: string | RelationAtom,
+  options: LanguageRuntimeOptions = {},
+): LanguagePlayResult {
   const atom = typeof call === "string" ? parseRelationAtom(call) : call;
   const callable = model.actions.get(atom.relation);
   if (!callable) {
@@ -78,7 +95,7 @@ export function playLanguageCall(model: StoryModel, call: string | RelationAtom)
   const working = model.clone();
   const effects: Effect[] = [];
   const events: LanguageEvent[] = [];
-  const result = executeCallable(working, callable, args, "action", effects, events);
+  const result = executeCallable(working, callable, args, "action", effects, events, options);
   if (result.status !== "passed") {
     return failResult(result.reasons, [], [], {
       kind: "action_failed",
@@ -90,13 +107,17 @@ export function playLanguageCall(model: StoryModel, call: string | RelationAtom)
   return { status: "passed", feedback: "succeed;", reasons: [], effects, events, failures: [] };
 }
 
-export function evalLanguageAtom(model: StoryModel, call: string | RelationAtom): LanguagePlayResult {
+export function evalLanguageAtom(
+  model: StoryModel,
+  call: string | RelationAtom,
+  options: LanguageRuntimeOptions = {},
+): LanguagePlayResult {
   const atom = typeof call === "string" ? parseRelationAtom(call) : call;
   if (model.actions.has(atom.relation)) return playLanguageCall(model, atom);
 
   const expression: Expression = { kind: "relation", atom };
   const effects: Effect[] = [];
-  const matches = evalExpression(model, expression, {}, effects, []);
+  const matches = evalExpression(model, expression, {}, effects, [], options);
   if (matches.length > 0) {
     return { status: "passed", feedback: "succeed;", reasons: [], effects, events: [], failures: [] };
   }
@@ -105,11 +126,14 @@ export function evalLanguageAtom(model: StoryModel, call: string | RelationAtom)
   });
 }
 
-export function runLanguageValidations(model: StoryModel): LanguageValidationResult {
+export function runLanguageValidations(
+  model: StoryModel,
+  options: LanguageRuntimeOptions = {},
+): LanguageValidationResult {
   const failures: LanguageValidationFailure[] = [];
   for (const validation of model.validations.values()) {
     validation.assertions.forEach((assertion, index) => {
-      const message = evaluateValidationAssertion(model, assertion);
+      const message = evaluateValidationAssertion(model, assertion, options);
       if (!message) return;
       failures.push({ validation: validation.id, assertion: index + 1, message });
     });
@@ -120,6 +144,7 @@ export function runLanguageValidations(model: StoryModel): LanguageValidationRes
 function evaluateValidationAssertion(
   model: StoryModel,
   assertion: ValidationAssertion,
+  options: LanguageRuntimeOptions,
 ): string | undefined {
   switch (assertion.kind) {
     case "fact": {
@@ -131,9 +156,9 @@ function evaluateValidationAssertion(
         : `expected fact: ${emitRelationAtom(assertion.atom, {})}`;
     }
     case "query": {
-      const matches = evalExpression(model, assertion.expression, {}, [], []);
+      const matches = evalExpression(model, assertion.expression, {}, [], [], options);
       const matched = assertion.expectedBindings
-        ? matches.length === 1 && assertion.expectedBindings.every((binding) => evalExpression(model, binding, matches[0]!, [], []).length > 0)
+        ? matches.length === 1 && assertion.expectedBindings.every((binding) => evalExpression(model, binding, matches[0]!, [], [], options).length > 0)
         : matches.length > 0;
       if (assertion.negate ? !matched : matched) return undefined;
       if (assertion.expectedBindings) {
@@ -144,7 +169,7 @@ function evaluateValidationAssertion(
         : `expected query to match: ${emitExpression(assertion.expression, {})}`;
     }
     case "play": {
-      const result = playLanguageCall(model.clone(), assertion.atom);
+      const result = playLanguageCall(model.clone(), assertion.atom, options);
       if (result.status !== assertion.expected) {
         return `expected play ${emitRelationAtom(assertion.atom, {})} to ${assertion.expected}, got ${result.status}`;
       }
@@ -188,8 +213,9 @@ function executeCallable(
   mode: "action" | "predicate",
   effects: Effect[],
   events: LanguageEvent[],
+  options: LanguageRuntimeOptions,
 ): BlockResult {
-  const bound = bindParameters(model, callable.parameters, args, effects, events);
+  const bound = bindParameters(model, callable.parameters, args, effects, events, options);
   if (bound.length === 0) {
     return {
       status: "failed",
@@ -204,11 +230,11 @@ function executeCallable(
     // inherit names from the caller's env, and after-rules do not inherit
     // names from the body's env. Rule parameter constraints re-introduce
     // any names they need.
-    const before = runRules(model, "before", callable.id, args, effects, events);
+    const before = runRules(model, "before", callable.id, args, effects, events, options);
     if (before.status === "failed" && before.terminal === "fail") return before;
     if (before.status === "passed" && before.terminal === "succeed") return before;
 
-    const body = executeBlock(model, callable.body, env, effects, events);
+    const body = executeBlock(model, callable.body, env, effects, events, options);
     if (body.status !== "passed") {
       if (before.reasons.length > 0) {
         return { ...body, reasons: [...body.reasons, ...before.reasons] };
@@ -217,7 +243,7 @@ function executeCallable(
     }
 
     if (mode === "action") {
-      const after = runRules(model, "after", callable.id, args, effects, events);
+      const after = runRules(model, "after", callable.id, args, effects, events, options);
       if (after.status === "failed" && after.terminal === "fail") return after;
     }
     return body;
@@ -238,13 +264,14 @@ function runRules(
   args: readonly GroundTerm[],
   effects: Effect[],
   events: LanguageEvent[],
+  options: LanguageRuntimeOptions,
 ): BlockResult {
   const noMatchReasons: string[] = [];
   for (const rule of model.rules) {
     if (rule.phase !== phase || rule.target !== target) continue;
-    const bound = bindParameters(model, rule.parameters, args, effects, events);
+    const bound = bindParameters(model, rule.parameters, args, effects, events, options);
     for (const ruleEnv of bound) {
-      const outcome = executeRuleBlock(model, rule, ruleEnv, effects, events);
+      const outcome = executeRuleBlock(model, rule, ruleEnv, effects, events, options);
       if (outcome.status === "failed" && outcome.terminal === "fail") return outcome;
       if (outcome.status === "passed" && outcome.terminal === "succeed") return outcome;
       // Surface only would-have-rescued reasons: a succeed-rule whose when
@@ -273,8 +300,9 @@ function executeRuleBlock(
   env: Env,
   effects: Effect[],
   events: LanguageEvent[],
+  options: LanguageRuntimeOptions,
 ): BlockResult {
-  return executeBlock(model, _rule.body, env, effects, events);
+  return executeBlock(model, _rule.body, env, effects, events, options);
 }
 
 function bindParameters(
@@ -283,6 +311,7 @@ function bindParameters(
   args: readonly GroundTerm[],
   effects: Effect[],
   events: LanguageEvent[],
+  options: LanguageRuntimeOptions,
 ): Env[] {
   if (patterns.length !== args.length) return [];
   let envs: Env[] = [{}];
@@ -296,7 +325,7 @@ function bindParameters(
       if (!named) continue;
       let constrained = [named];
       for (const constraint of pattern.constraints) {
-        constrained = constrained.flatMap((candidate) => evalExpression(model, constraint, candidate, effects, events));
+        constrained = constrained.flatMap((candidate) => evalExpression(model, constraint, candidate, effects, events, options));
       }
       next.push(...constrained);
     }
@@ -311,11 +340,12 @@ function executeBlock(
   env: Env,
   effects: Effect[],
   events: LanguageEvent[],
+  options: LanguageRuntimeOptions,
 ): BlockResult {
   let current = env;
   const reasons: string[] = [];
   for (const statement of block.statements) {
-    const result = executeBodyStatement(model, statement, current, effects, events);
+    const result = executeBodyStatement(model, statement, current, effects, events, options);
     if (result.status === "no_match") {
       reasons.push(...result.reasons);
       continue;
@@ -334,10 +364,11 @@ function executeBodyStatement(
   env: Env,
   effects: Effect[],
   events: LanguageEvent[],
+  options: LanguageRuntimeOptions,
 ): BlockResult {
   switch (statement.kind) {
     case "when":
-      return executeWhen(model, statement, env, effects, events);
+      return executeWhen(model, statement, env, effects, events, options);
     case "set":
       applySet(model, statement, env, effects);
       return { status: "passed", env, reasons: [] };
@@ -357,13 +388,14 @@ function executeWhen(
   env: Env,
   effects: Effect[],
   events: LanguageEvent[],
+  options: LanguageRuntimeOptions,
 ): BlockResult {
-  const matches = evalExpression(model, statement.condition, env, effects, events);
+  const matches = evalExpression(model, statement.condition, env, effects, events, options);
   if (matches.length === 0) {
     return { status: "no_match", env, reasons: explainExpression(model, statement.condition, env) };
   }
   for (const match of matches) {
-    const body = executeBlock(model, statement.body, match, effects, events);
+    const body = executeBlock(model, statement.body, match, effects, events, options);
     if (body.status === "passed" && body.terminal === "succeed") return body;
     if (body.status === "failed" && body.terminal === "fail") {
       return {
@@ -404,21 +436,22 @@ function evalExpression(
   env: Env,
   effects: Effect[],
   events: LanguageEvent[],
+  options: LanguageRuntimeOptions,
 ): Env[] {
   switch (expression.kind) {
     case "relation":
-      return evalRelation(model, expression.atom, env, effects, events);
+      return evalRelation(model, expression.atom, env, effects, events, options);
     case "not":
-      return evalExpression(model, expression.operand, env, effects, events).length === 0 ? [env] : [];
+      return evalExpression(model, expression.operand, env, effects, events, options).length === 0 ? [env] : [];
     case "binary": {
       if (expression.op === "&") {
-        return evalExpression(model, expression.left, env, effects, events).flatMap((leftEnv) =>
-          evalExpression(model, expression.right, leftEnv, effects, events),
+        return evalExpression(model, expression.left, env, effects, events, options).flatMap((leftEnv) =>
+          evalExpression(model, expression.right, leftEnv, effects, events, options),
         );
       }
       return dedupeEnvs([
-        ...evalExpression(model, expression.left, env, effects, events),
-        ...evalExpression(model, expression.right, env, effects, events),
+        ...evalExpression(model, expression.left, env, effects, events, options),
+        ...evalExpression(model, expression.right, env, effects, events, options),
       ]);
     }
     case "equal": {
@@ -444,12 +477,20 @@ function evalRelation(
   env: Env,
   effects: Effect[],
   events: LanguageEvent[],
+  options: LanguageRuntimeOptions,
 ): Env[] {
+  const externalPredicate = model.externalPredicates.get(atom.relation);
+  if (externalPredicate) {
+    const args = atom.args.map((term) => resolveTerm(term, env));
+    if (args.some((arg) => arg === undefined)) return [];
+    return options.host?.evalPredicate({ predicate: atom.relation, args: args as GroundTerm[] }) ? [env] : [];
+  }
+
   const predicate = model.predicates.get(atom.relation);
   if (predicate) {
     const args = atom.args.map((term) => resolveTerm(term, env));
     if (args.some((arg) => arg === undefined)) return [];
-    const result = executeCallable(model, predicate, args as GroundTerm[], "predicate", effects, events);
+    const result = executeCallable(model, predicate, args as GroundTerm[], "predicate", effects, events, options);
     // Predicate parameter names live in the predicate's own scope; the
     // caller continues with the env it had before the call.
     return result.status === "passed" ? [env] : [];
@@ -588,7 +629,7 @@ function explainExpression(model: StoryModel, expression: Expression, env: Env):
       if (predicate) {
         const args = expression.atom.args.map((term) => resolveTerm(term, env));
         if (args.every((arg) => arg !== undefined)) {
-          const result = executeCallable(model, predicate, args as GroundTerm[], "predicate", discard, []);
+          const result = executeCallable(model, predicate, args as GroundTerm[], "predicate", discard, [], {});
           if (result.status === "failed" && result.reasons.length > 0) {
             return [...result.reasons];
           }
@@ -605,10 +646,10 @@ function explainExpression(model: StoryModel, expression: Expression, env: Env):
           ...explainExpression(model, expression.right, env),
         ];
       }
-      if (evalExpression(model, expression.left, env, discard, []).length === 0) {
+      if (evalExpression(model, expression.left, env, discard, [], {}).length === 0) {
         return explainExpression(model, expression.left, env);
       }
-      return evalExpression(model, expression.left, env, discard, []).flatMap((leftEnv) =>
+      return evalExpression(model, expression.left, env, discard, [], {}).flatMap((leftEnv) =>
         explainExpression(model, expression.right, leftEnv),
       );
     case "equal":
@@ -684,5 +725,5 @@ function emitGroundTerm(term: GroundTerm): string {
 
 export const languageRuntimeInternals = {
   evalExpression: (model: StoryModel, expression: Expression, env: Env): Env[] =>
-    evalExpression(model, expression, env, [], []),
+    evalExpression(model, expression, env, [], [], {}),
 };

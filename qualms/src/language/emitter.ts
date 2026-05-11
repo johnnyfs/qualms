@@ -4,6 +4,7 @@ import type {
   BodyStatement,
   CallableStatement,
   EntityStatement,
+  ExternPredicateStatement,
   EqualityExpression,
   Expression,
   ExtendStatement,
@@ -47,6 +48,7 @@ export function programFromModel(model: StoryModel): Program {
   const statements: TopLevelStatement[] = [
     ...model.traits.values(),
     ...model.relations.values(),
+    ...model.externalPredicates.values(),
     ...model.predicates.values(),
     ...model.actions.values(),
     ...model.rules,
@@ -92,6 +94,8 @@ export function emitTopLevelStatement(statement: TopLevelStatement): string {
       return emitTrait(statement);
     case "relation":
       return emitRelation(statement);
+    case "externPredicate":
+      return emitExternPredicate(statement);
     case "predicate":
     case "action":
       return emitCallable(statement);
@@ -122,6 +126,10 @@ function emitRelation(statement: RelationStatement): string {
 function emitRelationParameter(parameter: RelationParameter): string {
   const name = parameter.name ? `${parameter.name}: ` : "";
   return `${name}${parameter.cardinality ? `${parameter.cardinality} ` : ""}${emitTypeExpr(parameter.type)}`;
+}
+
+function emitExternPredicate(statement: ExternPredicateStatement): string {
+  return `extern predicate ${statement.id}(${statement.parameters.map(emitParameter).join(", ")});`;
 }
 
 function emitCallable(statement: CallableStatement): string {

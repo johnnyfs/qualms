@@ -112,4 +112,16 @@ describe("tutorial language parser", () => {
       unique: ["subject"],
     });
   });
+
+  it("parses external predicate declarations", () => {
+    const program = parseProgram("trait Actor\ntrait Thing\nextern predicate CanSee(actor: Actor, target: Thing);");
+    expect(program.statements[2]).toMatchObject({
+      kind: "externPredicate",
+      id: "CanSee",
+      parameters: [
+        { name: "actor", type: { kind: "named", id: "Actor" } },
+        { name: "target", type: { kind: "named", id: "Thing" } },
+      ],
+    });
+  });
 });

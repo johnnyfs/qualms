@@ -3,6 +3,7 @@ import type {
   BodyStatement,
   CallableStatement,
   EntityStatement,
+  ExternPredicateStatement,
   Expression,
   EqualityExpression,
   ExtendStatement,
@@ -237,6 +238,7 @@ class Parser {
   private topLevelStatement(): TopLevelStatement {
     if (this.matchKeyword("trait")) return this.traitStatement();
     if (this.matchKeyword("relation")) return this.relationStatement();
+    if (this.matchKeyword("extern")) return this.externStatement();
     if (this.matchKeyword("replace")) return this.replaceStatement();
     if (this.matchKeyword("action")) return this.callableStatement("action");
     if (this.matchKeyword("predicate")) return this.callableStatement("predicate");
@@ -289,6 +291,15 @@ class Parser {
       type,
       ...(cardinality ? { cardinality } : {}),
     };
+  }
+
+  private externStatement(): ExternPredicateStatement {
+    this.expectKeyword("extern");
+    this.expectKeyword("predicate");
+    const id = this.identifier();
+    const parameters = this.callParameters();
+    this.consumeIf("semi");
+    return { kind: "externPredicate", id, parameters };
   }
 
   private uniqueRelationParameters(): string[] {

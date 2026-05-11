@@ -74,6 +74,31 @@ describe("tutorial language runtime", () => {
     expect(evalLanguageAtom(model, "At(Player, where)").status).toBe("failed");
   });
 
+  it("evaluates declared external predicates through a pure host adapter", () => {
+    const model = loadStoryProgram(`
+      trait Actor
+      trait Thing
+      extern predicate CanSee(actor: Actor, target: Thing);
+      action Look(actor: Actor, target: Thing) {
+        when (CanSee(actor, target)) {
+          succeed;
+        }
+      }
+      entity Player { Actor }
+      entity Gem { Thing }
+    `);
+
+    expect(playLanguageCall(model, "Look(Player, Gem)").status).toBe("failed");
+    expect(
+      playLanguageCall(model, "Look(Player, Gem)", {
+        host: {
+          evalPredicate: ({ predicate, args }) =>
+            predicate === "CanSee" && args[0]?.kind === "id" && args[0].id === "Player",
+        },
+      }).status,
+    ).toBe("passed");
+  });
+
   it("runs tutorial doors and locks through predicates and before rules", () => {
     const model = loadStoryProgram(readFileSync(TUTORIAL_PATH, "utf-8"));
 

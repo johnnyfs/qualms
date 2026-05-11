@@ -5,6 +5,7 @@ export interface Program {
 export type TopLevelStatement =
   | TraitStatement
   | RelationStatement
+  | ExternPredicateStatement
   | CallableStatement
   | RuleStatement
   | EntityStatement
@@ -36,6 +37,12 @@ export interface CallableStatement {
   readonly parameters: readonly ParameterPattern[];
   readonly body: Block;
   readonly replace?: boolean;
+}
+
+export interface ExternPredicateStatement {
+  readonly kind: "externPredicate";
+  readonly id: string;
+  readonly parameters: readonly ParameterPattern[];
 }
 
 export interface RuleStatement {
