@@ -3,9 +3,12 @@ import type {
   BodyStatement,
   CallableStatement,
   EntityStatement,
+  ExternPredicateStatement,
   Expression,
+  EqualityExpression,
   ExtendStatement,
   FailStatement,
+  EmitStatement,
   ParameterPattern,
   SucceedStatement,
   Program,
@@ -36,6 +39,7 @@ type TokenType =
   | "colon"
   | "semi"
   | "bang"
+  | "question"
   | "amp"
   | "pipe"
   | "eqeq"
@@ -179,6 +183,7 @@ function tokenize(source: string): Token[] {
       ":": "colon",
       ";": "semi",
       "!": "bang",
+      "?": "question",
       "&": "amp",
       "|": "pipe",
     };
@@ -233,6 +238,7 @@ class Parser {
   private topLevelStatement(): TopLevelStatement {
     if (this.matchKeyword("trait")) return this.traitStatement();
     if (this.matchKeyword("relation")) return this.relationStatement();
+    if (this.matchKeyword("extern")) return this.externStatement();
     if (this.matchKeyword("replace")) return this.replaceStatement();
     if (this.matchKeyword("action")) return this.callableStatement("action");
     if (this.matchKeyword("predicate")) return this.callableStatement("predicate");
@@ -271,13 +277,40 @@ class Parser {
       while (this.consumeIf("comma")) parameters.push(this.relationParameter());
     }
     this.expect("rparen");
-    return { kind: "relation", id, parameters };
+    const unique = this.consumeKeywordIf("unique") ? this.uniqueRelationParameters() : undefined;
+    return unique && unique.length > 0 ? { kind: "relation", id, parameters, unique } : { kind: "relation", id, parameters };
   }
 
   private relationParameter(): RelationParameter {
+    const name = this.at("identifier") && this.peekAhead(1).type === "colon" ? this.identifier() : undefined;
+    if (name) this.expect("colon");
     const cardinality = this.consumeKeywordIf("one") ? "one" : undefined;
     const type = this.typeExpr();
-    return cardinality ? { type, cardinality } : { type };
+    return {
+      ...(name ? { name } : {}),
+      type,
+      ...(cardinality ? { cardinality } : {}),
+    };
+  }
+
+  private externStatement(): ExternPredicateStatement {
+    this.expectKeyword("extern");
+    this.expectKeyword("predicate");
+    const id = this.identifier();
+    const parameters = this.callParameters();
+    this.consumeIf("semi");
+    return { kind: "externPredicate", id, parameters };
+  }
+
+  private uniqueRelationParameters(): string[] {
+    this.expect("lparen");
+    const names: string[] = [];
+    if (!this.at("rparen")) {
+      names.push(this.identifier());
+      while (this.consumeIf("comma")) names.push(this.identifier());
+    }
+    this.expect("rparen");
+    return names;
   }
 
   private callableStatement(kind: "action" | "predicate"): CallableStatement {
@@ -399,6 +432,7 @@ class Parser {
   private bodyStatement(): BodyStatement {
     if (this.matchKeyword("when")) return this.whenStatement();
     if (this.matchKeyword("set")) return this.setStatement();
+    if (this.matchKeyword("emit")) return this.emitStatement();
     if (this.matchKeyword("succeed")) return this.succeedStatement();
     if (this.matchKeyword("fail")) return this.failStatement();
     this.fail(`expected body statement, got '${this.peek().image}'`);
@@ -448,6 +482,13 @@ class Parser {
     return { polarity, atom: this.relationAtom() };
   }
 
+  private emitStatement(): EmitStatement {
+    this.expectKeyword("emit");
+    const atom = this.relationAtom();
+    this.consumeIf("semi");
+    return { kind: "emit", atom };
+  }
+
   private validationStatement(): ValidationStatement {
     this.expectKeyword("validation");
     const id = this.identifier();
@@ -470,17 +511,84 @@ class Parser {
       return { kind: "fact", negate, atom: this.relationAtom() };
     }
     if (this.consumeKeywordIf("query")) {
-      return { kind: "query", negate, expression: this.expression() };
+      const expression = this.expression();
+      const expectedBindings = this.consumeIf("arrow") ? this.validationBindings() : undefined;
+      return expectedBindings
+        ? { kind: "query", negate, expression, expectedBindings }
+        : { kind: "query", negate, expression };
     }
     if (negate) this.fail("play validation assertions use '=> failed', not 'assert not play'");
     if (this.consumeKeywordIf("play")) {
       const atom = this.relationAtom();
       this.expect("arrow");
-      if (this.consumeKeywordIf("passed")) return { kind: "play", atom, expected: "passed" };
-      if (this.consumeKeywordIf("failed")) return { kind: "play", atom, expected: "failed" };
+      const expected = this.consumeKeywordIf("passed")
+        ? "passed"
+        : this.consumeKeywordIf("failed")
+          ? "failed"
+          : undefined;
+      if (expected) {
+        const extras: {
+          expectedEffects?: SetEffect[];
+          expectedReasons?: Expression[];
+        } = {};
+        while (true) {
+          if (this.consumeKeywordIf("effects")) {
+            extras.expectedEffects = this.validationEffects();
+            continue;
+          }
+          if (this.consumeKeywordIf("reasons")) {
+            extras.expectedReasons = this.validationReasonExpressions();
+            continue;
+          }
+          break;
+        }
+        return { kind: "play", atom, expected, ...extras };
+      }
       this.fail("expected 'passed' or 'failed' after '=>'");
     }
     this.fail("expected validation assertion kind");
+  }
+
+  private validationBindings(): EqualityExpression[] {
+    this.expectKeyword("bindings");
+    this.expect("lbrace");
+    const bindings: EqualityExpression[] = [];
+    while (!this.at("rbrace")) {
+      this.skipSemis();
+      if (this.at("rbrace")) break;
+      const expression = this.expression();
+      if (expression.kind !== "equal") this.fail("expected equality expression in bindings block");
+      bindings.push(expression);
+      this.consumeIf("semi");
+    }
+    this.expect("rbrace");
+    return bindings;
+  }
+
+  private validationEffects(): SetEffect[] {
+    this.expect("lbrace");
+    const effects: SetEffect[] = [];
+    while (!this.at("rbrace")) {
+      this.skipSemis();
+      if (this.at("rbrace")) break;
+      effects.push(this.setEffect());
+      this.consumeIf("semi");
+    }
+    this.expect("rbrace");
+    return effects;
+  }
+
+  private validationReasonExpressions(): Expression[] {
+    this.expect("lbrace");
+    const reasons: Expression[] = [];
+    while (!this.at("rbrace")) {
+      this.skipSemis();
+      if (this.at("rbrace")) break;
+      reasons.push(this.expression());
+      this.consumeIf("semi");
+    }
+    this.expect("rbrace");
+    return reasons;
   }
 
   private expression(): Expression {
@@ -549,6 +657,9 @@ class Parser {
     if (this.atKeyword("_")) {
       this.advance();
       return { kind: "wildcard" };
+    }
+    if (this.consumeIf("question")) {
+      return { kind: "variable", id: this.identifier() };
     }
 
     const id = this.identifier();

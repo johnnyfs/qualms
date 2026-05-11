@@ -4,8 +4,6 @@ import type { SessionManager } from "./session.js";
 
 type GroundTerm = languageNs.GroundTerm;
 type Expression = languageNs.Expression;
-type RelationAtom = languageNs.RelationAtom;
-type Term = languageNs.Term;
 type Env = Record<string, GroundTerm>;
 
 export class QueryError extends Error {
@@ -54,6 +52,7 @@ export interface ModelCounts {
   traits: number;
   relations: number;
   predicates: number;
+  externalPredicates: number;
   actions: number;
   rules: number;
   validations: number;
@@ -149,10 +148,9 @@ export function handleQuery(manager: SessionManager, input: QueryInput): QueryOu
   }
 
   try {
-    const baseEnv = knownEntityBindings(session.model, parsed);
     const rows = languageNs.languageRuntimeInternals
-      .evalExpression(session.model, parsed, baseEnv)
-      .map((env) => formatRow(env, baseEnv));
+      .evalExpression(session.model, parsed, {})
+      .map((env) => formatRow(env));
     return {
       kind: "query",
       expr,
@@ -302,6 +300,9 @@ export interface PlayOutput {
   status: languageNs.LanguagePlayResult["status"];
   feedback: string;
   reasons: readonly string[];
+  effects: languageNs.LanguagePlayResult["effects"];
+  events: languageNs.LanguagePlayResult["events"];
+  failures: languageNs.LanguagePlayResult["failures"];
 }
 
 export function handlePlay(manager: SessionManager, input: PlayInput): PlayOutput {
@@ -325,6 +326,7 @@ function countModel(model: languageNs.StoryModel): ModelCounts {
     traits: model.traits.size,
     relations: model.relations.size,
     predicates: model.predicates.size,
+    externalPredicates: model.externalPredicates.size,
     actions: model.actions.size,
     rules: model.rules.length,
     validations: model.validations.size,
@@ -359,58 +361,9 @@ function showDefinitions(
     .map(languageNs.emitTopLevelStatement);
 }
 
-function knownEntityBindings(model: languageNs.StoryModel, expression: Expression): Env {
-  const names = new Set<string>();
-  collectExpressionIdentifiers(expression, names);
-  const env: Env = {};
-  for (const name of names) {
-    if (model.entities.has(name)) env[name] = languageNs.idTerm(name);
-  }
-  return env;
-}
-
-function collectExpressionIdentifiers(expression: Expression, names: Set<string>): void {
-  switch (expression.kind) {
-    case "relation":
-      collectAtomIdentifiers(expression.atom, names);
-      return;
-    case "not":
-      collectExpressionIdentifiers(expression.operand, names);
-      return;
-    case "binary":
-      collectExpressionIdentifiers(expression.left, names);
-      collectExpressionIdentifiers(expression.right, names);
-      return;
-    case "equal":
-      collectTermIdentifiers(expression.left, names);
-      collectTermIdentifiers(expression.right, names);
-      return;
-  }
-}
-
-function collectAtomIdentifiers(atom: RelationAtom, names: Set<string>): void {
-  for (const arg of atom.args) collectTermIdentifiers(arg, names);
-}
-
-function collectTermIdentifiers(term: Term, names: Set<string>): void {
-  switch (term.kind) {
-    case "identifier":
-      names.add(term.id);
-      return;
-    case "relationInstance":
-      collectAtomIdentifiers(term.atom, names);
-      return;
-    case "wildcard":
-    case "string":
-    case "number":
-      return;
-  }
-}
-
-function formatRow(env: Env, baseEnv: Env): Record<string, unknown> {
+function formatRow(env: Env): Record<string, unknown> {
   const row: Record<string, unknown> = {};
   for (const [name, value] of Object.entries(env)) {
-    if (baseEnv[name] && languageNs.termKey(baseEnv[name]) === languageNs.termKey(value)) continue;
     row[name] = formatGroundTerm(value);
   }
   return row;

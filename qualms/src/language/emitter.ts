@@ -4,6 +4,7 @@ import type {
   BodyStatement,
   CallableStatement,
   EntityStatement,
+  ExternPredicateStatement,
   EqualityExpression,
   Expression,
   ExtendStatement,
@@ -17,6 +18,7 @@ import type {
   RuleStatement,
   SetEffect,
   SetStatement,
+  EmitStatement,
   Term,
   TopLevelStatement,
   TraitStatement,
@@ -46,6 +48,7 @@ export function programFromModel(model: StoryModel): Program {
   const statements: TopLevelStatement[] = [
     ...model.traits.values(),
     ...model.relations.values(),
+    ...model.externalPredicates.values(),
     ...model.predicates.values(),
     ...model.actions.values(),
     ...model.rules,
@@ -91,6 +94,8 @@ export function emitTopLevelStatement(statement: TopLevelStatement): string {
       return emitTrait(statement);
     case "relation":
       return emitRelation(statement);
+    case "externPredicate":
+      return emitExternPredicate(statement);
     case "predicate":
     case "action":
       return emitCallable(statement);
@@ -112,11 +117,19 @@ function emitTrait(statement: TraitStatement): string {
 }
 
 function emitRelation(statement: RelationStatement): string {
-  return `relation ${statement.id}(${statement.parameters.map(emitRelationParameter).join(", ")})`;
+  const unique = statement.unique && statement.unique.length > 0
+    ? ` unique(${statement.unique.join(", ")})`
+    : "";
+  return `relation ${statement.id}(${statement.parameters.map(emitRelationParameter).join(", ")})${unique}`;
 }
 
 function emitRelationParameter(parameter: RelationParameter): string {
-  return `${parameter.cardinality ? `${parameter.cardinality} ` : ""}${emitTypeExpr(parameter.type)}`;
+  const name = parameter.name ? `${parameter.name}: ` : "";
+  return `${name}${parameter.cardinality ? `${parameter.cardinality} ` : ""}${emitTypeExpr(parameter.type)}`;
+}
+
+function emitExternPredicate(statement: ExternPredicateStatement): string {
+  return `extern predicate ${statement.id}(${statement.parameters.map(emitParameter).join(", ")});`;
 }
 
 function emitCallable(statement: CallableStatement): string {
@@ -146,10 +159,26 @@ function emitValidationAssertion(assertion: ValidationAssertion): string {
     case "fact":
       return `assert ${assertion.negate ? "not " : ""}fact ${emitRelationAtom(assertion.atom)};`;
     case "query":
-      return `assert ${assertion.negate ? "not " : ""}query ${emitExpression(assertion.expression)};`;
+      return `assert ${assertion.negate ? "not " : ""}query ${emitExpression(assertion.expression)}${emitExpectedBindings(assertion)};`;
     case "play":
-      return `assert play ${emitRelationAtom(assertion.atom)} => ${assertion.expected};`;
+      return `assert play ${emitRelationAtom(assertion.atom)} => ${assertion.expected}${emitExpectedPlay(assertion)};`;
   }
+}
+
+function emitExpectedBindings(assertion: Extract<ValidationAssertion, { kind: "query" }>): string {
+  if (!assertion.expectedBindings || assertion.expectedBindings.length === 0) return "";
+  return ` => bindings { ${assertion.expectedBindings.map(emitExpression).join("; ")}; }`;
+}
+
+function emitExpectedPlay(assertion: Extract<ValidationAssertion, { kind: "play" }>): string {
+  const parts: string[] = [];
+  if (assertion.expectedEffects) {
+    parts.push(`effects { ${assertion.expectedEffects.map((effect) => `${emitSetEffect(effect)};`).join(" ")} }`);
+  }
+  if (assertion.expectedReasons) {
+    parts.push(`reasons { ${assertion.expectedReasons.map((reason) => `${emitExpression(reason)};`).join(" ")} }`);
+  }
+  return parts.length > 0 ? ` ${parts.join(" ")}` : "";
 }
 
 function emitParameter(parameter: ParameterPattern): string {
@@ -173,6 +202,8 @@ function emitBodyStatement(statement: BodyStatement): string {
       return emitWhen(statement);
     case "set":
       return emitSet(statement);
+    case "emit":
+      return emitEmit(statement);
     case "succeed":
       return "succeed;";
     case "fail":
@@ -191,6 +222,10 @@ function emitSet(statement: SetStatement): string {
 
 function emitSetEffect(effect: SetEffect): string {
   return `${effect.polarity === "retract" ? "!" : ""}${emitRelationAtom(effect.atom)}`;
+}
+
+function emitEmit(statement: EmitStatement): string {
+  return `emit ${emitRelationAtom(statement.atom)};`;
 }
 
 function emitExpression(expression: Expression): string {
@@ -230,6 +265,8 @@ function emitTerm(term: Term): string {
   switch (term.kind) {
     case "identifier":
       return term.id;
+    case "variable":
+      return `?${term.id}`;
     case "wildcard":
       return "_";
     case "string":

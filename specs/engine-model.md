@@ -31,11 +31,19 @@ classDiagram
     +kind: "relation"
     +id: string
     +parameters: RelationParameter[]
+    +unique?: string[]
   }
 
   class RelationParameter {
+    +name?: string
     +type: TypeExpr
     +cardinality?: "one"
+  }
+
+  class ExternPredicateStatement {
+    +kind: "externPredicate"
+    +id: string
+    +parameters: ParameterPattern[]
   }
 
   class CallableStatement {
@@ -111,8 +119,14 @@ classDiagram
     <<union>>
     WhenStatement
     SetStatement
+    EmitStatement
     SucceedStatement
     FailStatement
+  }
+
+  class EmitStatement {
+    +kind: "emit"
+    +atom: RelationAtom
   }
 
   class WhenStatement {
@@ -136,11 +150,12 @@ classDiagram
 
   class Term {
     <<union>>
-    +kind: "identifier" | "wildcard" | "string" | "number" | "relationInstance"
+    +kind: "identifier" | "variable" | "wildcard" | "string" | "number" | "relationInstance"
   }
 
   Program --> "*" TraitStatement
   Program --> "*" RelationStatement
+  Program --> "*" ExternPredicateStatement
   Program --> "*" CallableStatement
   Program --> "*" RuleStatement
   Program --> "*" EntityStatement
@@ -167,8 +182,8 @@ classDiagram
 Notes:
 
 - `Term` of kind `relationInstance` carries a nested `RelationAtom`,
-  enabling relation-valued arguments such as `Gated(Path(here, target),
-  door)`.
+  enabling relation-valued arguments such as `Gated(Path(?here, target),
+  ?door)`.
 - `ParameterPattern` constraints are arbitrary `Expression` trees; they
   share grammar with `when` conditions (see `language.md` § 5.5).
 
@@ -184,6 +199,7 @@ classDiagram
   class StoryModel {
     +traits: Map~string, TraitStatement~
     +relations: Map~string, RelationStatement~
+    +externalPredicates: Map~string, ExternPredicateStatement~
     +predicates: Map~string, CallableStatement~
     +actions: Map~string, CallableStatement~
     +rules: RuleStatement[]
@@ -264,6 +280,19 @@ classDiagram
     +feedback: string
     +reasons: string[]
     +effects: Effect[]
+    +events: LanguageEvent[]
+    +failures: LanguageFailure[]
+  }
+
+  class LanguageEvent {
+    +event: string
+    +args: GroundTerm[]
+  }
+
+  class LanguageFailure {
+    +kind: "unknown_action" | "action_failed" | "condition" | "terminal"
+    +message: string
+    +callable?: string
   }
 
   class LanguageValidationResult {

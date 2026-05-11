@@ -33,8 +33,8 @@ describe("first-class validations", () => {
       trait Location
       relation At(Actor, one Location)
       relation Path(Location, Location)
-      action Go(actor: Actor, target: Location) {
-        when (Path(here, target)) {
+      action Go(actor: Actor { At(actor, ?here) }, target: Location) {
+        when (Path(?here, target)) {
           set At(actor, target)
         }
       }
@@ -103,5 +103,33 @@ describe("first-class validations", () => {
 
     expect(playLanguageCall(model, "Move(Player, Outside)").status).toBe("passed");
     expect(model.hasFact("At", [idTerm("Player"), idTerm("Outside")])).toBe(true);
+  });
+
+  it("checks expected query bindings, effects, and failure reasons", () => {
+    const model = loadStoryProgram(`
+      trait Actor
+      trait Location
+      relation At(subject: Actor, location: Location) unique(subject)
+      relation Path(Location, Location)
+      action Go(actor: Actor { At(actor, ?here) }, target: Location) {
+        when (Path(?here, target)) {
+          set At(actor, target)
+        }
+      }
+      entity Player { Actor }
+      entity Cell { Location }
+      entity Outside { Location }
+      set {
+        At(Player, Cell);
+        Path(Cell, Outside);
+      }
+      validation Contract {
+        assert query At(Player, ?where) => bindings { ?where == Cell; };
+        assert play Go(Player, Outside) => passed effects { At(Player, Outside); };
+        assert play Go(Player, Cell) => failed reasons { !Path(Cell, Cell); };
+      }
+    `);
+
+    expect(runLanguageValidations(model)).toEqual({ status: "passed", failures: [] });
   });
 });

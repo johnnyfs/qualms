@@ -27,6 +27,11 @@ export {
 } from "./runtime.js";
 export type {
   LanguagePlayResult,
+  LanguageEvent,
+  LanguageFailure,
+  LanguageHostAdapter,
+  LanguageHostPredicateCall,
   LanguageValidationFailure,
   LanguageValidationResult,
+  LanguageRuntimeOptions,
 } from "./runtime.js";

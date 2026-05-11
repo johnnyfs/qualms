@@ -33,6 +33,8 @@ describe("formatPlayResult", () => {
       effects: [
         { polarity: "assert", fact: { relation: "Opened", args: [idTerm("Bars")] } },
       ],
+      events: [],
+      failures: [],
     });
     expect(entries).toEqual([
       { kind: "feedback", text: "succeed;" },
@@ -46,6 +48,8 @@ describe("formatPlayResult", () => {
       feedback: "fail { Locked(Bars); }",
       reasons: ["Locked(Bars)"],
       effects: [],
+      events: [],
+      failures: [{ kind: "condition", message: "Locked(Bars)" }],
     });
     expect(entries).toEqual([{ kind: "feedback", text: "fail { Locked(Bars); }" }]);
   });

@@ -1,11 +1,9 @@
 # Specs
 
 Strict specifications for the Qualms DSL, runtime, and MCP protocol. These
-docs describe what is **already implemented** on branch `js-migration`
-(parser, model, runtime, emitter, MCP session and tools). They are not
-roadmaps; the tutorial fixture under `stories/tutorial/tutorial.qualms` is
-the authoring target and may temporarily run ahead of the engine. Features
-hinted there but not yet implemented are listed in the TODO below.
+docs describe the implemented parser, model, runtime, emitter, MCP session,
+and MCP tools. The tutorial fixture under `stories/tutorial/tutorial.qualms`
+is expected to parse, load, and pass its regression validations.
 
 Scope boundary: prior planning docs for the old YAML/Python engine and the
 DSL v2 prototype live under `deprecated/typescript-legacy/specs/`. They are
@@ -19,6 +17,8 @@ no longer normative.
 | [`engine-model.md`](./engine-model.md)    | UML class diagrams for AST, `StoryModel`, runtime helpers, MCP session/tool layers, and ownership summary. |
 | [`protocol.md`](./protocol.md)            | UML sequence diagrams for every registered MCP tool (`start`, `quit`, `query`, `begin`, `mutate`, `diff`, `commit`, `rollback`, `play`) and the error taxonomy. |
 | [`portable-ir.md`](./portable-ir.md)      | Language-neutral AST, world, fact/effect, runtime operation, and host adapter contract for reimplementations. |
+| [`conformance.md`](./conformance.md)      | Query dialect, round-trip, multi-file persistence, adapter replay, and minimum fixture expectations. |
+| [`remaining-recommendations.md`](./remaining-recommendations.md) | Lower-priority follow-up items after the portability pass. |
 
 ## Conventions
 
@@ -57,10 +57,9 @@ roughly priority for the spec author. Tick items off as features land.
       `!E` is negation-as-failure with no environment mutation; if the
       runtime ever lets a predicate's failure surface its own side
       effects through negation, § 5.5 needs revision.
-- [ ] **Persistence beyond a single `targetPath`.** `commit` only writes
-      when the transaction was bound to a single `.qualms` file. Define
-      behavior for multi-file commits and any normalisation across files
-      once supported.
+- [x] **Persistence beyond a single `targetPath`.** The language-level
+      contract is defined in `conformance.md`; MCP still implements the
+      current selected-target persistence strategy.
 - [ ] **Transaction model migration.** The current snapshot-by-deep-clone
       is provisional (see `memory/project_transaction_model.md`). When
       the amend layer (base + delta) lands, rewrite `engine-model.md` § 4
@@ -78,14 +77,12 @@ roughly priority for the spec author. Tick items off as features land.
 - [ ] **Play-feedback grammar.** The current `fail { reason; reason; }`
       shape is described informally in `language.md` § 7. Give it a
       concrete grammar and worked examples drawn from the runtime tests.
-- [ ] **`query` expression dialect.** `query` accepts a subset of the
-      `Expr` grammar (no `set`, no terminal `succeed`/`fail`). Document the
-      exact accepted subset and how `knownEntityBindings` shapes the
-      result rows.
+- [x] **`query` expression dialect.** `conformance.md` defines explicit
+      variables and result-row shaping.
 - [ ] **`show` command grammar.** Spec out the `^show( <kind>)?( <name>)?$`
       surface explicitly in `protocol.md` and enumerate the recognised
       kinds.
-- [ ] **Round-trip conformance.** State the invariants that
+- [x] **Round-trip conformance.** State the invariants that
       `emitStoryModel(parseProgram(s))` must satisfy and link to the
       tests that enforce them.
 - [ ] **MCP transport coverage.** `start`/`quit` are documented at the

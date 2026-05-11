@@ -5,6 +5,7 @@ export interface Program {
 export type TopLevelStatement =
   | TraitStatement
   | RelationStatement
+  | ExternPredicateStatement
   | CallableStatement
   | RuleStatement
   | EntityStatement
@@ -21,9 +22,11 @@ export interface RelationStatement {
   readonly kind: "relation";
   readonly id: string;
   readonly parameters: readonly RelationParameter[];
+  readonly unique?: readonly string[];
 }
 
 export interface RelationParameter {
+  readonly name?: string;
   readonly type: TypeExpr;
   readonly cardinality?: "one";
 }
@@ -34,6 +37,12 @@ export interface CallableStatement {
   readonly parameters: readonly ParameterPattern[];
   readonly body: Block;
   readonly replace?: boolean;
+}
+
+export interface ExternPredicateStatement {
+  readonly kind: "externPredicate";
+  readonly id: string;
+  readonly parameters: readonly ParameterPattern[];
 }
 
 export interface RuleStatement {
@@ -82,19 +91,22 @@ export interface QueryValidationAssertion {
   readonly kind: "query";
   readonly negate: boolean;
   readonly expression: Expression;
+  readonly expectedBindings?: readonly EqualityExpression[];
 }
 
 export interface PlayValidationAssertion {
   readonly kind: "play";
   readonly atom: RelationAtom;
   readonly expected: "passed" | "failed";
+  readonly expectedEffects?: readonly SetEffect[];
+  readonly expectedReasons?: readonly Expression[];
 }
 
 export interface Block {
   readonly statements: readonly BodyStatement[];
 }
 
-export type BodyStatement = WhenStatement | SetStatement | SucceedStatement | FailStatement;
+export type BodyStatement = WhenStatement | SetStatement | EmitStatement | SucceedStatement | FailStatement;
 
 export interface WhenStatement {
   readonly kind: "when";
@@ -112,6 +124,11 @@ export interface FailStatement {
 
 export interface SetEffect {
   readonly polarity: "assert" | "retract";
+  readonly atom: RelationAtom;
+}
+
+export interface EmitStatement {
+  readonly kind: "emit";
   readonly atom: RelationAtom;
 }
 
@@ -162,6 +179,7 @@ export interface RelationAtom {
 
 export type Term =
   | { readonly kind: "identifier"; readonly id: string }
+  | { readonly kind: "variable"; readonly id: string }
   | { readonly kind: "wildcard" }
   | { readonly kind: "string"; readonly value: string }
   | { readonly kind: "number"; readonly value: number }

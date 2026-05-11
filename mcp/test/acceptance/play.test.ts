@@ -77,7 +77,7 @@ describe("MCP play with tutorial-syntax stories", () => {
       (await call(client, "play", { sessionId, call: "Go(Player, Corridor)" })).structuredContent,
     ).toMatchObject({ status: "passed", feedback: "succeed;" });
 
-    const query = await call(client, "query", { sessionId, expr: "At(Player, here)" });
+    const query = await call(client, "query", { sessionId, expr: "At(Player, ?here)" });
     expect(query.structuredContent).toMatchObject({
       kind: "query",
       rows: [{ here: "Corridor" }],
@@ -107,7 +107,7 @@ describe("MCP play with tutorial-syntax stories", () => {
       });
       expect(mutate.isError).not.toBe(true);
 
-      const query = await call(client, "query", { sessionId, expr: "At(Player, place)" });
+      const query = await call(client, "query", { sessionId, expr: "At(Player, ?place)" });
       expect(query.structuredContent).toMatchObject({
         kind: "query",
         rows: [{ place: "Room" }],

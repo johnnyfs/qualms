@@ -27,7 +27,7 @@ describe("tutorial language parser", () => {
 
   it("parses constrained action parameters", () => {
     const program = parseProgram(
-      "trait Actor\ntrait Locatable\ntrait Location\naction Go(actor: (Actor & Locatable) { At(actor, here) }, target: Location) { when (Path(here, target)) { set At(actor, target) } }",
+      "trait Actor\ntrait Locatable\ntrait Location\naction Go(actor: (Actor & Locatable) { At(actor, ?here) }, target: Location) { when (Path(?here, target)) { set At(actor, target) } }",
     );
     const go = program.statements.find((s) => s.kind === "action" && s.id === "Go");
     if (!go || go.kind !== "action") throw new Error("missing Go action");
@@ -83,6 +83,45 @@ describe("tutorial language parser", () => {
           { kind: "identifier", id: "Corridor" },
         ],
       },
+    });
+  });
+
+  it("parses explicit variable terms", () => {
+    const expression = language.parseExpression("At(Player, ?where)");
+    expect(expression).toEqual({
+      kind: "relation",
+      atom: {
+        relation: "At",
+        args: [
+          { kind: "identifier", id: "Player" },
+          { kind: "variable", id: "where" },
+        ],
+      },
+    });
+  });
+
+  it("parses named relation parameters and explicit uniqueness", () => {
+    const program = parseProgram("trait Actor\ntrait Location\nrelation At(subject: Actor, location: Location) unique(subject)");
+    expect(program.statements[2]).toMatchObject({
+      kind: "relation",
+      id: "At",
+      parameters: [
+        { name: "subject", type: { kind: "named", id: "Actor" } },
+        { name: "location", type: { kind: "named", id: "Location" } },
+      ],
+      unique: ["subject"],
+    });
+  });
+
+  it("parses external predicate declarations", () => {
+    const program = parseProgram("trait Actor\ntrait Thing\nextern predicate CanSee(actor: Actor, target: Thing);");
+    expect(program.statements[2]).toMatchObject({
+      kind: "externPredicate",
+      id: "CanSee",
+      parameters: [
+        { name: "actor", type: { kind: "named", id: "Actor" } },
+        { name: "target", type: { kind: "named", id: "Thing" } },
+      ],
     });
   });
 });

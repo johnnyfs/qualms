@@ -55,7 +55,7 @@ describe("tool handlers for the tutorial-era DSL", () => {
     if (show.kind !== "show") throw new Error("expected show");
     expect(show.definitions[0]).toContain("action Open");
 
-    const query = handleQuery(manager, { sessionId, expr: "LockedWith(Bars, key)" });
+    const query = handleQuery(manager, { sessionId, expr: "LockedWith(Bars, ?key)" });
     expect(query.kind).toBe("query");
     if (query.kind !== "query") throw new Error("expected query");
     expect(query.rows).toEqual([{ key: "MasterKey" }]);
@@ -85,7 +85,7 @@ describe("tool handlers for the tutorial-era DSL", () => {
       feedback: "succeed;",
     });
 
-    const at = handleQuery(manager, { sessionId, expr: "At(Player, here)" });
+    const at = handleQuery(manager, { sessionId, expr: "At(Player, ?here)" });
     expect(at.kind).toBe("query");
     if (at.kind !== "query") throw new Error("expected query");
     expect(at.rows).toEqual([{ here: "Corridor" }]);
