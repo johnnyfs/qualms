@@ -9,11 +9,11 @@ trait Actor
 trait Locatable
 trait Location
 
-relation At(Locatable, one Location)
+relation At(subject: Locatable, location: Location) unique(subject)
 relation Path(Location, Location)
 
-action Go(actor: (Actor & Locatable) { At(actor, here) }, target: Location) {
-  when (Path(here, target)) {
+action Go(actor: (Actor & Locatable) { At(actor, ?here) }, target: Location) {
+  when (Path(?here, target)) {
     set At(actor, target)
   }
 }
@@ -38,8 +38,8 @@ set {
 
 trait Describable
 
-predicate IsColocated(actor: (Actor & Locatable) { At(actor, here) }, target: Locatable) {
-  when (At(target, here)) {
+predicate IsColocated(actor: (Actor & Locatable) { At(actor, ?here) }, target: Locatable) {
+  when (At(target, ?here)) {
     succeed;
   }
 }
@@ -68,9 +68,9 @@ action Take(actor: Actor, target: Portable) {
   }
 }
 
-after Take(_, target: Locatable { At(target, here) }) {
+after Take(_, target: Locatable { At(target, ?here) }) {
   set {
-    !At(target, here);
+    !At(target, ?here);
   }
 }
 
@@ -82,9 +82,9 @@ action Drop(actor: Actor, target: Portable) {
   }
 }
 
-after Drop(actor: Locatable { At(actor, here) }, target: Locatable) {
+after Drop(actor: Locatable { At(actor, ?here) }, target: Locatable) {
   set {
-    At(target, here);
+    At(target, ?here);
   }
 }
 
@@ -99,22 +99,22 @@ set {
 trait Openable
 
 relation Opened(Openable)
-relation Gated(Path, one Openable)
+relation Gated(path: Path, door: Openable) unique(path)
 
 before Go(
-  actor: (Actor & Locatable) { At(actor, here) },
-  target: Location { Gated(Path(here, target), door) }
+  actor: (Actor & Locatable) { At(actor, ?here) },
+  target: Location { Gated(Path(?here, target), ?door) }
 ) {
-  when (!Opened(door)) {
+  when (!Opened(?door)) {
     fail;
   }
 }
 
 before IsColocated(
-  actor: (Actor & Locatable) { At(actor, here) },
+  actor: (Actor & Locatable) { At(actor, ?here) },
   target: Locatable
 ) {
-  when (Gated(Path(here, _), door) & target == door) {
+  when (Gated(Path(?here, _), ?door) & target == ?door) {
     succeed;
   }
 }
@@ -227,12 +227,12 @@ predicate Opaque(door: Openable) {
 -- the when clause tests only the visibility-specific rules, so a failure
 -- here describes why the visibility rules failed.
 before IsVisibleTo(
-  actor: Actor { At(actor, here) },
-  target: Locatable { At(target, location) & Path(here, location) }
+  actor: Actor { At(actor, ?here) },
+  target: Locatable { At(target, ?location) & Path(?here, ?location) }
 ) {
   when (
-    ConveysVisibility(Path(here, location)) &
-    !(Gated(Path(here, location), door) & Opaque(door))
+    ConveysVisibility(Path(?here, ?location)) &
+    !(Gated(Path(?here, ?location), ?door) & Opaque(?door))
   ) {
     succeed;
   }
@@ -290,15 +290,16 @@ set {
 }
 
 -- (8) Extend to conversation trees.
--- Introduces: a `one`-cardinality state relation (InConversation) tracking the
--- current conversation topic per (Actor, Speaker), a `LeadsTo` adjacency over
--- topics, and a predicate WillTalkAbout that holds when the actor can reach
--- the topic either as a top-level entry (TalksAbout) or as a sub-topic of the
--- current conversation (InConversation + LeadsTo). The (7) TalkAbout action
--- is replaced to consult WillTalkAbout, and a single after-rule advances
--- InConversation uniformly on every successful talk.
+-- Introduces: an explicit unique(actor, speaker) state relation
+-- (InConversation) tracking the current conversation topic per (Actor,
+-- Speaker), a `LeadsTo` adjacency over topics, and a predicate WillTalkAbout
+-- that holds when the actor can reach the topic either as a top-level entry
+-- (TalksAbout) or as a sub-topic of the current conversation (InConversation
+-- + LeadsTo). The (7) TalkAbout action is replaced to consult WillTalkAbout,
+-- and a single after-rule advances InConversation uniformly on every
+-- successful talk.
 
-relation InConversation(Actor, Speaker, one Topic)
+relation InConversation(actor: Actor, speaker: Speaker, topic: Topic) unique(actor, speaker)
 relation LeadsTo(Speaker, Topic, Topic)
 
 predicate WillTalkAbout(actor: Actor, speaker: Speaker, topic: Topic) {
@@ -312,10 +313,10 @@ predicate WillTalkAbout(actor: Actor, speaker: Speaker, topic: Topic) {
 -- call-site sub-topic.
 before WillTalkAbout(
   actor: Actor,
-  speaker: Speaker { InConversation(actor, speaker, topic) },
+  speaker: Speaker { InConversation(actor, speaker, ?topic) },
   subTopic: Topic
 ) {
-  when (LeadsTo(speaker, topic, subTopic)) {
+  when (LeadsTo(speaker, ?topic, subTopic)) {
     succeed;
   }
 }
@@ -328,14 +329,14 @@ replace action TalkAbout(actor: Actor, speaker: Speaker, topic: Topic) {
 
 -- Both top-level entries and sub-topic walks pass through the action body
 -- now, so a single after-rule records the new conversation topic. The
--- `one Topic` cardinality on InConversation handles displacement.
+-- unique(actor, speaker) on InConversation handles displacement.
 after TalkAbout(actor: Actor, speaker: Speaker, topic: Topic) {
   set InConversation(actor, speaker, topic);
 }
 
 action StopTalking(actor: Actor, speaker: Speaker) {
-  when (InConversation(actor, speaker, topic)) {
-    set !InConversation(actor, speaker, topic);
+  when (InConversation(actor, speaker, ?topic)) {
+    set !InConversation(actor, speaker, ?topic);
   }
 }
 

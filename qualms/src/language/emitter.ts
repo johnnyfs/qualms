@@ -112,11 +112,15 @@ function emitTrait(statement: TraitStatement): string {
 }
 
 function emitRelation(statement: RelationStatement): string {
-  return `relation ${statement.id}(${statement.parameters.map(emitRelationParameter).join(", ")})`;
+  const unique = statement.unique && statement.unique.length > 0
+    ? ` unique(${statement.unique.join(", ")})`
+    : "";
+  return `relation ${statement.id}(${statement.parameters.map(emitRelationParameter).join(", ")})${unique}`;
 }
 
 function emitRelationParameter(parameter: RelationParameter): string {
-  return `${parameter.cardinality ? `${parameter.cardinality} ` : ""}${emitTypeExpr(parameter.type)}`;
+  const name = parameter.name ? `${parameter.name}: ` : "";
+  return `${name}${parameter.cardinality ? `${parameter.cardinality} ` : ""}${emitTypeExpr(parameter.type)}`;
 }
 
 function emitCallable(statement: CallableStatement): string {
@@ -230,6 +234,8 @@ function emitTerm(term: Term): string {
   switch (term.kind) {
     case "identifier":
       return term.id;
+    case "variable":
+      return `?${term.id}`;
     case "wildcard":
       return "_";
     case "string":

@@ -18,6 +18,16 @@ describe("semantic model validation", () => {
     expect(() => loadStoryProgram(`relation Broken(Missing)`)).toThrow(LanguageModelError);
   });
 
+  it("rejects invalid unique relation constraints", () => {
+    expect(() =>
+      loadStoryProgram(`
+        trait Actor
+        trait Location
+        relation At(subject: Actor, location: Location) unique(target)
+      `),
+    ).toThrow(LanguageModelError);
+  });
+
   it("rejects facts with the wrong arity", () => {
     expect(() =>
       loadStoryProgram(`

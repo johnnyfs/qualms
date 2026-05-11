@@ -7,7 +7,7 @@ import { language } from "../src/index.js";
 const __filename = fileURLToPath(import.meta.url);
 const TUTORIAL_PATH = resolve(__filename, "../../../stories/tutorial/tutorial.qualms");
 
-const { idTerm, loadStoryProgram, playLanguageCall } = language;
+const { evalLanguageAtom, idTerm, loadStoryProgram, playLanguageCall } = language;
 
 // Stage 9 moves the master key from the cell floor onto the guard. To run
 // any test that needs the key, the player has to walk Whatever → Bribery →
@@ -28,8 +28,8 @@ describe("tutorial language runtime", () => {
       relation At(Locatable, one Location)
       relation Path(Location, Location)
 
-      action Go(actor: (Actor & Locatable) { At(actor, here) }, target: Location) {
-        when (Path(here, target)) {
+      action Go(actor: (Actor & Locatable) { At(actor, ?here) }, target: Location) {
+        when (Path(?here, target)) {
           set At(actor, target)
         }
       }
@@ -58,6 +58,20 @@ describe("tutorial language runtime", () => {
 
     expect(playLanguageCall(model, "Go(Player, Outside)").status).toBe("passed");
     expect(model.hasFact("At", [idTerm("Player"), idTerm("Outside")])).toBe(true);
+  });
+
+  it("requires explicit variables for free query bindings", () => {
+    const model = loadStoryProgram(`
+      trait Actor
+      trait Location
+      relation At(Actor, Location)
+      entity Player { Actor }
+      entity Cell { Location }
+      set At(Player, Cell)
+    `);
+
+    expect(evalLanguageAtom(model, "At(Player, ?where)").status).toBe("passed");
+    expect(evalLanguageAtom(model, "At(Player, where)").status).toBe("failed");
   });
 
   it("runs tutorial doors and locks through predicates and before rules", () => {
@@ -372,10 +386,10 @@ describe("tutorial language runtime", () => {
       -- instead of the parent.
       before TalkAbout(
         actor: Actor,
-        speaker: Speaker { InConversation(actor, speaker, topic) },
+        speaker: Speaker { InConversation(actor, speaker, ?topic) },
         subTopic: Topic
       ) {
-        when (LeadsTo(speaker, topic, subTopic)) {
+        when (LeadsTo(speaker, ?topic, subTopic)) {
           set InConversation(actor, speaker, subTopic);
           succeed;
         }
@@ -624,7 +638,7 @@ describe("tutorial language runtime", () => {
       relation Stamped(Item)
 
       action Touch(a: Actor, t: Item) {
-        when (Holds(a, secret)) { succeed; }
+        when (Holds(a, ?secret)) { succeed; }
       }
 
       -- If body env leaked, secret would be bound here from the body's

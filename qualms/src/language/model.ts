@@ -214,8 +214,22 @@ export class StoryModel {
   }
 
   private validateRelation(statement: RelationStatement): void {
+    const seenNames = new Set<string>();
     for (const parameter of statement.parameters) {
+      if (parameter.name) {
+        if (seenNames.has(parameter.name)) {
+          throw new LanguageModelError(`relation '${statement.id}' has duplicate parameter name '${parameter.name}'`);
+        }
+        seenNames.add(parameter.name);
+      }
       this.validateRelationParameter(parameter);
+    }
+    if (statement.unique) {
+      for (const name of statement.unique) {
+        if (!seenNames.has(name)) {
+          throw new LanguageModelError(`relation '${statement.id}' unique references unknown parameter '${name}'`);
+        }
+      }
     }
   }
 
@@ -310,23 +324,37 @@ export class StoryModel {
   private applyCardinality(fact: Fact): void {
     const relation = this.relations.get(fact.relation);
     if (!relation) return;
-    const oneIndexes = relation.parameters
+    const legacyOneIndexes = relation.parameters
       .map((parameter, index) => (parameter.cardinality === "one" ? index : -1))
       .filter((index) => index >= 0);
-    if (oneIndexes.length === 0) return;
+    const uniqueIndexes = relation.unique
+      ? relation.unique.map((name) => relation.parameters.findIndex((parameter) => parameter.name === name))
+      : [];
+    if (legacyOneIndexes.length === 0 && uniqueIndexes.length === 0) return;
 
     for (const existing of this.listFacts(fact.relation)) {
-      let sameKey = true;
-      for (let i = 0; i < relation.parameters.length; i++) {
-        if (oneIndexes.includes(i)) continue;
-        if (termKey(existing.args[i]) !== termKey(fact.args[i])) {
-          sameKey = false;
-          break;
-        }
+      if (legacyOneIndexes.length > 0 && sameProjection(existing, fact, invertIndexes(relation.parameters.length, legacyOneIndexes))) {
+        this.facts.delete(factKey(existing));
+        continue;
       }
-      if (sameKey) this.facts.delete(factKey(existing));
+      if (uniqueIndexes.length > 0 && sameProjection(existing, fact, uniqueIndexes)) {
+        this.facts.delete(factKey(existing));
+      }
     }
   }
+}
+
+function invertIndexes(length: number, indexes: readonly number[]): number[] {
+  const skipped = new Set(indexes);
+  const out: number[] = [];
+  for (let i = 0; i < length; i++) {
+    if (!skipped.has(i)) out.push(i);
+  }
+  return out;
+}
+
+function sameProjection(left: Fact, right: Fact, indexes: readonly number[]): boolean {
+  return indexes.every((index) => termKey(left.args[index]) === termKey(right.args[index]));
 }
 
 export function loadStoryProgram(source: string | Program): StoryModel {
@@ -347,6 +375,8 @@ export function groundTermFromTerm(term: Term): GroundTerm {
   switch (term.kind) {
     case "identifier":
       return { kind: "id", id: term.id };
+    case "variable":
+      throw new LanguageModelError("variables are not valid in ground facts");
     case "string":
       return { kind: "string", value: term.value };
     case "number":

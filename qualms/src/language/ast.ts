@@ -21,9 +21,11 @@ export interface RelationStatement {
   readonly kind: "relation";
   readonly id: string;
   readonly parameters: readonly RelationParameter[];
+  readonly unique?: readonly string[];
 }
 
 export interface RelationParameter {
+  readonly name?: string;
   readonly type: TypeExpr;
   readonly cardinality?: "one";
 }
@@ -162,6 +164,7 @@ export interface RelationAtom {
 
 export type Term =
   | { readonly kind: "identifier"; readonly id: string }
+  | { readonly kind: "variable"; readonly id: string }
   | { readonly kind: "wildcard" }
   | { readonly kind: "string"; readonly value: string }
   | { readonly kind: "number"; readonly value: number }

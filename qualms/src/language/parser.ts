@@ -36,6 +36,7 @@ type TokenType =
   | "colon"
   | "semi"
   | "bang"
+  | "question"
   | "amp"
   | "pipe"
   | "eqeq"
@@ -179,6 +180,7 @@ function tokenize(source: string): Token[] {
       ":": "colon",
       ";": "semi",
       "!": "bang",
+      "?": "question",
       "&": "amp",
       "|": "pipe",
     };
@@ -271,13 +273,31 @@ class Parser {
       while (this.consumeIf("comma")) parameters.push(this.relationParameter());
     }
     this.expect("rparen");
-    return { kind: "relation", id, parameters };
+    const unique = this.consumeKeywordIf("unique") ? this.uniqueRelationParameters() : undefined;
+    return unique && unique.length > 0 ? { kind: "relation", id, parameters, unique } : { kind: "relation", id, parameters };
   }
 
   private relationParameter(): RelationParameter {
+    const name = this.at("identifier") && this.peekAhead(1).type === "colon" ? this.identifier() : undefined;
+    if (name) this.expect("colon");
     const cardinality = this.consumeKeywordIf("one") ? "one" : undefined;
     const type = this.typeExpr();
-    return cardinality ? { type, cardinality } : { type };
+    return {
+      ...(name ? { name } : {}),
+      type,
+      ...(cardinality ? { cardinality } : {}),
+    };
+  }
+
+  private uniqueRelationParameters(): string[] {
+    this.expect("lparen");
+    const names: string[] = [];
+    if (!this.at("rparen")) {
+      names.push(this.identifier());
+      while (this.consumeIf("comma")) names.push(this.identifier());
+    }
+    this.expect("rparen");
+    return names;
   }
 
   private callableStatement(kind: "action" | "predicate"): CallableStatement {
@@ -549,6 +569,9 @@ class Parser {
     if (this.atKeyword("_")) {
       this.advance();
       return { kind: "wildcard" };
+    }
+    if (this.consumeIf("question")) {
+      return { kind: "variable", id: this.identifier() };
     }
 
     const id = this.identifier();

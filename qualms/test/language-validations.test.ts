@@ -33,8 +33,8 @@ describe("first-class validations", () => {
       trait Location
       relation At(Actor, one Location)
       relation Path(Location, Location)
-      action Go(actor: Actor, target: Location) {
-        when (Path(here, target)) {
+      action Go(actor: Actor { At(actor, ?here) }, target: Location) {
+        when (Path(?here, target)) {
           set At(actor, target)
         }
       }

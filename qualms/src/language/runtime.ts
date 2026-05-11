@@ -104,12 +104,11 @@ function evaluateValidationAssertion(
         : `expected fact: ${emitRelationAtom(assertion.atom, {})}`;
     }
     case "query": {
-      const baseEnv = knownEntityBindings(model, assertion.expression);
-      const matched = evalExpression(model, assertion.expression, baseEnv, []).length > 0;
+      const matched = evalExpression(model, assertion.expression, {}, []).length > 0;
       if (assertion.negate ? !matched : matched) return undefined;
       return assertion.negate
-        ? `expected query to have no matches: ${emitExpression(assertion.expression, baseEnv)}`
-        : `expected query to match: ${emitExpression(assertion.expression, baseEnv)}`;
+        ? `expected query to have no matches: ${emitExpression(assertion.expression, {})}`
+        : `expected query to match: ${emitExpression(assertion.expression, {})}`;
     }
     case "play": {
       const result = playLanguageCall(model.clone(), assertion.atom);
@@ -320,11 +319,11 @@ function evalExpression(model: StoryModel, expression: Expression, env: Env, eff
       const left = resolveTerm(expression.left, env);
       const right = resolveTerm(expression.right, env);
       if (left && right) return termKey(left) === termKey(right) ? [env] : [];
-      if (!left && right && expression.left.kind === "identifier") {
+      if (!left && right && expression.left.kind === "variable") {
         const bound = bindName(expression.left.id, right, env);
         return bound ? [bound] : [];
       }
-      if (!right && left && expression.right.kind === "identifier") {
+      if (!right && left && expression.right.kind === "variable") {
         const bound = bindName(expression.right.id, left, env);
         return bound ? [bound] : [];
       }
@@ -368,6 +367,8 @@ function matchTerm(pattern: Term, value: GroundTerm, env: Env): Env | undefined 
     case "wildcard":
       return env;
     case "identifier":
+      return matchIdentifier(pattern.id, value, env);
+    case "variable":
       return bindName(pattern.id, value, env);
     case "string":
       return value.kind === "string" && value.value === pattern.value ? env : undefined;
@@ -393,10 +394,18 @@ function bindName(name: string, value: GroundTerm, env: Env): Env | undefined {
   return { ...env, [name]: value };
 }
 
+function matchIdentifier(name: string, value: GroundTerm, env: Env): Env | undefined {
+  const existing = env[name];
+  if (existing) return termKey(existing) === termKey(value) ? env : undefined;
+  return value.kind === "id" && value.id === name ? env : undefined;
+}
+
 function resolveTerm(term: Term, env: Env): GroundTerm | undefined {
   switch (term.kind) {
     case "identifier":
       return env[term.id] ?? { kind: "id", id: term.id };
+    case "variable":
+      return env[term.id];
     case "wildcard":
       return undefined;
     case "string":
@@ -535,6 +544,7 @@ function emitRelationAtom(atom: RelationAtom, env: Env): string {
 }
 
 function emitTerm(term: Term, env: Env): string {
+  if (term.kind === "variable" && !env[term.id]) return `?${term.id}`;
   const resolved = resolveTerm(term, env);
   return resolved ? emitGroundTerm(resolved) : "_";
 }
@@ -549,54 +559,6 @@ function emitGroundTerm(term: GroundTerm): string {
       return String(term.value);
     case "relation":
       return `${term.relation}(${term.args.map(emitGroundTerm).join(", ")})`;
-  }
-}
-
-function knownEntityBindings(model: StoryModel, expression: Expression): Env {
-  const names = new Set<string>();
-  collectExpressionIdentifiers(expression, names);
-  const env: Env = {};
-  for (const name of names) {
-    if (model.entities.has(name)) env[name] = { kind: "id", id: name };
-  }
-  return env;
-}
-
-function collectExpressionIdentifiers(expression: Expression, names: Set<string>): void {
-  switch (expression.kind) {
-    case "relation":
-      collectAtomIdentifiers(expression.atom, names);
-      return;
-    case "not":
-      collectExpressionIdentifiers(expression.operand, names);
-      return;
-    case "binary":
-      collectExpressionIdentifiers(expression.left, names);
-      collectExpressionIdentifiers(expression.right, names);
-      return;
-    case "equal":
-      collectTermIdentifiers(expression.left, names);
-      collectTermIdentifiers(expression.right, names);
-      return;
-  }
-}
-
-function collectAtomIdentifiers(atom: RelationAtom, names: Set<string>): void {
-  for (const arg of atom.args) collectTermIdentifiers(arg, names);
-}
-
-function collectTermIdentifiers(term: Term, names: Set<string>): void {
-  switch (term.kind) {
-    case "identifier":
-      names.add(term.id);
-      return;
-    case "relationInstance":
-      collectAtomIdentifiers(term.atom, names);
-      return;
-    case "wildcard":
-    case "string":
-    case "number":
-      return;
   }
 }
 

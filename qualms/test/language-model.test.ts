@@ -53,6 +53,24 @@ describe("tutorial language model", () => {
     );
   });
 
+  it("enforces explicit unique relation constraints", () => {
+    const model = loadStoryProgram(`
+      trait Actor
+      trait Location
+      relation At(subject: Actor, location: Location) unique(subject)
+      entity Player { Actor }
+      entity Cell { Location }
+      entity Outside { Location }
+      set {
+        At(Player, Cell);
+        At(Player, Outside);
+      }
+    `);
+
+    expect(model.hasFact("At", [idTerm("Player"), idTerm("Cell")])).toBe(false);
+    expect(model.hasFact("At", [idTerm("Player"), idTerm("Outside")])).toBe(true);
+  });
+
   it("emits parseable tutorial language", () => {
     const source = readFileSync(TUTORIAL_PATH, "utf-8");
     const program = parseProgram(source);
