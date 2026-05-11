@@ -45,7 +45,7 @@ using these names for traits, relations, predicates, actions, or entities:
 
 ```
 action  after   before  entity  extend  fail    one
-pass    predicate       relation        replace
+predicate       relation        replace succeed
 set     trait   when    _
 ```
 
@@ -90,7 +90,7 @@ TypeExpr       ::= <id>
 Block          ::= "{" { BodyStmt [ ";" ] } "}"
 BodyStmt       ::= WhenStmt
                  | SetStatement
-                 | "pass" [ ";" ]
+                 | "succeed" [ ";" ]
                  | "fail" [ ";" ]
 
 WhenStmt       ::= "when" "(" Expr ")" Block
@@ -177,7 +177,7 @@ Duplicate relation identifiers raise `LanguageModelError`.
 
 ```
 predicate IsColocated(actor: (Actor & Locatable) { At(actor, here) }, target: Locatable) {
-  when (At(target, here)) { pass; }
+  when (At(target, here)) { succeed; }
 }
 
 action Go(actor: (Actor & Locatable) { At(actor, here) }, target: Location) {
@@ -197,7 +197,7 @@ the declaration with `replace` overrides the prior definition in place:
 
 ```
 replace action Examine(actor: Actor, target) {
-  when (IsVisibleTo(actor, target)) { pass; }
+  when (IsVisibleTo(actor, target)) { succeed; }
 }
 ```
 
@@ -360,14 +360,14 @@ Inside a callable body or rule body, the supported statements are:
 - `set …` — applies effects to the model immediately (§ 6.2). Inside a
   body, `set` is permitted to reference identifiers bound by enclosing
   parameter patterns and `when` matches.
-- `pass;` — terminates the enclosing callable's body with a successful,
+- `succeed;` — terminates the enclosing callable's body with a successful,
   no-effect outcome and short-circuits subsequent rule evaluation as
   described in § 5.3.
 - `fail;` — terminates the enclosing callable's body with a failure
   outcome and short-circuits subsequent rule evaluation as described in
   § 5.3.
 
-A body that finishes without explicit `pass`/`fail` is a successful pass
+A body that finishes without explicit `succeed`/`fail` is a successful pass
 result if every statement executed (or, for `when` statements, matched);
 otherwise the body produces a failure result and surfaces explanatory
 reasons (§ 7).
@@ -383,13 +383,15 @@ from `when` conditions (§ 5.5). The execution flow for a single call is:
    environments (§ 4). If zero, the call fails with reason
    `!<callable>(args…)`.
 
-2. **`before` rules.** For each candidate environment, gather all rules
-   whose phase is `before` and whose target is the callable's name. For
-   each rule and each environment produced by re-binding the original
-   arguments against the rule's own parameter patterns, execute the rule
-   body (§ 5.3.1).
+2. **`before` rules.** Gather all rules whose phase is `before` and whose
+   target is the callable's name. For each rule, re-bind the original
+   positional arguments against the rule's own parameter patterns,
+   starting from the caller's `baseEnv` (i.e. `{}` for a top-level play
+   call). The rule's env is independent of the action's parameter
+   binding — the action's parameter names are not visible inside the
+   rule. Execute the rule body (§ 5.3.1).
 
-3. **Body.** If no `before` rule emitted a terminal `pass` or `fail`,
+3. **Body.** If no `before` rule emitted a terminal `succeed` or `fail`,
    execute the callable's own body in the candidate environment (§ 5.3.2).
 
 4. **`after` rules.** Only for actions (not predicates), and only if the
@@ -402,21 +404,21 @@ from `when` conditions (§ 5.5). The execution flow for a single call is:
 
 #### 5.3.1 Rule terminals
 
-A `before` rule body that runs to a `pass;` immediately short-circuits the
-whole call as `passed`. A `before` rule body that runs to a `fail;`
+A `before` rule body that runs to a `succeed;` immediately short-circuits
+the whole call as `passed`. A `before` rule body that runs to a `fail;`
 immediately short-circuits the whole call as `failed`. A rule that exits
 without a terminal contributes to the call only through its side effects
 (`set …`) and through failure reasons it raised internally.
 
 An `after` rule has the same terminal semantics with one exception:
 because it runs only after the body has already passed, an `after`
-terminal `pass` is redundant. An `after` terminal `fail` flips the call
-result to failed.
+terminal `succeed` is redundant. An `after` terminal `fail` flips the
+call result to failed.
 
 When a rule's `when` condition fails to match, the runtime keeps the
 already-bound parameter pattern environment and records the failure
-reasons only if the rule contains a `pass;` somewhere inside it. Rules
-that exist purely to fail (no `pass;` in the body) do not emit reasons
+reasons only if the rule contains a `succeed;` somewhere inside it. Rules
+that exist purely to fail (no `succeed;` in the body) do not emit reasons
 when their `when` clause fails to match — their non-firing is a non-event,
 not an error.
 
@@ -429,7 +431,7 @@ records the condition's failure reasons and treats the statement as a
 non-match (the block continues to subsequent statements but will not end
 in `passed` unless reasons are cleared). For each matching environment the
 runtime executes the `when` block; the first match whose block ends in
-`passed` (or `pass;`) yields the block's environment, and the first match
+`passed` (or `succeed;`) yields the block's environment, and the first match
 whose block ends in `fail;` propagates as a terminal failure.
 
 A block whose statements all succeeded and which accumulated no failure
@@ -450,7 +452,7 @@ by the runtime today:
 
 A predicate evaluated as part of a `when` condition that fails contributes
 its own internal failure reasons in place of `!PredicateName(args)` so
-that the chain of `pass`-rules that *could have rescued* the call is
+that the chain of `succeed`-rules that *could have rescued* the call is
 visible to the caller.
 
 #### 5.3.4 Action vs predicate
@@ -601,7 +603,7 @@ fact base — they live in a separate entity map. They cannot be retracted.
 The runtime returns a `LanguagePlayResult` shape:
 
 ```ts
-{ status: "passed"; feedback: "pass;"; reasons: [] }
+{ status: "passed"; feedback: "succeed;"; reasons: [] }
 | { status: "failed"; feedback: "fail { reason1; reason2; }"; reasons: [...] }
 ```
 

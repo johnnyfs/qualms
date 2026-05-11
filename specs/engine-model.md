@@ -252,7 +252,7 @@ classDiagram
     +status: "passed" | "failed" | "no_match"
     +env: Env
     +reasons: string[]
-    +terminal?: "pass" | "fail"
+    +terminal?: "succeed" | "fail"
   }
 
   class LanguageParseError {

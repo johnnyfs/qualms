@@ -150,7 +150,7 @@ export function buildServer(options: BuildServerOptions = {}): {
     "play",
     {
       description:
-        "Run an action call in the current DSL syntax, such as `Go(Player, Outside)`. Returns compact DSL feedback, e.g. `pass;` or `fail { !Path(Cell, Outside); }`.",
+        "Run an action call in the current DSL syntax, such as `Go(Player, Outside)`. Returns compact DSL feedback, e.g. `succeed;` or `fail { !Path(Cell, Outside); }`.",
       inputSchema: {
         sessionId: z.string(),
         call: z.string().describe("Action call in current DSL syntax."),

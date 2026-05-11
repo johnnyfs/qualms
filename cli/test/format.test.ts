@@ -28,14 +28,14 @@ describe("formatPlayResult", () => {
   it("emits feedback followed by effects on pass", () => {
     const entries = formatPlayResult({
       status: "passed",
-      feedback: "pass;",
+      feedback: "succeed;",
       reasons: [],
       effects: [
         { polarity: "assert", fact: { relation: "Opened", args: [idTerm("Bars")] } },
       ],
     });
     expect(entries).toEqual([
-      { kind: "feedback", text: "pass;" },
+      { kind: "feedback", text: "succeed;" },
       { kind: "effect", text: "+ Opened(Bars);" },
     ]);
   });

@@ -40,13 +40,13 @@ trait Describable
 
 predicate IsColocated(actor: (Actor & Locatable) { At(actor, here) }, target: Locatable) {
   when (At(target, here)) {
-    pass;
+    succeed;
   }
 }
 
 action Examine(actor: Actor, target) {
   when (At(actor, target) | IsColocated(actor, target)) {
-    pass;
+    succeed;
   }
 }
 
@@ -115,7 +115,7 @@ before IsColocated(
   target: Locatable
 ) {
   when (Gated(Path(here, _), door) & target == door) {
-    pass;
+    succeed;
   }
 }
 
@@ -207,13 +207,13 @@ relation ConveysVisibility(Path)
 
 predicate IsVisibleTo(actor: Actor, target) {
   when (At(actor, target) | IsColocated(actor, target) | Carrying(actor, target)) {
-    pass;
+    succeed;
   }
 }
 
 predicate Opaque(door: Openable) {
   when (!Transparent(door) & !Opened(door)) {
-    pass;
+    succeed;
   }
 }
 
@@ -229,14 +229,14 @@ before IsVisibleTo(
     ConveysVisibility(Path(here, location)) &
     !(Gated(Path(here, location), door) & Opaque(door))
   ) {
-    pass;
+    succeed;
   }
 }
 
 -- Examine now routes through IsVisibleTo, so visibility actually gates it.
 replace action Examine(actor: Actor, target) {
   when (IsVisibleTo(actor, target)) {
-    pass;
+    succeed;
   }
 }
 
@@ -272,7 +272,7 @@ relation TalksAbout(Speaker, Topic)
 
 action TalkAbout(actor: Actor, speaker: Speaker, topic: Topic) {
   when (IsVisibleTo(actor, speaker) & TalksAbout(speaker, topic)) {
-    pass;
+    succeed;
   }
 }
 
@@ -306,7 +306,7 @@ before TalkAbout(
 ) {
   when (IsVisibleTo(actor, speaker) & LeadsTo(speaker, current, subTopic)) {
     set InConversation(actor, speaker, subTopic);
-    pass;
+    succeed;
   }
 }
 

@@ -70,15 +70,15 @@ describe("tool handlers for the tutorial-era DSL", () => {
     });
     expect(handlePlay(manager, { sessionId, call: "Unlock(Player, Bars, MasterKey)" })).toMatchObject({
       status: "passed",
-      feedback: "pass;",
+      feedback: "succeed;",
     });
     expect(handlePlay(manager, { sessionId, call: "Open(Player, Bars)" })).toMatchObject({
       status: "passed",
-      feedback: "pass;",
+      feedback: "succeed;",
     });
     expect(handlePlay(manager, { sessionId, call: "Go(Player, Corridor)" })).toMatchObject({
       status: "passed",
-      feedback: "pass;",
+      feedback: "succeed;",
     });
 
     const at = handleQuery(manager, { sessionId, expr: "At(Player, here)" });

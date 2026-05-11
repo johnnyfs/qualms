@@ -35,7 +35,7 @@ interface BlockResult {
   readonly status: "passed" | "failed" | "no_match";
   readonly env: Env;
   readonly reasons: readonly string[];
-  readonly terminal?: "pass" | "fail";
+  readonly terminal?: "succeed" | "fail";
 }
 
 export function playLanguageCall(model: StoryModel, call: string | RelationAtom): LanguagePlayResult {
@@ -47,7 +47,7 @@ export function playLanguageCall(model: StoryModel, call: string | RelationAtom)
   const effects: Effect[] = [];
   const result = executeCallable(model, callable, args, "action", {}, effects);
   return result.status === "passed"
-    ? { status: "passed", feedback: "pass;", reasons: [], effects }
+    ? { status: "passed", feedback: "succeed;", reasons: [], effects }
     : failResult(result.reasons, effects);
 }
 
@@ -59,7 +59,7 @@ export function evalLanguageAtom(model: StoryModel, call: string | RelationAtom)
   const effects: Effect[] = [];
   const matches = evalExpression(model, expression, {}, effects);
   if (matches.length > 0) {
-    return { status: "passed", feedback: "pass;", reasons: [], effects };
+    return { status: "passed", feedback: "succeed;", reasons: [], effects };
   }
   return failResult(explainExpression(model, expression, {}), effects);
 }
@@ -82,9 +82,13 @@ function executeCallable(
   }
 
   for (const env of bound) {
-    const before = runRules(model, "before", callable.id, args, env, effects);
+    // Before-rules see only the caller-supplied baseEnv, not the action's
+    // parameter-bound env. The action's parameter names are internal to the
+    // body; rules re-bind the original positional args against their own
+    // patterns and must not inherit names from a sibling pattern shape.
+    const before = runRules(model, "before", callable.id, args, baseEnv, effects);
     if (before.status === "failed" && before.terminal === "fail") return before;
-    if (before.status === "passed" && before.terminal === "pass") return before;
+    if (before.status === "passed" && before.terminal === "succeed") return before;
 
     const body = executeBlock(model, callable.body, env, effects);
     if (body.status !== "passed") {
@@ -123,11 +127,12 @@ function runRules(
     for (const ruleEnv of bound) {
       const outcome = executeRuleBlock(model, rule, ruleEnv, effects);
       if (outcome.status === "failed" && outcome.terminal === "fail") return outcome;
-      if (outcome.status === "passed" && outcome.terminal === "pass") return outcome;
-      // Surface only would-have-rescued reasons: a pass-rule whose when failed
-      // contributes useful failure context. A fail-rule whose when failed is a
-      // non-event (the rule wasn't meant to fire) and would be noise.
-      if (outcome.status === "failed" && blockHasPass(rule.body)) {
+      if (outcome.status === "passed" && outcome.terminal === "succeed") return outcome;
+      // Surface only would-have-rescued reasons: a succeed-rule whose when
+      // failed contributes useful failure context. A fail-rule whose when
+      // failed is a non-event (the rule wasn't meant to fire) and would be
+      // noise.
+      if (outcome.status === "failed" && blockHasSucceed(rule.body)) {
         noMatchReasons.push(...outcome.reasons);
       }
     }
@@ -135,10 +140,10 @@ function runRules(
   return { status: "no_match", env, reasons: noMatchReasons };
 }
 
-function blockHasPass(block: Block): boolean {
+function blockHasSucceed(block: Block): boolean {
   for (const statement of block.statements) {
-    if (statement.kind === "pass") return true;
-    if (statement.kind === "when" && blockHasPass(statement.body)) return true;
+    if (statement.kind === "succeed") return true;
+    if (statement.kind === "when" && blockHasSucceed(statement.body)) return true;
   }
   return false;
 }
@@ -199,8 +204,8 @@ function executeBodyStatement(model: StoryModel, statement: BodyStatement, env: 
     case "set":
       applySet(model, statement, env, effects);
       return { status: "passed", env, reasons: [] };
-    case "pass":
-      return { status: "passed", env, reasons: [], terminal: "pass" };
+    case "succeed":
+      return { status: "passed", env, reasons: [], terminal: "succeed" };
     case "fail":
       return { status: "failed", env, reasons: ["fail"], terminal: "fail" };
   }
@@ -213,7 +218,7 @@ function executeWhen(model: StoryModel, statement: WhenStatement, env: Env, effe
   }
   for (const match of matches) {
     const body = executeBlock(model, statement.body, match, effects);
-    if (body.status === "passed" && body.terminal === "pass") return body;
+    if (body.status === "passed" && body.terminal === "succeed") return body;
     if (body.status === "failed" && body.terminal === "fail") {
       return {
         ...body,

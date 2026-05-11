@@ -64,13 +64,13 @@ describe("MCP play with tutorial-syntax stories", () => {
         sessionId,
         call: "Unlock(Player, Bars, MasterKey)",
       })).structuredContent,
-    ).toMatchObject({ status: "passed", feedback: "pass;" });
+    ).toMatchObject({ status: "passed", feedback: "succeed;" });
     expect(
       (await call(client, "play", { sessionId, call: "Open(Player, Bars)" })).structuredContent,
-    ).toMatchObject({ status: "passed", feedback: "pass;" });
+    ).toMatchObject({ status: "passed", feedback: "succeed;" });
     expect(
       (await call(client, "play", { sessionId, call: "Go(Player, Corridor)" })).structuredContent,
-    ).toMatchObject({ status: "passed", feedback: "pass;" });
+    ).toMatchObject({ status: "passed", feedback: "succeed;" });
 
     const query = await call(client, "query", { sessionId, expr: "At(Player, here)" });
     expect(query.structuredContent).toMatchObject({
