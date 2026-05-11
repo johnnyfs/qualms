@@ -245,7 +245,7 @@ replace action Examine(actor: Actor, target) {
   }
 }
 
-entity Guard { Locatable, Describable }
+entity Guard { Actor, Locatable, Describable }
 entity Closet { Location, Describable }
 entity ClosetDoor { Openable, Locatable, Describable }
 entity Mop { Portable, Describable, Locatable }

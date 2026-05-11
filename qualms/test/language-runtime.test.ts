@@ -490,6 +490,10 @@ describe("tutorial language runtime", () => {
 
       relation Hit(Actor, Target)
 
+      entity Alice { Actor }
+      entity Bob { Target }
+      entity Carol { Target }
+
       action Punch(a: Actor, t: Target) { succeed; }
 
       -- Sugar: bare 'Bob' in the second slot is desugared to '_: Bob' and
@@ -497,10 +501,6 @@ describe("tutorial language runtime", () => {
       after Punch(a: Actor, Bob) {
         when (a == Alice) { fail; }
       }
-
-      entity Alice { Actor }
-      entity Bob { Target }
-      entity Carol { Target }
     `);
 
     // Alice punching Bob: the after-rule binds (Bob slot matches), when
