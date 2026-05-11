@@ -39,14 +39,21 @@ const RCS_NOSE_Z := 1.42
 const RCS_REAR_Z := -1.42
 const ORBIT_SEGMENTS := 192
 const ORBIT_RATE_AT_1_AU := TAU / 120.0
+const ORBIT_TIME_SCALE := 0.125
 const MIN_ORBIT_RATE_AXIS_AU := 0.2
 const PLAYFIELD_SIZE := 140000.0
 const FLIGHT_GRID_SIZE := 4000.0
 const FLIGHT_GRID_STEP := 8.0
 const MAP_GRID_SIZE := 140000.0
-const MAP_GRID_STEP := WORLD_UNITS_PER_AU * 8.0
+const MAP_GRID_STEP := WORLD_UNITS_PER_AU * 4.0
 const STAR_FIELD_SIZE := 4000.0
 const STAR_COUNT := 30000
+const VIEW_YAW_PER_PIXEL := 0.005
+const VIEW_PITCH_PER_PIXEL := 0.005
+const MIN_VIEW_PITCH := 0.0
+const MAX_VIEW_PITCH := PI * 0.42
+const FLIGHT_CAMERA_FAR := 100000.0
+const MAP_CAMERA_FAR := 300000.0
 
 @export_enum("flight", "map") var startup_mode := "flight"
 
@@ -71,6 +78,9 @@ var map_grid: MeshInstance3D
 var main_thrust: GPUParticles3D
 var main_thrust_light: OmniLight3D
 var rcs_jets: Dictionary = {}
+var view_pitch := 0.0
+var view_yaw := 0.0
+var is_dragging := false
 
 
 func _ready() -> void:
@@ -126,15 +136,26 @@ func _unhandled_input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 				return
 
-	if event is InputEventMouseButton and event.pressed:
+	if event is InputEventMouseButton:
 		var mouse_event := event as InputEventMouseButton
-		var step := MAP_WHEEL_STEP if active_mode == MODE_MAP else FLIGHT_WHEEL_STEP
-		if mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			_apply_zoom_step(-step)
+		if mouse_event.button_index == MOUSE_BUTTON_LEFT:
+			is_dragging = mouse_event.pressed
 			get_viewport().set_input_as_handled()
-		elif mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_apply_zoom_step(step)
-			get_viewport().set_input_as_handled()
+			return
+		if mouse_event.pressed:
+			var step := MAP_WHEEL_STEP if active_mode == MODE_MAP else FLIGHT_WHEEL_STEP
+			if mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP:
+				_apply_zoom_step(-step)
+				get_viewport().set_input_as_handled()
+			elif mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+				_apply_zoom_step(step)
+				get_viewport().set_input_as_handled()
+
+	if event is InputEventMouseMotion and is_dragging:
+		var motion_event := event as InputEventMouseMotion
+		view_yaw = wrapf(view_yaw - motion_event.relative.x * VIEW_YAW_PER_PIXEL, -PI, PI)
+		view_pitch = clampf(view_pitch + motion_event.relative.y * VIEW_PITCH_PER_PIXEL, MIN_VIEW_PITCH, MAX_VIEW_PITCH)
+		get_viewport().set_input_as_handled()
 
 
 func _resolve_start_mode() -> String:
@@ -292,20 +313,42 @@ func _update_flight_camera() -> void:
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	camera.size = flight_camera_size
 	camera.near = 0.05
-	camera.far = FLIGHT_CAMERA_HEIGHT + 200.0
+	camera.far = FLIGHT_CAMERA_FAR
 	camera.current = true
-	camera.global_position = ship_root.global_position + Vector3(0.0, FLIGHT_CAMERA_HEIGHT, 0.0)
-	camera.rotation = Vector3(-PI * 0.5, 0.0, 0.0)
+	var basis := _view_basis()
+	camera.basis = basis
+	camera.global_position = ship_root.global_position + basis.z * FLIGHT_CAMERA_HEIGHT
+	_align_grids_to_view(ship_root.global_position)
 
 
 func _update_map_camera() -> void:
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	camera.size = map_camera_size
 	camera.near = 0.05
-	camera.far = MAP_CAMERA_HEIGHT + 200.0
+	camera.far = MAP_CAMERA_FAR
 	camera.current = true
-	camera.global_position = Vector3(0.0, MAP_CAMERA_HEIGHT, 0.0)
-	camera.rotation = Vector3(-PI * 0.5, 0.0, 0.0)
+	var basis := _view_basis()
+	camera.basis = basis
+	camera.global_position = basis.z * MAP_CAMERA_HEIGHT
+	_align_grids_to_view(Vector3.ZERO)
+
+
+func _view_basis() -> Basis:
+	var yaw_basis := Basis(Vector3.UP, view_yaw)
+	var pitch_basis := Basis(Vector3.RIGHT, -PI * 0.5 + view_pitch)
+	return yaw_basis * pitch_basis
+
+
+func _align_grids_to_view(focal: Vector3) -> void:
+	# Keep grids unaffected by view angle by orienting them perpendicular to the camera —
+	# the grid pattern looks the same on screen regardless of pitch/yaw. Other things in
+	# the world (ship, orbitals, paths, starfield) rotate naturally with the camera.
+	var basis := _view_basis()
+	var screen_aligned := Basis(basis.x, basis.z, -basis.y)
+	if flight_grid != null:
+		flight_grid.global_transform = Transform3D(screen_aligned, Vector3(focal.x, 0.0, focal.z))
+	if map_grid != null:
+		map_grid.global_transform = Transform3D(screen_aligned, Vector3.ZERO)
 
 
 func _configure_world() -> void:
@@ -597,11 +640,12 @@ func _create_orbit_ring(body: Dictionary, parent_node: Node3D) -> void:
 
 
 func _update_orbits(delta: float) -> void:
+	var scaled_delta := delta * ORBIT_TIME_SCALE
 	for i in range(bodies.size()):
 		var body := bodies[i]
 		var angular_velocity := float(body.get("angular_velocity_rad_per_second", 0.0))
 		if angular_velocity != 0.0:
-			body["orbit_angle"] = fposmod(float(body.get("orbit_angle", 0.0)) + angular_velocity * delta, TAU)
+			body["orbit_angle"] = fposmod(float(body.get("orbit_angle", 0.0)) + angular_velocity * scaled_delta, TAU)
 			bodies[i] = body
 
 		var body_node := body.get("node") as Node3D
@@ -922,7 +966,7 @@ func _update_hud() -> void:
 	var speed := ship_velocity.length()
 	var body_factor := BODY_VISIBILITY_FACTOR * body_size_multiplier
 	if active_mode == MODE_MAP:
-		hud_label.text = "%s — map view\nShip   %.1f, %.1f u\nBodies %d   Body× %.0f\nZoom   %.0f u   (M: flight  wheel/+-: zoom  {/}: bodies)" % [
+		hud_label.text = "%s — map view\nShip   %.1f, %.1f u\nBodies %d   Body× %.0f\nZoom   %.0f u   (M: flight  wheel/+-: zoom  drag: tilt  {/}: bodies)" % [
 			system_name,
 			ship_root.position.x,
 			ship_root.position.z,
@@ -932,7 +976,7 @@ func _update_hud() -> void:
 		]
 		return
 
-	hud_label.text = "%s — flight\nVelocity %.1f u/s\nPosition %.1f, %.1f u\nBody× %.0f   Zoom %.0f u   (M: map  arrows: fly  wheel/+-: zoom  {/}: bodies)" % [
+	hud_label.text = "%s — flight\nVelocity %.1f u/s\nPosition %.1f, %.1f u\nBody× %.0f   Zoom %.0f u   (M: map  arrows: fly  wheel/+-: zoom  drag: tilt  {/}: bodies)" % [
 		system_name,
 		speed,
 		ship_root.position.x,
