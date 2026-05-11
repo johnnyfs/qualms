@@ -18,7 +18,20 @@ describe("predicate purity", () => {
     ).toThrow(LanguageModelError);
   });
 
-  it("rejects set effects inside rules attached to known predicates", () => {
+  it("rejects emitted events inside predicate bodies", () => {
+    expect(() =>
+      loadStoryProgram(`
+        trait Thing
+        predicate TouchesHost(target: Thing) {
+          emit Saw(target);
+          succeed;
+        }
+        entity Widget { Thing }
+      `),
+    ).toThrow(LanguageModelError);
+  });
+
+  it("rejects side effects inside rules attached to known predicates", () => {
     expect(() =>
       loadStoryProgram(`
         trait Thing

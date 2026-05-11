@@ -70,6 +70,34 @@ describe("engine-tracked effects", () => {
     const blocked = playLanguageCall(model, "Go(Player, Outside)");
     expect(blocked.status).toBe("failed");
     expect(blocked.effects).toEqual([]);
+    expect(blocked.failures).toContainEqual({
+      kind: "action_failed",
+      message: "!Path(Cell, Outside)",
+      callable: "Go",
+    });
+  });
+
+  it("returns emitted events from passing actions only", () => {
+    const model = loadStoryProgram(`
+      trait Thing
+      relation Allowed(Thing)
+      action Touch(target: Thing) {
+        emit Touched(target);
+        when (Allowed(target)) {
+          succeed;
+        }
+      }
+      entity Widget { Thing }
+    `);
+
+    const failed = playLanguageCall(model, "Touch(Widget)");
+    expect(failed.status).toBe("failed");
+    expect(failed.events).toEqual([]);
+
+    model.apply(parseProgram("set Allowed(Widget)"));
+    const passed = playLanguageCall(model, "Touch(Widget)");
+    expect(passed.status).toBe("passed");
+    expect(passed.events).toEqual([{ event: "Touched", args: [idTerm("Widget")] }]);
   });
 
   it("rolls back action body effects when a later statement fails", () => {

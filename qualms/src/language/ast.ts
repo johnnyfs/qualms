@@ -84,19 +84,22 @@ export interface QueryValidationAssertion {
   readonly kind: "query";
   readonly negate: boolean;
   readonly expression: Expression;
+  readonly expectedBindings?: readonly EqualityExpression[];
 }
 
 export interface PlayValidationAssertion {
   readonly kind: "play";
   readonly atom: RelationAtom;
   readonly expected: "passed" | "failed";
+  readonly expectedEffects?: readonly SetEffect[];
+  readonly expectedReasons?: readonly Expression[];
 }
 
 export interface Block {
   readonly statements: readonly BodyStatement[];
 }
 
-export type BodyStatement = WhenStatement | SetStatement | SucceedStatement | FailStatement;
+export type BodyStatement = WhenStatement | SetStatement | EmitStatement | SucceedStatement | FailStatement;
 
 export interface WhenStatement {
   readonly kind: "when";
@@ -114,6 +117,11 @@ export interface FailStatement {
 
 export interface SetEffect {
   readonly polarity: "assert" | "retract";
+  readonly atom: RelationAtom;
+}
+
+export interface EmitStatement {
+  readonly kind: "emit";
   readonly atom: RelationAtom;
 }
 

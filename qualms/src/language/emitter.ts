@@ -17,6 +17,7 @@ import type {
   RuleStatement,
   SetEffect,
   SetStatement,
+  EmitStatement,
   Term,
   TopLevelStatement,
   TraitStatement,
@@ -150,10 +151,26 @@ function emitValidationAssertion(assertion: ValidationAssertion): string {
     case "fact":
       return `assert ${assertion.negate ? "not " : ""}fact ${emitRelationAtom(assertion.atom)};`;
     case "query":
-      return `assert ${assertion.negate ? "not " : ""}query ${emitExpression(assertion.expression)};`;
+      return `assert ${assertion.negate ? "not " : ""}query ${emitExpression(assertion.expression)}${emitExpectedBindings(assertion)};`;
     case "play":
-      return `assert play ${emitRelationAtom(assertion.atom)} => ${assertion.expected};`;
+      return `assert play ${emitRelationAtom(assertion.atom)} => ${assertion.expected}${emitExpectedPlay(assertion)};`;
   }
+}
+
+function emitExpectedBindings(assertion: Extract<ValidationAssertion, { kind: "query" }>): string {
+  if (!assertion.expectedBindings || assertion.expectedBindings.length === 0) return "";
+  return ` => bindings { ${assertion.expectedBindings.map(emitExpression).join("; ")}; }`;
+}
+
+function emitExpectedPlay(assertion: Extract<ValidationAssertion, { kind: "play" }>): string {
+  const parts: string[] = [];
+  if (assertion.expectedEffects) {
+    parts.push(`effects { ${assertion.expectedEffects.map((effect) => `${emitSetEffect(effect)};`).join(" ")} }`);
+  }
+  if (assertion.expectedReasons) {
+    parts.push(`reasons { ${assertion.expectedReasons.map((reason) => `${emitExpression(reason)};`).join(" ")} }`);
+  }
+  return parts.length > 0 ? ` ${parts.join(" ")}` : "";
 }
 
 function emitParameter(parameter: ParameterPattern): string {
@@ -177,6 +194,8 @@ function emitBodyStatement(statement: BodyStatement): string {
       return emitWhen(statement);
     case "set":
       return emitSet(statement);
+    case "emit":
+      return emitEmit(statement);
     case "succeed":
       return "succeed;";
     case "fail":
@@ -195,6 +214,10 @@ function emitSet(statement: SetStatement): string {
 
 function emitSetEffect(effect: SetEffect): string {
   return `${effect.polarity === "retract" ? "!" : ""}${emitRelationAtom(effect.atom)}`;
+}
+
+function emitEmit(statement: EmitStatement): string {
+  return `emit ${emitRelationAtom(statement.atom)};`;
 }
 
 function emitExpression(expression: Expression): string {

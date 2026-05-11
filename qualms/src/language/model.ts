@@ -169,8 +169,8 @@ export class StoryModel {
     kind: string,
   ): void {
     this.validateCallableTypes(statement);
-    if (kind === "predicate" && blockContainsSet(statement.body)) {
-      throw new LanguageModelError(`predicate '${statement.id}' cannot contain set effects`);
+    if (kind === "predicate" && blockContainsImpureStatement(statement.body)) {
+      throw new LanguageModelError(`predicate '${statement.id}' cannot contain set or emit effects`);
     }
     if (statement.replace) {
       if (!map.has(statement.id)) {
@@ -186,9 +186,9 @@ export class StoryModel {
 
   private validateRulePurity(statement: RuleStatement): void {
     if (!this.predicates.has(statement.target)) return;
-    if (blockContainsSet(statement.body)) {
+    if (blockContainsImpureStatement(statement.body)) {
       throw new LanguageModelError(
-        `rule for predicate '${statement.target}' cannot contain set effects`,
+        `rule for predicate '${statement.target}' cannot contain set or emit effects`,
       );
     }
   }
@@ -207,6 +207,9 @@ export class StoryModel {
           throw new LanguageModelError(
             `validation action '${assertion.atom.relation}' expects ${action.parameters.length} args, got ${assertion.atom.args.length}`,
           );
+        }
+        for (const effect of assertion.expectedEffects ?? []) {
+          this.validateFact(factFromAtom(effect.atom));
         }
       }
     }
@@ -408,13 +411,13 @@ export function relationTerm(relation: string, args: readonly GroundTerm[]): Gro
   return { kind: "relation", relation, args };
 }
 
-function blockContainsSet(block: Block): boolean {
-  return block.statements.some(statementContainsSet);
+function blockContainsImpureStatement(block: Block): boolean {
+  return block.statements.some(statementContainsImpureStatement);
 }
 
-function statementContainsSet(statement: BodyStatement): boolean {
-  if (statement.kind === "set") return true;
-  if (statement.kind === "when") return blockContainsSet(statement.body);
+function statementContainsImpureStatement(statement: BodyStatement): boolean {
+  if (statement.kind === "set" || statement.kind === "emit") return true;
+  if (statement.kind === "when") return blockContainsImpureStatement(statement.body);
   return false;
 }
 

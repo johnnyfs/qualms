@@ -27,6 +27,8 @@ export {
 } from "./runtime.js";
 export type {
   LanguagePlayResult,
+  LanguageEvent,
+  LanguageFailure,
   LanguageValidationFailure,
   LanguageValidationResult,
 } from "./runtime.js";
