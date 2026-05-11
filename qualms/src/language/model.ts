@@ -13,6 +13,7 @@ import type {
   Term,
   TraitStatement,
   TypeExpr,
+  ValidationStatement,
 } from "./ast.js";
 import { parseProgram } from "./parser.js";
 
@@ -45,6 +46,7 @@ export class StoryModel {
   readonly predicates = new Map<string, CallableStatement>();
   readonly actions = new Map<string, CallableStatement>();
   readonly rules: RuleStatement[] = [];
+  readonly validations = new Map<string, ValidationStatement>();
   readonly entities = new Map<string, Set<string>>();
   private readonly facts = new Map<string, Fact>();
 
@@ -55,6 +57,7 @@ export class StoryModel {
     for (const [id, predicate] of this.predicates) clone.predicates.set(id, predicate);
     for (const [id, action] of this.actions) clone.actions.set(id, action);
     clone.rules.push(...this.rules);
+    for (const [id, validation] of this.validations) clone.validations.set(id, validation);
     for (const [id, traits] of this.entities) clone.entities.set(id, new Set(traits));
     for (const [key, fact] of this.facts) clone.facts.set(key, fact);
     return clone;
@@ -90,6 +93,9 @@ export class StoryModel {
           break;
         case "set":
           this.applySet(statement.effects, effects);
+          break;
+        case "validation":
+          this.addValidation(statement);
           break;
       }
     }
@@ -185,6 +191,26 @@ export class StoryModel {
         `rule for predicate '${statement.target}' cannot contain set effects`,
       );
     }
+  }
+
+  private addValidation(statement: ValidationStatement): void {
+    if (this.validations.has(statement.id)) {
+      throw new LanguageModelError(`duplicate validation '${statement.id}'`);
+    }
+    for (const assertion of statement.assertions) {
+      if (assertion.kind === "fact") {
+        this.validateFact(factFromAtom(assertion.atom));
+      } else if (assertion.kind === "play") {
+        const action = this.actions.get(assertion.atom.relation);
+        if (!action) throw new LanguageModelError(`unknown validation action '${assertion.atom.relation}'`);
+        if (action.parameters.length !== assertion.atom.args.length) {
+          throw new LanguageModelError(
+            `validation action '${assertion.atom.relation}' expects ${action.parameters.length} args, got ${assertion.atom.args.length}`,
+          );
+        }
+      }
+    }
+    this.validations.set(statement.id, statement);
   }
 
   private validateRelation(statement: RelationStatement): void {

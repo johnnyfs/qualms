@@ -56,6 +56,7 @@ export interface ModelCounts {
   predicates: number;
   actions: number;
   rules: number;
+  validations: number;
   entities: number;
   facts: number;
 }
@@ -254,6 +255,13 @@ export function handleCommit(manager: SessionManager, input: CommitInput): Commi
     input.sessionId,
     input.transactionId,
   );
+  const validation = languageNs.runLanguageValidations(session.model);
+  if (validation.status === "failed") {
+    throw new MutationError(
+      `validation failed: ${validation.failures.map((failure) => `${failure.validation}#${failure.assertion}: ${failure.message}`).join("; ")}`,
+      "scope_error",
+    );
+  }
   if (!transaction.targetPath) {
     const result = manager.commit(input.sessionId, input.transactionId);
     return {
@@ -319,6 +327,7 @@ function countModel(model: languageNs.StoryModel): ModelCounts {
     predicates: model.predicates.size,
     actions: model.actions.size,
     rules: model.rules.length,
+    validations: model.validations.size,
     entities: model.entities.size,
     facts: model.listFacts().length,
   };

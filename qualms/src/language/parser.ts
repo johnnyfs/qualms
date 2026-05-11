@@ -19,6 +19,8 @@ import type {
   TopLevelStatement,
   TraitStatement,
   TypeExpr,
+  ValidationAssertion,
+  ValidationStatement,
   WhenStatement,
 } from "./ast.js";
 
@@ -37,6 +39,7 @@ type TokenType =
   | "amp"
   | "pipe"
   | "eqeq"
+  | "arrow"
   | "eof";
 
 interface Token {
@@ -160,6 +163,13 @@ function tokenize(source: string): Token[] {
       continue;
     }
 
+    if (ch === "=" && source[i + 1] === ">") {
+      advance(ch);
+      advance(source[i]!);
+      push("arrow", "=>", offset, startLine, startColumn);
+      continue;
+    }
+
     const single: Record<string, TokenType> = {
       "(": "lparen",
       ")": "rparen",
@@ -232,6 +242,7 @@ class Parser {
     if (this.matchKeyword("entity")) return this.entityStatement();
     if (this.matchKeyword("extend")) return this.extendStatement();
     if (this.matchKeyword("set")) return this.setStatement();
+    if (this.matchKeyword("validation")) return this.validationStatement();
     this.fail(`expected top-level statement, got '${this.peek().image}'`);
   }
 
@@ -436,6 +447,41 @@ class Parser {
   private setEffect(): SetEffect {
     const polarity = this.consumeIf("bang") ? "retract" : "assert";
     return { polarity, atom: this.relationAtom() };
+  }
+
+  private validationStatement(): ValidationStatement {
+    this.expectKeyword("validation");
+    const id = this.identifier();
+    this.expect("lbrace");
+    const assertions: ValidationAssertion[] = [];
+    while (!this.at("rbrace")) {
+      this.skipSemis();
+      if (this.at("rbrace")) break;
+      assertions.push(this.validationAssertion());
+      this.consumeIf("semi");
+    }
+    this.expect("rbrace");
+    return { kind: "validation", id, assertions };
+  }
+
+  private validationAssertion(): ValidationAssertion {
+    this.expectKeyword("assert");
+    const negate = this.consumeKeywordIf("not");
+    if (this.consumeKeywordIf("fact")) {
+      return { kind: "fact", negate, atom: this.relationAtom() };
+    }
+    if (this.consumeKeywordIf("query")) {
+      return { kind: "query", negate, expression: this.expression() };
+    }
+    if (negate) this.fail("play validation assertions use '=> failed', not 'assert not play'");
+    if (this.consumeKeywordIf("play")) {
+      const atom = this.relationAtom();
+      this.expect("arrow");
+      if (this.consumeKeywordIf("passed")) return { kind: "play", atom, expected: "passed" };
+      if (this.consumeKeywordIf("failed")) return { kind: "play", atom, expected: "failed" };
+      this.fail("expected 'passed' or 'failed' after '=>'");
+    }
+    this.fail("expected validation assertion kind");
   }
 
   private expression(): Expression {

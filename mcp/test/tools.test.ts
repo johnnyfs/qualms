@@ -154,6 +154,38 @@ describe("tool handlers for the tutorial-era DSL", () => {
     }
   });
 
+  it("blocks commits when validations fail and keeps the transaction open", () => {
+    const sessionId = handleStart(manager).sessionId;
+    const tx = handleBegin(manager, { sessionId });
+    handleMutate(manager, {
+      sessionId,
+      transactionId: tx.transactionId,
+      expr: `
+        trait Thing
+        relation Marked(Thing)
+        entity Widget { Thing }
+        validation Guard {
+          assert fact Marked(Widget);
+        }
+      `,
+    });
+
+    expect(() => handleCommit(manager, { sessionId, transactionId: tx.transactionId })).toThrowError(
+      MutationError,
+    );
+    expect(handleDiff(manager, { sessionId, transactionId: tx.transactionId }).applied).toHaveLength(1);
+
+    handleMutate(manager, {
+      sessionId,
+      transactionId: tx.transactionId,
+      expr: "set Marked(Widget)",
+    });
+    expect(handleCommit(manager, { sessionId, transactionId: tx.transactionId })).toMatchObject({
+      committed: 2,
+      persisted: false,
+    });
+  });
+
   it("rejects second transactions and parse errors", () => {
     const sessionId = handleStart(manager).sessionId;
     handleBegin(manager, { sessionId });

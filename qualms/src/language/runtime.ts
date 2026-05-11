@@ -9,6 +9,7 @@ import type {
   SetStatement,
   Term,
   TypeExpr,
+  ValidationAssertion,
   WhenStatement,
 } from "./ast.js";
 import {
@@ -29,6 +30,17 @@ export interface LanguagePlayResult {
   readonly feedback: string;
   readonly reasons: readonly string[];
   readonly effects: readonly Effect[];
+}
+
+export interface LanguageValidationFailure {
+  readonly validation: string;
+  readonly assertion: number;
+  readonly message: string;
+}
+
+export interface LanguageValidationResult {
+  readonly status: "passed" | "failed";
+  readonly failures: readonly LanguageValidationFailure[];
 }
 
 interface BlockResult {
@@ -64,6 +76,47 @@ export function evalLanguageAtom(model: StoryModel, call: string | RelationAtom)
     return { status: "passed", feedback: "succeed;", reasons: [], effects };
   }
   return failResult(explainExpression(model, expression, {}), effects);
+}
+
+export function runLanguageValidations(model: StoryModel): LanguageValidationResult {
+  const failures: LanguageValidationFailure[] = [];
+  for (const validation of model.validations.values()) {
+    validation.assertions.forEach((assertion, index) => {
+      const message = evaluateValidationAssertion(model, assertion);
+      if (!message) return;
+      failures.push({ validation: validation.id, assertion: index + 1, message });
+    });
+  }
+  return failures.length === 0 ? { status: "passed", failures: [] } : { status: "failed", failures };
+}
+
+function evaluateValidationAssertion(
+  model: StoryModel,
+  assertion: ValidationAssertion,
+): string | undefined {
+  switch (assertion.kind) {
+    case "fact": {
+      const fact = factFromAtom(assertion.atom);
+      const matched = model.hasFact(fact.relation, fact.args);
+      if (assertion.negate ? !matched : matched) return undefined;
+      return assertion.negate
+        ? `expected fact to be absent: ${emitRelationAtom(assertion.atom, {})}`
+        : `expected fact: ${emitRelationAtom(assertion.atom, {})}`;
+    }
+    case "query": {
+      const baseEnv = knownEntityBindings(model, assertion.expression);
+      const matched = evalExpression(model, assertion.expression, baseEnv, []).length > 0;
+      if (assertion.negate ? !matched : matched) return undefined;
+      return assertion.negate
+        ? `expected query to have no matches: ${emitExpression(assertion.expression, baseEnv)}`
+        : `expected query to match: ${emitExpression(assertion.expression, baseEnv)}`;
+    }
+    case "play": {
+      const result = playLanguageCall(model.clone(), assertion.atom);
+      if (result.status === assertion.expected) return undefined;
+      return `expected play ${emitRelationAtom(assertion.atom, {})} to ${assertion.expected}, got ${result.status}`;
+    }
+  }
 }
 
 function executeCallable(
@@ -496,6 +549,54 @@ function emitGroundTerm(term: GroundTerm): string {
       return String(term.value);
     case "relation":
       return `${term.relation}(${term.args.map(emitGroundTerm).join(", ")})`;
+  }
+}
+
+function knownEntityBindings(model: StoryModel, expression: Expression): Env {
+  const names = new Set<string>();
+  collectExpressionIdentifiers(expression, names);
+  const env: Env = {};
+  for (const name of names) {
+    if (model.entities.has(name)) env[name] = { kind: "id", id: name };
+  }
+  return env;
+}
+
+function collectExpressionIdentifiers(expression: Expression, names: Set<string>): void {
+  switch (expression.kind) {
+    case "relation":
+      collectAtomIdentifiers(expression.atom, names);
+      return;
+    case "not":
+      collectExpressionIdentifiers(expression.operand, names);
+      return;
+    case "binary":
+      collectExpressionIdentifiers(expression.left, names);
+      collectExpressionIdentifiers(expression.right, names);
+      return;
+    case "equal":
+      collectTermIdentifiers(expression.left, names);
+      collectTermIdentifiers(expression.right, names);
+      return;
+  }
+}
+
+function collectAtomIdentifiers(atom: RelationAtom, names: Set<string>): void {
+  for (const arg of atom.args) collectTermIdentifiers(arg, names);
+}
+
+function collectTermIdentifiers(term: Term, names: Set<string>): void {
+  switch (term.kind) {
+    case "identifier":
+      names.add(term.id);
+      return;
+    case "relationInstance":
+      collectAtomIdentifiers(term.atom, names);
+      return;
+    case "wildcard":
+    case "string":
+    case "number":
+      return;
   }
 }
 
