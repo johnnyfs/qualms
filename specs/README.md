@@ -79,7 +79,7 @@ roughly priority for the spec author. Tick items off as features land.
       shape is described informally in `language.md` § 7. Give it a
       concrete grammar and worked examples drawn from the runtime tests.
 - [ ] **`query` expression dialect.** `query` accepts a subset of the
-      `Expr` grammar (no `set`, no terminal `pass`/`fail`). Document the
+      `Expr` grammar (no `set`, no terminal `succeed`/`fail`). Document the
       exact accepted subset and how `knownEntityBindings` shapes the
       result rows.
 - [ ] **`show` command grammar.** Spec out the `^show( <kind>)?( <name>)?$`

@@ -152,8 +152,8 @@ function emitBodyStatement(statement: BodyStatement): string {
       return emitWhen(statement);
     case "set":
       return emitSet(statement);
-    case "pass":
-      return "pass;";
+    case "succeed":
+      return "succeed;";
     case "fail":
       return "fail;";
   }

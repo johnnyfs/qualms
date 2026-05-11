@@ -7,7 +7,7 @@ import type {
   ExtendStatement,
   FailStatement,
   ParameterPattern,
-  PassStatement,
+  SucceedStatement,
   Program,
   RelationAtom,
   RelationParameter,
@@ -368,7 +368,7 @@ class Parser {
   private bodyStatement(): BodyStatement {
     if (this.matchKeyword("when")) return this.whenStatement();
     if (this.matchKeyword("set")) return this.setStatement();
-    if (this.matchKeyword("pass")) return this.passStatement();
+    if (this.matchKeyword("succeed")) return this.succeedStatement();
     if (this.matchKeyword("fail")) return this.failStatement();
     this.fail(`expected body statement, got '${this.peek().image}'`);
   }
@@ -382,10 +382,10 @@ class Parser {
     return { kind: "when", condition, body };
   }
 
-  private passStatement(): PassStatement {
-    this.expectKeyword("pass");
+  private succeedStatement(): SucceedStatement {
+    this.expectKeyword("succeed");
     this.consumeIf("semi");
-    return { kind: "pass" };
+    return { kind: "succeed" };
   }
 
   private failStatement(): FailStatement {

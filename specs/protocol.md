@@ -385,8 +385,8 @@ sequenceDiagram
     Runtime-->>Runtime: failed, reasons=[!Callable(args…)]
   else
     loop for each candidate env
-      Runtime->>Runtime: runRules("before", id, args, env)
-      alt before terminal pass/fail
+      Runtime->>Runtime: runRules("before", id, args, baseEnv)
+      alt before terminal succeed/fail
         Runtime-->>Runtime: short-circuit with terminal
       else
         Runtime->>Runtime: executeBlock(body, env)
@@ -409,7 +409,10 @@ sequenceDiagram
 
 `runRules` walks `model.rules` in order, filters by `phase` and `target`,
 re-binds each rule's own parameter patterns against the original
-arguments, and executes the rule body. A pass-rule whose `when` did not
+arguments, and executes the rule body. For `before` rules, the rule's
+parameter binding starts from the caller's `baseEnv` rather than the
+action's parameter-bound env — the rule does not inherit names bound by
+the action's parameter patterns. A succeed-rule whose `when` did not
 match contributes its negative reasons to the caller's reason list; a
 fail-rule whose `when` did not match contributes nothing (its non-firing
 is not an error).

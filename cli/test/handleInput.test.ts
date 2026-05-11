@@ -14,7 +14,7 @@ describe("handleInput", () => {
   it("plays an action call and emits feedback + effects", () => {
     const model = loadStoryProgram(readFileSync(TUTORIAL_PATH, "utf-8"));
     const entries = handleInput(model, "Unlock(Player, Bars, MasterKey)");
-    expect(entries[0]).toEqual({ kind: "feedback", text: "pass;" });
+    expect(entries[0]).toEqual({ kind: "feedback", text: "succeed;" });
     expect(entries).toContainEqual({ kind: "effect", text: "- Locked(Bars);" });
   });
 
@@ -55,7 +55,7 @@ describe("handleInput", () => {
   it("walks the tutorial golden path end-to-end", () => {
     const model = loadStoryProgram(readFileSync(TUTORIAL_PATH, "utf-8"));
 
-    expect(handleInput(model, "At(Player, Cell)")[0]).toEqual({ kind: "feedback", text: "pass;" });
+    expect(handleInput(model, "At(Player, Cell)")[0]).toEqual({ kind: "feedback", text: "succeed;" });
 
     const blocked = handleInput(model, "Go(Player, Corridor)");
     expect(blocked[0]!.kind).toBe("feedback");
@@ -63,12 +63,12 @@ describe("handleInput", () => {
 
     expect(handleInput(model, "Unlock(Player, Bars, MasterKey)")[0]).toEqual({
       kind: "feedback",
-      text: "pass;",
+      text: "succeed;",
     });
-    expect(handleInput(model, "Open(Player, Bars)")[0]).toEqual({ kind: "feedback", text: "pass;" });
+    expect(handleInput(model, "Open(Player, Bars)")[0]).toEqual({ kind: "feedback", text: "succeed;" });
 
     const moved = handleInput(model, "Go(Player, Corridor)");
-    expect(moved[0]).toEqual({ kind: "feedback", text: "pass;" });
+    expect(moved[0]).toEqual({ kind: "feedback", text: "succeed;" });
     expect(moved).toContainEqual({ kind: "effect", text: "+ At(Player, Corridor);" });
   });
 

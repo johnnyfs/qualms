@@ -64,7 +64,7 @@ export interface Block {
   readonly statements: readonly BodyStatement[];
 }
 
-export type BodyStatement = WhenStatement | SetStatement | PassStatement | FailStatement;
+export type BodyStatement = WhenStatement | SetStatement | SucceedStatement | FailStatement;
 
 export interface WhenStatement {
   readonly kind: "when";
@@ -72,8 +72,8 @@ export interface WhenStatement {
   readonly body: Block;
 }
 
-export interface PassStatement {
-  readonly kind: "pass";
+export interface SucceedStatement {
+  readonly kind: "succeed";
 }
 
 export interface FailStatement {

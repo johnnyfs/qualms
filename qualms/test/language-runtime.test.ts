@@ -286,4 +286,76 @@ describe("tutorial language runtime", () => {
     expect(playLanguageCall(model, "TalkAbout(Player, Guard, OfferMoney)").status).toBe("failed");
     expect(playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)").status).toBe("failed");
   });
+
+  it("before-rule env is isolated from the action's parameter bindings", () => {
+    // Demonstrates the fix: a before-rule can reuse a name from the action
+    // ("topic") as a fresh constraint variable, because the action's parameter
+    // bindings do not leak into the rule's env. The rule binds `topic`
+    // via the speaker constraint's InConversation fact lookup, then walks
+    // LeadsTo to the call-site sub-topic.
+    const model = loadStoryProgram(`
+      trait Actor
+      trait Speaker
+      trait Topic
+
+      relation TalksAbout(Speaker, Topic)
+      relation InConversation(Actor, Speaker, one Topic)
+      relation LeadsTo(Speaker, Topic, Topic)
+
+      action TalkAbout(actor: Actor, speaker: Speaker, topic: Topic) {
+        when (TalksAbout(speaker, topic)) { succeed; }
+      }
+
+      -- Rule reuses the action's parameter name "topic" inside the speaker's
+      -- constraint as a fresh variable bound by the InConversation fact.
+      -- Without env isolation, the action's "topic" (= call-site sub-topic)
+      -- would leak in and force the fact lookup to match the sub-topic
+      -- instead of the parent.
+      before TalkAbout(
+        actor: Actor,
+        speaker: Speaker { InConversation(actor, speaker, topic) },
+        subTopic: Topic
+      ) {
+        when (LeadsTo(speaker, topic, subTopic)) {
+          set InConversation(actor, speaker, subTopic);
+          succeed;
+        }
+      }
+
+      after TalkAbout(actor: Actor, speaker: Speaker, topic: Topic) {
+        set InConversation(actor, speaker, topic);
+      }
+
+      entity Player { Actor }
+      entity Guard { Speaker }
+      entity Whatever { Topic }
+      entity Bribery { Topic }
+      entity OfferMoney { Topic }
+
+      set {
+        TalksAbout(Guard, Whatever);
+        LeadsTo(Guard, Whatever, Bribery);
+        LeadsTo(Guard, Bribery, OfferMoney);
+      }
+    `);
+
+    // Top-level: passes via the action body; after-rule records Whatever.
+    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)").status).toBe("passed");
+    expect(
+      model.hasFact("InConversation", [idTerm("Player"), idTerm("Guard"), idTerm("Whatever")]),
+    ).toBe(true);
+
+    // Sub-topic walk: the before-rule's `topic` constraint variable must bind
+    // to the parent topic Whatever (not the call-site sub-topic Bribery).
+    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Bribery)").status).toBe("passed");
+    expect(
+      model.hasFact("InConversation", [idTerm("Player"), idTerm("Guard"), idTerm("Bribery")]),
+    ).toBe(true);
+
+    // Step further: `topic` rebinds to Bribery (the new parent) on this call.
+    expect(playLanguageCall(model, "TalkAbout(Player, Guard, OfferMoney)").status).toBe("passed");
+    expect(
+      model.hasFact("InConversation", [idTerm("Player"), idTerm("Guard"), idTerm("OfferMoney")]),
+    ).toBe(true);
+  });
 });

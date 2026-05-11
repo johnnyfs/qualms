@@ -42,7 +42,7 @@ describe("engine-tracked effects", () => {
       trait Location
       relation At(Locatable, one Location)
       predicate Here(actor: Locatable, location: Location) {
-        when (At(actor, location)) { pass }
+        when (At(actor, location)) { succeed }
       }
       action Check(actor: Locatable, location: Location) {
         when (Here(actor, location)) {}

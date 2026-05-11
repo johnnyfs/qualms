@@ -25,7 +25,7 @@ The current `.qualms` syntax supports:
 - pattern-constrained parameters such as `actor: (Actor & Locatable) { At(actor, here) }`
 - relation-valued terms such as `Gated(Path(Cell, Corridor), Bars)`
 - boolean conditions with `!`, `&`, `|`, and `==`
-- compact play feedback such as `pass;` and `fail { Locked(Bars); }`
+- compact play feedback such as `succeed;` and `fail { Locked(Bars); }`
 
 ## Development
 
