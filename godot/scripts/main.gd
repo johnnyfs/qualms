@@ -4,18 +4,30 @@ const MODE_FLIGHT := "flight"
 const MODE_MAP := "map"
 const SHIP_MODEL_PATH := "res://assets/ships/canary/canary.glb"
 const SYSTEM_DATA_PATH := "res://data/sol_like_system.json"
-const SHIP_ALTITUDE := 0.75
+const SHIP_ALTITUDE := 100.0
 const SHIP_DISPLAY_SIZE := 3.2
-const FLIGHT_CAMERA_HEIGHT := 42.0
-const FLIGHT_CAMERA_ORTHOGRAPHIC_SIZE := 30.0
+const KM_PER_AU := 149597870.7
+const WORLD_UNITS_PER_AU := 640.0
+const BODY_WORLD_UNITS_PER_KM := 2.6738668e-7
+const BODY_VISIBILITY_FACTOR := 2400.0
+const STAR_VISIBILITY_FACTOR := 60.0
+const BODY_SIZE_TUNING_STEP := 1.2
+const MAP_MAX_BODY_RADIUS := 400.0
+const MAP_MIN_BODY_RADIUS := 200.0
+const MAP_BODY_SCALE := 35.81
+const FLIGHT_CAMERA_HEIGHT := 320.0
+const FLIGHT_CAMERA_ORTHOGRAPHIC_SIZE := 50.0
 const MIN_FLIGHT_CAMERA_ORTHOGRAPHIC_SIZE := 7.0
-const MAX_FLIGHT_CAMERA_ORTHOGRAPHIC_SIZE := 104.0
-const MAP_CAMERA_HEIGHT := 210.0
-const MAP_CAMERA_MARGIN := 14.0
-const MAP_MIN_CAMERA_ORTHOGRAPHIC_SIZE := 28.0
-const MAP_ICON_ALTITUDE := 1.2
-const MAP_SHIP_ICON_ALTITUDE := 1.75
-const ZOOM_UNITS_PER_SECOND := 42.0
+const MAX_FLIGHT_CAMERA_ORTHOGRAPHIC_SIZE := 400.0
+const MAP_CAMERA_HEIGHT := 5000.0
+const MAP_CAMERA_INITIAL_SIZE := 56000.0
+const MIN_MAP_CAMERA_ORTHOGRAPHIC_SIZE := 6400.0
+const MAX_MAP_CAMERA_ORTHOGRAPHIC_SIZE := 70000.0
+const MAP_SHIP_ICON_ALTITUDE := 110.0
+const FLIGHT_ZOOM_UNITS_PER_SECOND := 120.0
+const MAP_ZOOM_UNITS_PER_SECOND := 30000.0
+const FLIGHT_WHEEL_STEP := 10.0
+const MAP_WHEEL_STEP := 3500.0
 const TURN_RADIANS_PER_SECOND := 2.7
 const THRUST_UNITS_PER_SECOND_SQUARED := 18.0
 const MAX_SPEED_UNITS_PER_SECOND := 34.0
@@ -25,15 +37,16 @@ const MAIN_ENGINE_Z := -1.7
 const RCS_SIDE_X := 0.58
 const RCS_NOSE_Z := 1.42
 const RCS_REAR_Z := -1.42
-const AU_TO_WORLD_UNITS := 1.6
-const MOON_AU_TO_WORLD_UNITS := 350.0
-const MIN_LOCAL_ORBIT_RADIUS := 0.85
-const ORBIT_SEGMENTS := 160
+const ORBIT_SEGMENTS := 192
 const ORBIT_RATE_AT_1_AU := TAU / 120.0
 const MIN_ORBIT_RATE_AXIS_AU := 0.2
-const PLAYFIELD_SIZE := 140.0
-const GRID_STEP := 5.0
-const STAR_COUNT := 190
+const PLAYFIELD_SIZE := 140000.0
+const FLIGHT_GRID_SIZE := 4000.0
+const FLIGHT_GRID_STEP := 8.0
+const MAP_GRID_SIZE := 140000.0
+const MAP_GRID_STEP := WORLD_UNITS_PER_AU * 8.0
+const STAR_FIELD_SIZE := 4000.0
+const STAR_COUNT := 30000
 
 @export_enum("flight", "map") var startup_mode := "flight"
 
@@ -45,13 +58,16 @@ var active_mode := MODE_FLIGHT
 var ship_heading := 0.0
 var ship_velocity := Vector3.ZERO
 var ship_model: Node3D
-var camera_size := FLIGHT_CAMERA_ORTHOGRAPHIC_SIZE
+var ship_model_root: Node3D
+var flight_camera_size := FLIGHT_CAMERA_ORTHOGRAPHIC_SIZE
+var map_camera_size := MAP_CAMERA_INITIAL_SIZE
+var body_size_multiplier := 1.0
 var system_name := "Unloaded System"
 var bodies: Array[Dictionary] = []
 var system_root: Node3D
-var map_root: Node3D
-var map_body_icons: Dictionary = {}
 var map_ship_icon: Node3D
+var flight_grid: MeshInstance3D
+var map_grid: MeshInstance3D
 var main_thrust: GPUParticles3D
 var main_thrust_light: OmniLight3D
 var rcs_jets: Dictionary = {}
@@ -75,7 +91,7 @@ func _ready_flight_scene() -> void:
 	_build_rcs_jets()
 	_load_ship_model()
 	_place_ship_near_body("earth")
-	_build_map_icons()
+	_build_ship_map_icon()
 	_update_ship_transform()
 	_update_camera()
 	_update_hud()
@@ -83,12 +99,12 @@ func _ready_flight_scene() -> void:
 
 func _process(delta: float) -> void:
 	_update_orbits(delta)
+	_update_zoom(delta)
 	if active_mode == MODE_FLIGHT:
-		_update_zoom(delta)
 		_update_ship(delta)
 	else:
 		_coast_ship(delta)
-	_update_map_icons()
+	_update_ship_map_icon()
 	_update_camera()
 	_update_hud()
 
@@ -98,21 +114,26 @@ func _unhandled_input(event: InputEvent) -> void:
 		var key_event := event as InputEventKey
 		if key_event.pressed and not key_event.echo:
 			if key_event.keycode == KEY_M:
-				_set_active_mode(MODE_MAP)
+				_toggle_mode()
 				get_viewport().set_input_as_handled()
 				return
-			if key_event.keycode == KEY_F:
-				_set_active_mode(MODE_FLIGHT)
+			if key_event.keycode == KEY_BRACELEFT:
+				_apply_body_size_tuning(1.0 / BODY_SIZE_TUNING_STEP)
+				get_viewport().set_input_as_handled()
+				return
+			if key_event.keycode == KEY_BRACERIGHT:
+				_apply_body_size_tuning(BODY_SIZE_TUNING_STEP)
 				get_viewport().set_input_as_handled()
 				return
 
-	if active_mode == MODE_FLIGHT and event is InputEventMouseButton and event.pressed:
+	if event is InputEventMouseButton and event.pressed:
 		var mouse_event := event as InputEventMouseButton
+		var step := MAP_WHEEL_STEP if active_mode == MODE_MAP else FLIGHT_WHEEL_STEP
 		if mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			_apply_zoom_step(-4.0)
+			_apply_zoom_step(-step)
 			get_viewport().set_input_as_handled()
 		elif mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_apply_zoom_step(4.0)
+			_apply_zoom_step(step)
 			get_viewport().set_input_as_handled()
 
 
@@ -182,37 +203,81 @@ func _heading_forward() -> Vector3:
 
 
 func _update_zoom(delta: float) -> void:
+	var zoom_in := Input.is_key_pressed(KEY_EQUAL) or Input.is_key_pressed(KEY_PLUS) or Input.is_key_pressed(KEY_KP_ADD)
+	var zoom_out := Input.is_key_pressed(KEY_MINUS) or Input.is_key_pressed(KEY_KP_SUBTRACT)
+	if not zoom_in and not zoom_out:
+		return
+
+	var rate := MAP_ZOOM_UNITS_PER_SECOND if active_mode == MODE_MAP else FLIGHT_ZOOM_UNITS_PER_SECOND
 	var zoom_delta := 0.0
-	if Input.is_key_pressed(KEY_EQUAL) or Input.is_key_pressed(KEY_PLUS) or Input.is_key_pressed(KEY_KP_ADD):
-		zoom_delta -= ZOOM_UNITS_PER_SECOND * delta
-	if Input.is_key_pressed(KEY_MINUS) or Input.is_key_pressed(KEY_KP_SUBTRACT):
-		zoom_delta += ZOOM_UNITS_PER_SECOND * delta
+	if zoom_in:
+		zoom_delta -= rate * delta
+	if zoom_out:
+		zoom_delta += rate * delta
 
 	if zoom_delta != 0.0:
 		_apply_zoom_step(zoom_delta)
 
 
 func _apply_zoom_step(zoom_delta: float) -> void:
-	camera_size = clampf(
-		camera_size + zoom_delta,
-		MIN_FLIGHT_CAMERA_ORTHOGRAPHIC_SIZE,
-		MAX_FLIGHT_CAMERA_ORTHOGRAPHIC_SIZE
-	)
-	if active_mode == MODE_FLIGHT:
-		camera.size = camera_size
+	if active_mode == MODE_MAP:
+		map_camera_size = clampf(
+			map_camera_size + zoom_delta,
+			MIN_MAP_CAMERA_ORTHOGRAPHIC_SIZE,
+			MAX_MAP_CAMERA_ORTHOGRAPHIC_SIZE
+		)
+		camera.size = map_camera_size
+	else:
+		flight_camera_size = clampf(
+			flight_camera_size + zoom_delta,
+			MIN_FLIGHT_CAMERA_ORTHOGRAPHIC_SIZE,
+			MAX_FLIGHT_CAMERA_ORTHOGRAPHIC_SIZE
+		)
+		camera.size = flight_camera_size
+
+
+func _toggle_mode() -> void:
+	_set_active_mode(MODE_FLIGHT if active_mode == MODE_MAP else MODE_MAP)
+
+
+func _apply_body_size_tuning(factor: float) -> void:
+	body_size_multiplier = clampf(body_size_multiplier * factor, 0.05, 64.0)
+	_apply_body_mesh_scales()
+
+
+func _apply_body_mesh_scales() -> void:
+	var in_flight := active_mode == MODE_FLIGHT
+	for body in bodies:
+		var mesh_instance := body.get("mesh") as MeshInstance3D
+		if mesh_instance == null:
+			continue
+		if in_flight:
+			mesh_instance.scale = Vector3.ONE * body_size_multiplier
+		else:
+			mesh_instance.scale = Vector3.ONE * float(body.get("map_scale", 1.0))
 
 
 func _set_active_mode(mode: String) -> void:
 	active_mode = MODE_MAP if mode == MODE_MAP else MODE_FLIGHT
-	if system_root != null:
-		system_root.visible = active_mode == MODE_FLIGHT
-	if map_root != null:
-		map_root.visible = active_mode == MODE_MAP
-	ship_root.visible = active_mode == MODE_FLIGHT
-	if active_mode == MODE_MAP:
+	var in_flight := active_mode == MODE_FLIGHT
+	if ship_model_root != null:
+		ship_model_root.visible = in_flight
+	if main_thrust != null:
+		main_thrust.visible = in_flight
+	for jet in rcs_jets.values():
+		var particle := jet as GPUParticles3D
+		if particle != null:
+			particle.visible = in_flight
+	if map_ship_icon != null:
+		map_ship_icon.visible = not in_flight
+	if flight_grid != null:
+		flight_grid.visible = in_flight
+	if map_grid != null:
+		map_grid.visible = not in_flight
+	if not in_flight:
 		_update_main_thrust(false)
 		_update_rcs_jets(false, false)
-	_update_map_icons()
+	_apply_body_mesh_scales()
 	_update_camera()
 
 
@@ -225,64 +290,22 @@ func _update_camera() -> void:
 
 func _update_flight_camera() -> void:
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.size = camera_size
+	camera.size = flight_camera_size
 	camera.near = 0.05
-	camera.far = 800.0
+	camera.far = FLIGHT_CAMERA_HEIGHT + 200.0
 	camera.current = true
 	camera.global_position = ship_root.global_position + Vector3(0.0, FLIGHT_CAMERA_HEIGHT, 0.0)
 	camera.rotation = Vector3(-PI * 0.5, 0.0, 0.0)
 
 
 func _update_map_camera() -> void:
-	var bounds := _map_bounds()
-	var center := bounds.position + bounds.size * 0.5
-	var viewport_size := get_viewport().get_visible_rect().size
-	var aspect := 1.0
-	if viewport_size.y > 0.0:
-		aspect = maxf(viewport_size.x / viewport_size.y, 0.01)
-
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.size = maxf(
-		MAP_MIN_CAMERA_ORTHOGRAPHIC_SIZE,
-		maxf(bounds.size.y, bounds.size.x / aspect) + MAP_CAMERA_MARGIN
-	)
+	camera.size = map_camera_size
 	camera.near = 0.05
-	camera.far = 900.0
+	camera.far = MAP_CAMERA_HEIGHT + 200.0
 	camera.current = true
-	camera.global_position = Vector3(center.x, MAP_CAMERA_HEIGHT, center.y)
+	camera.global_position = Vector3(0.0, MAP_CAMERA_HEIGHT, 0.0)
 	camera.rotation = Vector3(-PI * 0.5, 0.0, 0.0)
-
-
-func _map_bounds() -> Rect2:
-	var has_position := false
-	var min_position := Vector2.ZERO
-	var max_position := Vector2.ZERO
-
-	for body in bodies:
-		var body_node := body.get("node") as Node3D
-		if body_node != null:
-			var body_position := Vector2(body_node.global_position.x, body_node.global_position.z)
-			if has_position:
-				min_position.x = minf(min_position.x, body_position.x)
-				min_position.y = minf(min_position.y, body_position.y)
-				max_position.x = maxf(max_position.x, body_position.x)
-				max_position.y = maxf(max_position.y, body_position.y)
-			else:
-				min_position = body_position
-				max_position = body_position
-				has_position = true
-
-	var ship_position := Vector2(ship_root.global_position.x, ship_root.global_position.z)
-	if has_position:
-		min_position.x = minf(min_position.x, ship_position.x)
-		min_position.y = minf(min_position.y, ship_position.y)
-		max_position.x = maxf(max_position.x, ship_position.x)
-		max_position.y = maxf(max_position.y, ship_position.y)
-	else:
-		min_position = ship_position
-		max_position = ship_position
-
-	return Rect2(min_position, max_position - min_position)
 
 
 func _configure_world() -> void:
@@ -307,10 +330,11 @@ func _configure_world() -> void:
 
 func _configure_camera() -> void:
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera_size = FLIGHT_CAMERA_ORTHOGRAPHIC_SIZE
-	camera.size = camera_size
+	flight_camera_size = FLIGHT_CAMERA_ORTHOGRAPHIC_SIZE
+	map_camera_size = MAP_CAMERA_INITIAL_SIZE
+	camera.size = flight_camera_size
 	camera.near = 0.05
-	camera.far = 800.0
+	camera.far = FLIGHT_CAMERA_HEIGHT + 200.0
 	camera.current = true
 	camera.position = Vector3(0.0, FLIGHT_CAMERA_HEIGHT, 0.0)
 	camera.rotation = Vector3(-PI * 0.5, 0.0, 0.0)
@@ -318,7 +342,7 @@ func _configure_camera() -> void:
 
 func _configure_hud() -> void:
 	hud_label.position = Vector2(18.0, 18.0)
-	hud_label.size = Vector2(420.0, 88.0)
+	hud_label.size = Vector2(560.0, 96.0)
 	hud_label.add_theme_color_override("font_color", Color(0.78, 0.87, 0.93, 0.9))
 	hud_label.add_theme_font_size_override("font_size", 15)
 
@@ -340,20 +364,28 @@ func _build_playfield() -> void:
 
 
 func _build_reference_grid() -> void:
+	flight_grid = _make_reference_grid("FlightGrid", FLIGHT_GRID_SIZE, FLIGHT_GRID_STEP, Color(0.17, 0.28, 0.35, 0.42))
+	add_child(flight_grid)
+	map_grid = _make_reference_grid("MapGrid", MAP_GRID_SIZE, MAP_GRID_STEP, Color(0.17, 0.28, 0.35, 0.42))
+	map_grid.visible = false
+	add_child(map_grid)
+
+
+func _make_reference_grid(name_: String, size: float, step: float, color: Color) -> MeshInstance3D:
 	var grid := MeshInstance3D.new()
-	grid.name = "ReferenceGrid"
+	grid.name = name_
 
 	var mesh := ImmediateMesh.new()
 	var material := StandardMaterial3D.new()
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	material.albedo_color = Color(0.17, 0.28, 0.35, 0.42)
+	material.albedo_color = color
 
-	var half_size := PLAYFIELD_SIZE * 0.5
+	var half_size := size * 0.5
 	mesh.surface_begin(Mesh.PRIMITIVE_LINES)
-	var line_count := int(PLAYFIELD_SIZE / GRID_STEP)
+	var line_count := int(size / step)
 	for i in range(line_count + 1):
-		var offset := -half_size + GRID_STEP * float(i)
+		var offset := -half_size + step * float(i)
 		mesh.surface_add_vertex(Vector3(offset, -0.04, -half_size))
 		mesh.surface_add_vertex(Vector3(offset, -0.04, half_size))
 		mesh.surface_add_vertex(Vector3(-half_size, -0.04, offset))
@@ -362,7 +394,7 @@ func _build_reference_grid() -> void:
 
 	grid.mesh = mesh
 	grid.material_override = material
-	add_child(grid)
+	return grid
 
 
 func _build_starfield() -> void:
@@ -383,7 +415,7 @@ func _build_starfield() -> void:
 
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 53021940
-	var half_size := PLAYFIELD_SIZE * 0.5
+	var half_size := STAR_FIELD_SIZE * 0.5
 	for i in range(STAR_COUNT):
 		var x := rng.randf_range(-half_size, half_size)
 		var z := rng.randf_range(-half_size, half_size)
@@ -398,74 +430,15 @@ func _build_starfield() -> void:
 	add_child(starfield)
 
 
-func _build_map_icons() -> void:
-	map_root = Node3D.new()
-	map_root.name = "MapRoot"
-	map_root.visible = false
-	add_child(map_root)
-
-	map_body_icons.clear()
-	for body in bodies:
-		var icon := _create_map_body_icon(body)
-		map_root.add_child(icon)
-		map_body_icons[String(body.get("id", ""))] = icon
-
-	map_ship_icon = _create_map_ship_icon()
-	map_root.add_child(map_ship_icon)
-	_update_map_icons()
-
-
-func _create_map_body_icon(body: Dictionary) -> Node3D:
-	var icon_root := Node3D.new()
-	icon_root.name = "%s MapIcon" % String(body.get("name", "Body"))
+func _build_ship_map_icon() -> void:
+	map_ship_icon = Node3D.new()
+	map_ship_icon.name = "ShipMapIcon"
+	map_ship_icon.visible = false
 
 	var mesh_instance := MeshInstance3D.new()
 	mesh_instance.name = "IconMesh"
-	var body_type := String(body.get("type", "planet"))
-	if body_type == "station":
-		var box_mesh := BoxMesh.new()
-		box_mesh.size = Vector3.ONE * (_map_body_icon_radius(body) * 1.65)
-		mesh_instance.mesh = box_mesh
-	else:
-		var sphere_mesh := SphereMesh.new()
-		var radius := _map_body_icon_radius(body)
-		sphere_mesh.radius = radius
-		sphere_mesh.height = radius * 2.0
-		sphere_mesh.radial_segments = 16
-		sphere_mesh.rings = 8
-		mesh_instance.mesh = sphere_mesh
-		mesh_instance.position.y = radius
-
-	var material := StandardMaterial3D.new()
-	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.albedo_color = Color(String(body.get("color", "#ffffff")))
-	material.emission_enabled = body_type == "star"
-	if material.emission_enabled:
-		material.emission = material.albedo_color
-		material.emission_energy_multiplier = 0.65
-	mesh_instance.material_override = material
-
-	icon_root.add_child(mesh_instance)
-	return icon_root
-
-
-func _map_body_icon_radius(body: Dictionary) -> float:
-	var body_type := String(body.get("type", "planet"))
-	if body_type == "star":
-		return 0.72
-	if body_type == "moon":
-		return 0.22
-	if body_type == "station":
-		return 0.30
-	return 0.38
-
-
-func _create_map_ship_icon() -> Node3D:
-	var icon_root := Node3D.new()
-	icon_root.name = "ShipMapIcon"
-
-	var mesh_instance := MeshInstance3D.new()
-	mesh_instance.name = "IconMesh"
+	var icon_scale := maxf(MAP_CAMERA_INITIAL_SIZE * 0.012, 1.0)
+	mesh_instance.scale = Vector3.ONE * icon_scale
 
 	var mesh := ImmediateMesh.new()
 	mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -481,34 +454,22 @@ func _create_map_ship_icon() -> Node3D:
 	material.albedo_color = Color(1.0, 0.84, 0.28)
 	material.emission_enabled = true
 	material.emission = Color(1.0, 0.62, 0.18)
-	material.emission_energy_multiplier = 0.35
+	material.emission_energy_multiplier = 0.45
 	mesh_instance.material_override = material
 
-	icon_root.add_child(mesh_instance)
-	return icon_root
+	map_ship_icon.add_child(mesh_instance)
+	add_child(map_ship_icon)
 
 
-func _update_map_icons() -> void:
-	if map_root == null:
+func _update_ship_map_icon() -> void:
+	if map_ship_icon == null:
 		return
-
-	for body in bodies:
-		var icon := map_body_icons.get(String(body.get("id", ""))) as Node3D
-		var body_node := body.get("node") as Node3D
-		if icon != null and body_node != null:
-			icon.global_position = Vector3(
-				body_node.global_position.x,
-				MAP_ICON_ALTITUDE,
-				body_node.global_position.z
-			)
-
-	if map_ship_icon != null:
-		map_ship_icon.global_position = Vector3(
-			ship_root.global_position.x,
-			MAP_SHIP_ICON_ALTITUDE,
-			ship_root.global_position.z
-		)
-		map_ship_icon.rotation.y = ship_heading
+	map_ship_icon.global_position = Vector3(
+		ship_root.global_position.x,
+		MAP_SHIP_ICON_ALTITUDE,
+		ship_root.global_position.z
+	)
+	map_ship_icon.rotation.y = ship_heading
 
 
 func _load_system(path: String) -> void:
@@ -551,6 +512,8 @@ func _build_body(body_data: Dictionary, parent_index: int) -> void:
 	var body_node := _create_body_node(entry)
 	parent_node.add_child(body_node)
 	entry["node"] = body_node
+	entry["mesh"] = body_node.get_node_or_null("Sphere") as MeshInstance3D
+	entry["map_scale"] = _map_body_scale(float(entry.get("display_radius_units", 0.0)))
 	bodies.append(entry)
 
 	if parent_index >= 0:
@@ -577,7 +540,8 @@ func _create_body_node(body: Dictionary) -> Node3D:
 	mesh.radial_segments = 32 if body_type != "moon" else 16
 	mesh.rings = 16 if body_type != "moon" else 8
 	mesh_instance.mesh = mesh
-	mesh_instance.position.y = radius
+	mesh_instance.position.y = 0.0
+	mesh_instance.scale = Vector3.ONE * body_size_multiplier
 
 	var material := StandardMaterial3D.new()
 	if body_type == "star":
@@ -596,10 +560,11 @@ func _create_body_node(body: Dictionary) -> Node3D:
 	if body_type == "star":
 		var sun_light := OmniLight3D.new()
 		sun_light.name = "SunLight"
-		sun_light.position = Vector3(0.0, 7.0, 0.0)
+		sun_light.position = Vector3.ZERO
 		sun_light.light_color = Color(String(body.get("color", "#ffd166")))
-		sun_light.light_energy = 8.0
-		sun_light.omni_range = 92.0
+		sun_light.light_energy = 10.0
+		sun_light.omni_range = WORLD_UNITS_PER_AU * 12.0
+		sun_light.omni_attenuation = 1.6
 		body_node.add_child(sun_light)
 
 	return body_node
@@ -657,7 +622,10 @@ func _place_ship_near_body(body_id: String) -> void:
 	if body_node == null:
 		return
 
-	ship_root.global_position = body_node.global_position + Vector3(1.25, SHIP_ALTITUDE, 0.85)
+	var body_radius := float(body.get("display_radius_units", 0.4))
+	var offset := maxf(body_radius * 2.0, 2.5)
+	ship_root.global_position = body_node.global_position + Vector3(offset, SHIP_ALTITUDE, offset * 0.7)
+	ship_root.global_position.y = SHIP_ALTITUDE
 	ship_velocity = Vector3.ZERO
 
 
@@ -695,31 +663,22 @@ func _major_axis_vector(body: Dictionary) -> Vector3:
 
 
 func _body_radius_units(body: Dictionary) -> float:
-	var body_type := String(body.get("type", "planet"))
 	var radius_km := maxf(float(body.get("radius_km", 1.0)), 1.0)
+	var factor := STAR_VISIBILITY_FACTOR if String(body.get("type", "")) == "star" else BODY_VISIBILITY_FACTOR
+	return radius_km * BODY_WORLD_UNITS_PER_KM * factor
 
-	if body_type == "star":
-		return 0.82
-	if body_type == "moon":
-		return clampf(0.15 + sqrt(radius_km / 1737.0) * 0.08, 0.15, 0.34)
-	if body_type == "station":
-		return 0.28
-	return clampf(0.28 + sqrt(radius_km / 6371.0) * 0.18, 0.32, 1.25)
+
+func _map_body_scale(physical_radius: float) -> float:
+	if physical_radius <= 0.0:
+		return 1.0
+	var target := clampf(physical_radius * MAP_BODY_SCALE, MAP_MIN_BODY_RADIUS, MAP_MAX_BODY_RADIUS)
+	return target / physical_radius
 
 
 func _orbit_radius_units(body: Dictionary, parent_index: int) -> float:
-	var semi_major_axis_au := _semi_major_axis_au(body)
 	if parent_index < 0:
 		return 0.0
-
-	var parent_body := bodies[parent_index]
-	if String(parent_body.get("type", "")) != "star":
-		var parent_radius := float(parent_body.get("display_radius_units", 0.5))
-		var body_radius := float(body.get("display_radius_units", 0.2))
-		var minimum_radius := parent_radius + body_radius + MIN_LOCAL_ORBIT_RADIUS
-		return maxf(semi_major_axis_au * MOON_AU_TO_WORLD_UNITS, minimum_radius)
-
-	return semi_major_axis_au * AU_TO_WORLD_UNITS
+	return _semi_major_axis_au(body) * WORLD_UNITS_PER_AU
 
 
 func _angular_velocity_rad_per_second(body: Dictionary) -> float:
@@ -871,14 +830,14 @@ func _load_ship_model() -> void:
 	if packed_scene is PackedScene:
 		var model_instance: Node = (packed_scene as PackedScene).instantiate()
 		if model_instance is Node3D:
-			var visual_root := Node3D.new()
-			visual_root.name = "CanaryVisual"
-			visual_root.rotation.y = MODEL_YAW_OFFSET
-			ship_root.add_child(visual_root)
+			ship_model_root = Node3D.new()
+			ship_model_root.name = "CanaryVisual"
+			ship_model_root.rotation.y = MODEL_YAW_OFFSET
+			ship_root.add_child(ship_model_root)
 
 			ship_model = model_instance as Node3D
 			ship_model.name = "Canary"
-			visual_root.add_child(ship_model)
+			ship_model_root.add_child(ship_model)
 			_fit_ship_model(ship_model)
 			return
 
@@ -915,6 +874,10 @@ func _fit_ship_model(model_root: Node3D) -> void:
 
 
 func _create_placeholder_ship() -> void:
+	ship_model_root = Node3D.new()
+	ship_model_root.name = "PlaceholderShipRoot"
+	ship_root.add_child(ship_model_root)
+
 	var placeholder := MeshInstance3D.new()
 	placeholder.name = "PlaceholderShip"
 
@@ -927,7 +890,7 @@ func _create_placeholder_ship() -> void:
 	material.metallic = 0.15
 	material.roughness = 0.42
 	placeholder.material_override = material
-	ship_root.add_child(placeholder)
+	ship_model_root.add_child(placeholder)
 
 
 func _update_main_thrust(forward_thrust: bool) -> void:
@@ -957,21 +920,23 @@ func _set_rcs_emitting(jet_id: String, emitting: bool) -> void:
 
 func _update_hud() -> void:
 	var speed := ship_velocity.length()
+	var body_factor := BODY_VISIBILITY_FACTOR * body_size_multiplier
 	if active_mode == MODE_MAP:
-		hud_label.text = "Dark Qualms map prototype\n%s\nVelocity  %.1f u/s\nShip      %.1f, %.1f\nOrbitals  %d\nZoom      %.0f" % [
+		hud_label.text = "%s — map view\nShip   %.1f, %.1f u\nBodies %d   Body× %.0f\nZoom   %.0f u   (M: flight  wheel/+-: zoom  {/}: bodies)" % [
 			system_name,
-			speed,
 			ship_root.position.x,
 			ship_root.position.z,
 			bodies.size(),
+			body_factor,
 			camera.size
 		]
 		return
 
-	hud_label.text = "Dark Qualms flight prototype\n%s\nVelocity  %.1f u/s\nPosition  %.1f, %.1f\nZoom      %.0f" % [
+	hud_label.text = "%s — flight\nVelocity %.1f u/s\nPosition %.1f, %.1f u\nBody× %.0f   Zoom %.0f u   (M: map  arrows: fly  wheel/+-: zoom  {/}: bodies)" % [
 		system_name,
 		speed,
 		ship_root.position.x,
 		ship_root.position.z,
+		body_factor,
 		camera.size
 	]
