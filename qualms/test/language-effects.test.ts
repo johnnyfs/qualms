@@ -72,6 +72,48 @@ describe("engine-tracked effects", () => {
     expect(blocked.effects).toEqual([]);
   });
 
+  it("rolls back action body effects when a later statement fails", () => {
+    const model = loadStoryProgram(`
+      trait Thing
+      relation Marked(Thing)
+      relation Allowed(Thing)
+      action Mark(target: Thing) {
+        set Marked(target)
+        when (Allowed(target)) {
+          succeed;
+        }
+      }
+      entity Widget { Thing }
+    `);
+
+    const failed = playLanguageCall(model, "Mark(Widget)");
+    expect(failed.status).toBe("failed");
+    expect(failed.effects).toEqual([]);
+    expect(model.hasFact("Marked", [idTerm("Widget")])).toBe(false);
+  });
+
+  it("rolls back action body effects when an after rule fails", () => {
+    const model = loadStoryProgram(`
+      trait Thing
+      relation Marked(Thing)
+      relation Blocked(Thing)
+      action Mark(target: Thing) {
+        set Marked(target)
+      }
+      after Mark(target: Thing) {
+        when (!Blocked(target)) {
+          fail;
+        }
+      }
+      entity Widget { Thing }
+    `);
+
+    const failed = playLanguageCall(model, "Mark(Widget)");
+    expect(failed.status).toBe("failed");
+    expect(failed.effects).toEqual([]);
+    expect(model.hasFact("Marked", [idTerm("Widget")])).toBe(false);
+  });
+
   it("model.apply returns set/retract effects from a program", () => {
     const model = new StoryModel();
     model.apply(parseProgram(`

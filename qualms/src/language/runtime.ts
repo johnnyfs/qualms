@@ -44,11 +44,13 @@ export function playLanguageCall(model: StoryModel, call: string | RelationAtom)
   if (!callable) return failResult([`!${emitRelationAtom(atom, {})}`], []);
 
   const args = atom.args.map(groundTermFromTerm);
+  const working = model.clone();
   const effects: Effect[] = [];
-  const result = executeCallable(model, callable, args, "action", effects);
-  return result.status === "passed"
-    ? { status: "passed", feedback: "succeed;", reasons: [], effects }
-    : failResult(result.reasons, effects);
+  const result = executeCallable(working, callable, args, "action", effects);
+  if (result.status !== "passed") return failResult(result.reasons, []);
+
+  commitEffects(model, effects);
+  return { status: "passed", feedback: "succeed;", reasons: [], effects };
 }
 
 export function evalLanguageAtom(model: StoryModel, call: string | RelationAtom): LanguagePlayResult {
@@ -98,14 +100,6 @@ function executeCallable(
     }
 
     if (mode === "action") {
-      // `on` rules fire after a successful body and may preempt the action
-      // by failing. They are the right home for validation that depends on
-      // the action having got this far (e.g. checking carry-state for a
-      // chosen offer). The engine has no transactional rollback, so on-rules
-      // should fail before issuing any set-effects of their own.
-      const onPhase = runRules(model, "on", callable.id, args, effects);
-      if (onPhase.status === "failed" && onPhase.terminal === "fail") return onPhase;
-
       const after = runRules(model, "after", callable.id, args, effects);
       if (after.status === "failed" && after.terminal === "fail") return after;
     }
@@ -121,7 +115,7 @@ function executeCallable(
 
 function runRules(
   model: StoryModel,
-  phase: "before" | "after" | "on",
+  phase: "before" | "after",
   target: string,
   args: readonly GroundTerm[],
   effects: Effect[],
@@ -242,6 +236,13 @@ function applySet(model: StoryModel, statement: SetStatement, env: Env, effects:
     if (setEffect.polarity === "assert") model.assertFact(fact);
     else model.retractFact(fact);
     effects.push({ polarity: setEffect.polarity, fact });
+  }
+}
+
+function commitEffects(model: StoryModel, effects: readonly Effect[]): void {
+  for (const effect of effects) {
+    if (effect.polarity === "assert") model.assertFact(effect.fact);
+    else model.retractFact(effect.fact);
   }
 }
 
