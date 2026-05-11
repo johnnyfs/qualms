@@ -15,13 +15,13 @@ describe("tutorial language parser", () => {
     const program = parseProgram(source);
 
     expect(program.statements.filter((s) => s.kind === "trait")).toHaveLength(10);
-    expect(program.statements.filter((s) => s.kind === "relation")).toHaveLength(10);
+    expect(program.statements.filter((s) => s.kind === "relation")).toHaveLength(12);
     expect(program.statements.filter((s) => s.kind === "predicate")).toHaveLength(3);
-    expect(program.statements.filter((s) => s.kind === "action")).toHaveLength(10);
-    expect(program.statements.filter((s) => s.kind === "rule")).toHaveLength(10);
-    expect(program.statements.filter((s) => s.kind === "entity")).toHaveLength(14);
+    expect(program.statements.filter((s) => s.kind === "action")).toHaveLength(11);
+    expect(program.statements.filter((s) => s.kind === "rule")).toHaveLength(12);
+    expect(program.statements.filter((s) => s.kind === "entity")).toHaveLength(19);
     expect(program.statements.filter((s) => s.kind === "extend")).toHaveLength(3);
-    expect(program.statements.filter((s) => s.kind === "set")).toHaveLength(7);
+    expect(program.statements.filter((s) => s.kind === "set")).toHaveLength(8);
   });
 
   it("parses constrained action parameters", () => {

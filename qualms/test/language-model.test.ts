@@ -22,12 +22,14 @@ describe("tutorial language model", () => {
     const model = loadStoryProgram(source);
 
     expect(model.traits.size).toBe(10);
-    expect(model.relations.size).toBe(10);
+    expect(model.relations.size).toBe(12);
     expect(model.predicates.size).toBe(3);
-    expect(model.actions.size).toBe(9);
-    expect(model.rules).toHaveLength(10);
-    expect(model.entities.size).toBe(14);
-    expect(model.listFacts()).toHaveLength(22);
+    expect(model.actions.size).toBe(10);
+    expect(model.rules).toHaveLength(12);
+    expect(model.entities.size).toBe(19);
+    expect(model.listFacts()).toHaveLength(27);
+    expect(model.hasFact("TalksAbout", [idTerm("Guard"), idTerm("Bribery")])).toBe(false);
+    expect(model.hasFact("TalksAbout", [idTerm("Guard"), idTerm("Whatever")])).toBe(true);
 
     expect(model.entityTraits("Bars")).toEqual(
       new Set(["Describable", "Locatable", "Openable", "Lockable"]),

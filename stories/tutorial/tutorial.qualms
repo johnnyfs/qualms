@@ -283,3 +283,58 @@ entity Checkers { Topic }
 set {
   TalksAbout(Guard, Bribery);
 }
+
+-- (8) Extend to conversation trees.
+-- Introduces: a `one`-cardinality state relation (InConversation) tracking the
+-- current conversation topic per (Actor, Speaker), a `LeadsTo` adjacency over
+-- topics, and a before-rule whose parameter constraint binds the current
+-- topic — making the rule fire only when a conversation is already in
+-- progress. Top-level topics (those TalksAbout) still pass through the (7)
+-- action body; sub-topics short-circuit here and advance the conversation.
+
+relation InConversation(Actor, Speaker, one Topic)
+relation LeadsTo(Speaker, Topic, Topic)
+
+-- Note: the fresh variable is named `current` (not `topic`) because the
+-- enclosing action TalkAbout already binds `topic` to its third argument;
+-- reusing the name would shadow it and the constraint would never find a
+-- matching InConversation fact.
+before TalkAbout(
+  actor: Actor,
+  speaker: Speaker { InConversation(actor, speaker, current) },
+  subTopic: Topic
+) {
+  when (IsVisibleTo(actor, speaker) & LeadsTo(speaker, current, subTopic)) {
+    set InConversation(actor, speaker, subTopic);
+    pass;
+  }
+}
+
+-- Entry case: a top-level TalkAbout passed (7)'s body; record the current
+-- topic. Sub-topic walks set InConversation inline in the before rule above,
+-- so the `one Topic` cardinality on InConversation handles displacement.
+after TalkAbout(actor: Actor, speaker: Speaker, topic: Topic) {
+  set InConversation(actor, speaker, topic);
+}
+
+action StopTalking(actor: Actor, speaker: Speaker) {
+  when (InConversation(actor, speaker, topic)) {
+    set !InConversation(actor, speaker, topic);
+  }
+}
+
+entity Whatever { Topic }
+entity Weather { Topic }
+entity OfferMoney { Topic }
+entity OfferAFavor { Topic }
+entity BriberyIsWrong { Topic }
+
+set {
+  !TalksAbout(Guard, Bribery);
+  TalksAbout(Guard, Whatever);
+  LeadsTo(Guard, Whatever, Bribery);
+  LeadsTo(Guard, Whatever, Weather);
+  LeadsTo(Guard, Bribery, OfferMoney);
+  LeadsTo(Guard, Bribery, OfferAFavor);
+  LeadsTo(Guard, Bribery, BriberyIsWrong);
+}
