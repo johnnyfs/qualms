@@ -70,7 +70,12 @@ function executeCallable(
     if (before.status === "passed" && before.terminal === "pass") return before;
 
     const body = executeBlock(model, callable.body, env);
-    if (body.status !== "passed") return body;
+    if (body.status !== "passed") {
+      if (before.reasons.length > 0) {
+        return { ...body, reasons: [...body.reasons, ...before.reasons] };
+      }
+      return body;
+    }
 
     if (mode === "action") {
       const after = runRules(model, "after", callable.id, args, body.env);
@@ -93,6 +98,7 @@ function runRules(
   args: readonly GroundTerm[],
   env: Env,
 ): BlockResult {
+  const noMatchReasons: string[] = [];
   for (const rule of model.rules) {
     if (rule.phase !== phase || rule.target !== target) continue;
     const bound = bindParameters(model, rule.parameters, args, env);
@@ -100,9 +106,23 @@ function runRules(
       const outcome = executeRuleBlock(model, rule, ruleEnv);
       if (outcome.status === "failed" && outcome.terminal === "fail") return outcome;
       if (outcome.status === "passed" && outcome.terminal === "pass") return outcome;
+      // Surface only would-have-rescued reasons: a pass-rule whose when failed
+      // contributes useful failure context. A fail-rule whose when failed is a
+      // non-event (the rule wasn't meant to fire) and would be noise.
+      if (outcome.status === "failed" && blockHasPass(rule.body)) {
+        noMatchReasons.push(...outcome.reasons);
+      }
     }
   }
-  return { status: "no_match", env, reasons: [] };
+  return { status: "no_match", env, reasons: noMatchReasons };
+}
+
+function blockHasPass(block: Block): boolean {
+  for (const statement of block.statements) {
+    if (statement.kind === "pass") return true;
+    if (statement.kind === "when" && blockHasPass(statement.body)) return true;
+  }
+  return false;
 }
 
 function executeRuleBlock(model: StoryModel, _rule: RuleStatement, env: Env): BlockResult {
@@ -336,6 +356,7 @@ function matchesType(model: StoryModel, value: GroundTerm, type: TypeExpr): bool
   if (type.kind === "intersection") {
     return type.types.every((inner) => matchesType(model, value, inner));
   }
+  if (type.id === "Any") return true;
   if (model.traits.has(type.id)) {
     return value.kind === "id" && model.entities.get(value.id)?.has(type.id) === true;
   }

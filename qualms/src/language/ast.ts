@@ -32,6 +32,7 @@ export interface CallableStatement {
   readonly id: string;
   readonly parameters: readonly ParameterPattern[];
   readonly body: Block;
+  readonly replace?: boolean;
 }
 
 export interface RuleStatement {

@@ -108,7 +108,8 @@ function emitRelationParameter(parameter: RelationParameter): string {
 }
 
 function emitCallable(statement: CallableStatement): string {
-  return `${statement.kind} ${statement.id}(${statement.parameters.map(emitParameter).join(", ")}) ${emitBlock(statement.body)}`;
+  const prefix = statement.replace ? "replace " : "";
+  return `${prefix}${statement.kind} ${statement.id}(${statement.parameters.map(emitParameter).join(", ")}) ${emitBlock(statement.body)}`;
 }
 
 function emitRule(statement: RuleStatement): string {

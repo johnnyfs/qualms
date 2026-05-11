@@ -223,6 +223,7 @@ class Parser {
   private topLevelStatement(): TopLevelStatement {
     if (this.matchKeyword("trait")) return this.traitStatement();
     if (this.matchKeyword("relation")) return this.relationStatement();
+    if (this.matchKeyword("replace")) return this.replaceStatement();
     if (this.matchKeyword("action")) return this.callableStatement("action");
     if (this.matchKeyword("predicate")) return this.callableStatement("predicate");
     if (this.matchKeyword("before")) return this.ruleStatement("before");
@@ -231,6 +232,17 @@ class Parser {
     if (this.matchKeyword("extend")) return this.extendStatement();
     if (this.matchKeyword("set")) return this.setStatement();
     this.fail(`expected top-level statement, got '${this.peek().image}'`);
+  }
+
+  private replaceStatement(): CallableStatement {
+    this.expectKeyword("replace");
+    if (this.matchKeyword("action")) {
+      return { ...this.callableStatement("action"), replace: true };
+    }
+    if (this.matchKeyword("predicate")) {
+      return { ...this.callableStatement("predicate"), replace: true };
+    }
+    this.fail(`expected 'action' or 'predicate' after 'replace', got '${this.peek().image}'`);
   }
 
   private traitStatement(): TraitStatement {

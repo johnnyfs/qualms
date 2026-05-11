@@ -61,10 +61,10 @@ export class StoryModel {
           this.addUnique(this.relations, statement.id, statement, "relation");
           break;
         case "predicate":
-          this.addUnique(this.predicates, statement.id, statement, "predicate");
+          this.addCallable(this.predicates, statement, "predicate");
           break;
         case "action":
-          this.addUnique(this.actions, statement.id, statement, "action");
+          this.addCallable(this.actions, statement, "action");
           break;
         case "rule":
           this.rules.push(statement);
@@ -140,6 +140,23 @@ export class StoryModel {
   private addUnique<T>(map: Map<string, T>, id: string, value: T, kind: string): void {
     if (map.has(id)) throw new LanguageModelError(`duplicate ${kind} '${id}'`);
     map.set(id, value);
+  }
+
+  private addCallable(
+    map: Map<string, CallableStatement>,
+    statement: CallableStatement,
+    kind: string,
+  ): void {
+    if (statement.replace) {
+      if (!map.has(statement.id)) {
+        throw new LanguageModelError(
+          `replace ${kind} '${statement.id}' has no prior definition`,
+        );
+      }
+      map.set(statement.id, statement);
+      return;
+    }
+    this.addUnique(map, statement.id, statement, kind);
   }
 
   private requireTrait(id: string): void {
