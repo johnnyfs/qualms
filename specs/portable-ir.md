@@ -13,7 +13,8 @@ type Program = { statements: Statement[] };
 
 type Statement =
   | { kind: "trait"; id: string }
-  | { kind: "relation"; id: string; parameters: RelationParameter[] }
+  | { kind: "relation"; id: string; parameters: RelationParameter[]; unique?: string[] }
+  | { kind: "externPredicate"; id: string; parameters: Parameter[] }
   | { kind: "action" | "predicate"; id: string; parameters: Parameter[]; body: Block; replace?: boolean }
   | { kind: "rule"; phase: "before" | "after"; target: string; parameters: Parameter[]; body: Block }
   | { kind: "entity"; id: string; traits: string[] }
@@ -40,6 +41,7 @@ type GroundTerm =
 
 type Fact = { relation: string; args: GroundTerm[] };
 type Effect = { polarity: "assert" | "retract"; fact: Fact };
+type Event = { event: string; args: GroundTerm[] };
 ```
 
 Fact identity is structural: relation id plus structurally equal argument list.
@@ -52,7 +54,8 @@ authoring order is significant.
 A loaded world model contains:
 
 - `traits`: declared trait ids.
-- `relations`: declared relation signatures and cardinality constraints.
+- `relations`: declared relation signatures and uniqueness/cardinality constraints.
+- `externalPredicates`: pure host-adapter predicate signatures.
 - `predicates`: pure callable definitions.
 - `actions`: mutating callable definitions.
 - `rules`: ordered rule declarations.
@@ -69,8 +72,8 @@ targets.
 A compliant interpreter must provide these operations:
 
 - `load(programs) -> World | Error`: apply programs in order.
-- `query(world, expression) -> QueryResult`: pure expression evaluation.
-- `play(world, actionCall) -> ActionResult`: atomic action execution.
+- `query(world, expression, host?) -> QueryResult`: pure expression evaluation.
+- `play(world, actionCall, host?) -> ActionResult`: atomic action execution.
 - `mutate(world, programFragment) -> World | Error`: apply top-level
   declarations/effects to a candidate world.
 - `validate(world) -> ValidationResult`: run all validation declarations.
@@ -78,14 +81,40 @@ A compliant interpreter must provide these operations:
   output.
 
 `query` and validation evaluation must not mutate `world`. `play` stages effects
-against a candidate world and commits them only when the action body and all
-applicable `after` rules pass.
+and events against a candidate world and commits/returns them only when the
+action body and all applicable `after` rules pass.
+
+Action results must expose both human-readable and structured data:
+
+```ts
+type ActionResult = {
+  status: "passed" | "failed";
+  feedback: string;
+  reasons: string[];
+  effects: Effect[];
+  events: Event[];
+  failures: Failure[];
+};
+
+type Failure = {
+  kind: "unknown_action" | "action_failed" | "condition" | "terminal";
+  message: string;
+  callable?: string;
+};
+```
 
 ## Host Simulation Boundary
 
-The portable story contract does not call arbitrary host methods. If host
-simulation state is needed, it should be exposed as a pure adapter relation or
-predicate with a declared signature, deterministic result for the current host
-tick, and no side effects. The adapter boundary is intentionally outside the
-core language so the same story program can be replayed and conformance-tested
-without a specific game engine.
+The portable story contract does not call arbitrary host methods. Host
+simulation state is exposed through declared `extern predicate` signatures and
+an adapter object supplied to `query`, `play`, and validation calls.
+
+Adapter requirements:
+
+- Inputs are the predicate id and a fully grounded argument list.
+- Results are deterministic booleans for the current host tick/frame.
+- Adapter calls must be pure: no story-model mutation and no simulation
+  mutation.
+- Missing adapters or unresolved arguments evaluate as no match.
+- Conformance tests that depend on adapters must provide replay fixtures that
+  map `(predicate, args)` to booleans.

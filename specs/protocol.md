@@ -97,9 +97,9 @@ sequenceDiagram
   Server-->>Client: { kind: "summary", counts, facts: FactRecord[] }
 ```
 
-`counts` covers `traits`, `relations`, `predicates`, `actions`, `rules`,
-`validations`, `entities`, `facts`. Each `FactRecord` carries structured `args` plus a
-ready-to-print `text` form.
+`counts` covers `traits`, `relations`, `externalPredicates`, `predicates`,
+`actions`, `rules`, `validations`, `entities`, `facts`. Each `FactRecord`
+carries structured `args` plus a ready-to-print `text` form.
 
 ### 2.2 `query` — show mode
 
@@ -124,9 +124,10 @@ sequenceDiagram
   Server-->>Client: { kind: "show", targetKind, name?, definitions, count, text }
 ```
 
-`targetKind` recognises any AST kind that the emitter produces:
-`trait`, `relation`, `predicate`, `action`, `rule`, `entity`, `set`, and
-`validation`. The sentinel value `"all"` is returned when `<kind>` is omitted.
+`targetKind` recognises any AST kind that the emitter produces: `trait`,
+`relation`, `externPredicate`, `predicate`, `action`, `rule`, `entity`, `set`,
+and `validation`. The sentinel value `"all"` is returned when `<kind>` is
+omitted.
 
 ### 2.3 `query` — expression mode
 
@@ -148,20 +149,16 @@ sequenceDiagram
     Server-->>Client: error "[parse] <message>"
   else parsed
     Parser-->>Server: Expression
-    Server->>Server: knownEntityBindings(model, expression)
-    Server->>Runtime: evalExpression(model, expression, baseEnv)
+    Server->>Runtime: evalExpression(model, expression, {})
     Runtime-->>Server: Env[]
-    Server->>Server: formatRow(env, baseEnv) for each match
+    Server->>Server: formatRow(env) for each match
     Server-->>Client: { kind: "query", expr, rows, count, text }
   end
 ```
 
-`knownEntityBindings` pre-binds any identifier referenced in the
-expression that also names a declared entity. This lets callers write
-`At(Player, Cell)` directly without explicit binding; identifiers that do
-not name an entity remain free and may be bound by the match. `formatRow`
-elides bindings that match the pre-bound base env so the result rows
-contain only the *new* bindings discovered by the query.
+Bare identifiers in query expressions are ground ids. Free query bindings must
+use explicit variable terms such as `?where`; result rows contain the explicit
+variables bound by evaluation.
 
 Evaluation errors during `evalExpression` propagate as
 `QueryError(category: "evaluate")`.
@@ -356,7 +353,7 @@ sequenceDiagram
     else parsed
       Runtime->>Model: actions.get(atom.relation)
       alt action unknown
-        Runtime-->>Server: { status: "failed", feedback: "fail { !Foo(...); }", reasons: ["!Foo(...)"] }
+        Runtime-->>Server: { status: "failed", feedback, reasons, effects: [], events: [], failures }
       else action found
         Runtime->>Runtime: executeCallable(action, args, "action", {})
         Note over Runtime: bind parameters, run before rules,<br/>execute body, run after rules
@@ -364,16 +361,17 @@ sequenceDiagram
       end
     end
     deactivate Runtime
-    Server-->>Client: { call, status, feedback, reasons }
+    Server-->>Client: { call, status, feedback, reasons, effects, events, failures }
   end
 ```
 
 `play` reads the live model but executes atomically against a cloned candidate
 model. If the action body and applicable `after` rules pass, the returned
-effects are committed to the live model in order. If the body or an `after`
-rule fails, no staged effects are committed. If a transaction is open, committed
-play effects are still part of the live transaction state and can be reverted by
-rolling that transaction back.
+effects are committed to the live model in order and emitted events are
+returned to the client. If the body or an `after` rule fails, no staged effects
+are committed and no staged events are returned. If a transaction is open,
+committed play effects are still part of the live transaction state and can be
+reverted by rolling that transaction back.
 
 ### 4.1 Callable evaluation detail
 

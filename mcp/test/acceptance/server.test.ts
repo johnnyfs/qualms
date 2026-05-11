@@ -80,7 +80,7 @@ describe("MCP server for the current Qualms DSL", () => {
     const sessionId = (start.structuredContent as { sessionId: string }).sessionId;
     const result = await call(client, "query", {
       sessionId,
-      expr: "LockedWith(Bars, key)",
+      expr: "LockedWith(Bars, ?key)",
     });
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent).toMatchObject({
