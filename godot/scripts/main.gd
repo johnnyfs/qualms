@@ -4,8 +4,9 @@ const MODE_FLIGHT := "flight"
 const MODE_MAP := "map"
 const SHIP_MODEL_PATH := "res://assets/ships/canary/canary.glb"
 const SYSTEM_DATA_PATH := "res://data/sol_like_system.json"
-const SHIP_ALTITUDE := 100.0
+const SHIP_ALTITUDE := 0.0
 const SHIP_DISPLAY_SIZE := 3.2
+const SHIP_OVERLAY_RENDER_PRIORITY := 50
 const KM_PER_AU := 149597870.7
 const WORLD_UNITS_PER_AU := 640.0
 const BODY_WORLD_UNITS_PER_KM := 2.6738668e-7
@@ -23,7 +24,7 @@ const MAP_CAMERA_HEIGHT := 5000.0
 const MAP_CAMERA_INITIAL_SIZE := 56000.0
 const MIN_MAP_CAMERA_ORTHOGRAPHIC_SIZE := 6400.0
 const MAX_MAP_CAMERA_ORTHOGRAPHIC_SIZE := 70000.0
-const MAP_SHIP_ICON_ALTITUDE := 110.0
+const MAP_SHIP_ICON_ALTITUDE := 0.0
 const FLIGHT_ZOOM_UNITS_PER_SECOND := 120.0
 const MAP_ZOOM_UNITS_PER_SECOND := 30000.0
 const FLIGHT_WHEEL_STEP := 10.0
@@ -339,6 +340,26 @@ func _view_basis() -> Basis:
 	return yaw_basis * pitch_basis
 
 
+func _apply_overlay_flags(material: BaseMaterial3D) -> void:
+	# Ship visuals share the orbital plane (y=0) with bodies — draw them as an
+	# overlay so they always appear on top regardless of camera angle / depth.
+	material.no_depth_test = true
+	material.render_priority = SHIP_OVERLAY_RENDER_PRIORITY
+
+
+func _apply_overlay_to_subtree(root: Node) -> void:
+	for child in root.find_children("*", "MeshInstance3D", true, false):
+		var mi := child as MeshInstance3D
+		if mi.mesh == null:
+			continue
+		for surface_idx in range(mi.mesh.get_surface_count()):
+			var mat := mi.get_active_material(surface_idx)
+			if mat is BaseMaterial3D:
+				var dup := (mat as BaseMaterial3D).duplicate() as BaseMaterial3D
+				_apply_overlay_flags(dup)
+				mi.set_surface_override_material(surface_idx, dup)
+
+
 func _align_grids_to_view(focal: Vector3) -> void:
 	# Keep grids unaffected by view angle by orienting them perpendicular to the camera —
 	# the grid pattern looks the same on screen regardless of pitch/yaw. Other things in
@@ -498,6 +519,7 @@ func _build_ship_map_icon() -> void:
 	material.emission_enabled = true
 	material.emission = Color(1.0, 0.62, 0.18)
 	material.emission_energy_multiplier = 0.45
+	_apply_overlay_flags(material)
 	mesh_instance.material_override = material
 
 	map_ship_icon.add_child(mesh_instance)
@@ -754,6 +776,7 @@ func _build_main_thrust() -> void:
 	particle_material.emission_enabled = true
 	particle_material.emission = Color(0.34, 0.82, 1.0)
 	particle_material.emission_energy_multiplier = 1.25
+	_apply_overlay_flags(particle_material)
 	particle_mesh.material = particle_material
 
 	var process_material := ParticleProcessMaterial.new()
@@ -823,6 +846,7 @@ func _create_rcs_jet(jet_name: String, local_position: Vector3, direction: Vecto
 	particle_material.emission_enabled = true
 	particle_material.emission = Color.WHITE
 	particle_material.emission_energy_multiplier = 0.75
+	_apply_overlay_flags(particle_material)
 	particle_mesh.material = particle_material
 
 	var process_material := ParticleProcessMaterial.new()
@@ -883,6 +907,7 @@ func _load_ship_model() -> void:
 			ship_model.name = "Canary"
 			ship_model_root.add_child(ship_model)
 			_fit_ship_model(ship_model)
+			_apply_overlay_to_subtree(ship_model)
 			return
 
 	push_warning("Could not load ship model at %s. Using placeholder mesh." % SHIP_MODEL_PATH)
@@ -933,6 +958,7 @@ func _create_placeholder_ship() -> void:
 	material.albedo_color = Color(0.95, 0.82, 0.28)
 	material.metallic = 0.15
 	material.roughness = 0.42
+	_apply_overlay_flags(material)
 	placeholder.material_override = material
 	ship_model_root.add_child(placeholder)
 
