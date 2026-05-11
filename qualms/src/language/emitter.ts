@@ -33,6 +33,13 @@ export function emitStoryModel(model: StoryModel): string {
   return emitProgram(programFromModel(model));
 }
 
+export function emitFact(fact: Fact): string {
+  return emitRelationAtom({
+    relation: fact.relation,
+    args: fact.args.map(termFromGround),
+  });
+}
+
 export function programFromModel(model: StoryModel): Program {
   const statements: TopLevelStatement[] = [
     ...model.traits.values(),

@@ -23,6 +23,11 @@ export interface Fact {
   readonly args: readonly GroundTerm[];
 }
 
+export interface Effect {
+  readonly polarity: "assert" | "retract";
+  readonly fact: Fact;
+}
+
 export class LanguageModelError extends Error {
   constructor(message: string) {
     super(message);
@@ -51,7 +56,8 @@ export class StoryModel {
     return clone;
   }
 
-  apply(program: Program): void {
+  apply(program: Program): Effect[] {
+    const effects: Effect[] = [];
     for (const statement of program.statements) {
       switch (statement.kind) {
         case "trait":
@@ -76,10 +82,11 @@ export class StoryModel {
           this.extendEntity(statement);
           break;
         case "set":
-          this.applySet(statement.effects);
+          this.applySet(statement.effects, effects);
           break;
       }
     }
+    return effects;
   }
 
   hasFact(relation: string, args: readonly GroundTerm[]): boolean {
@@ -129,11 +136,12 @@ export class StoryModel {
     }
   }
 
-  private applySet(effects: readonly SetEffect[]): void {
-    for (const effect of effects) {
-      const fact = factFromAtom(effect.atom);
-      if (effect.polarity === "assert") this.assertFact(fact);
+  private applySet(setEffects: readonly SetEffect[], sink: Effect[]): void {
+    for (const setEffect of setEffects) {
+      const fact = factFromAtom(setEffect.atom);
+      if (setEffect.polarity === "assert") this.assertFact(fact);
       else this.retractFact(fact);
+      sink.push({ polarity: setEffect.polarity, fact });
     }
   }
 
