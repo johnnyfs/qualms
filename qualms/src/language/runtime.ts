@@ -12,6 +12,7 @@ import type {
   WhenStatement,
 } from "./ast.js";
 import {
+  type Effect,
   type Fact,
   type GroundTerm,
   StoryModel,
@@ -27,6 +28,7 @@ export interface LanguagePlayResult {
   readonly status: "passed" | "failed";
   readonly feedback: string;
   readonly reasons: readonly string[];
+  readonly effects: readonly Effect[];
 }
 
 interface BlockResult {
@@ -39,13 +41,27 @@ interface BlockResult {
 export function playLanguageCall(model: StoryModel, call: string | RelationAtom): LanguagePlayResult {
   const atom = typeof call === "string" ? parseRelationAtom(call) : call;
   const callable = model.actions.get(atom.relation);
-  if (!callable) return failResult([`!${emitRelationAtom(atom, {})}`]);
+  if (!callable) return failResult([`!${emitRelationAtom(atom, {})}`], []);
 
   const args = atom.args.map(groundTermFromTerm);
-  const result = executeCallable(model, callable, args, "action", {});
+  const effects: Effect[] = [];
+  const result = executeCallable(model, callable, args, "action", {}, effects);
   return result.status === "passed"
-    ? { status: "passed", feedback: "pass;", reasons: [] }
-    : failResult(result.reasons);
+    ? { status: "passed", feedback: "pass;", reasons: [], effects }
+    : failResult(result.reasons, effects);
+}
+
+export function evalLanguageAtom(model: StoryModel, call: string | RelationAtom): LanguagePlayResult {
+  const atom = typeof call === "string" ? parseRelationAtom(call) : call;
+  if (model.actions.has(atom.relation)) return playLanguageCall(model, atom);
+
+  const expression: Expression = { kind: "relation", atom };
+  const effects: Effect[] = [];
+  const matches = evalExpression(model, expression, {}, effects);
+  if (matches.length > 0) {
+    return { status: "passed", feedback: "pass;", reasons: [], effects };
+  }
+  return failResult(explainExpression(model, expression, {}), effects);
 }
 
 function executeCallable(
@@ -54,8 +70,9 @@ function executeCallable(
   args: readonly GroundTerm[],
   mode: "action" | "predicate",
   baseEnv: Env,
+  effects: Effect[],
 ): BlockResult {
-  const bound = bindParameters(model, callable.parameters, args, baseEnv);
+  const bound = bindParameters(model, callable.parameters, args, baseEnv, effects);
   if (bound.length === 0) {
     return {
       status: "failed",
@@ -65,11 +82,11 @@ function executeCallable(
   }
 
   for (const env of bound) {
-    const before = runRules(model, "before", callable.id, args, env);
+    const before = runRules(model, "before", callable.id, args, env, effects);
     if (before.status === "failed" && before.terminal === "fail") return before;
     if (before.status === "passed" && before.terminal === "pass") return before;
 
-    const body = executeBlock(model, callable.body, env);
+    const body = executeBlock(model, callable.body, env, effects);
     if (body.status !== "passed") {
       if (before.reasons.length > 0) {
         return { ...body, reasons: [...body.reasons, ...before.reasons] };
@@ -78,7 +95,7 @@ function executeCallable(
     }
 
     if (mode === "action") {
-      const after = runRules(model, "after", callable.id, args, body.env);
+      const after = runRules(model, "after", callable.id, args, body.env, effects);
       if (after.status === "failed" && after.terminal === "fail") return after;
     }
     return body;
@@ -97,13 +114,14 @@ function runRules(
   target: string,
   args: readonly GroundTerm[],
   env: Env,
+  effects: Effect[],
 ): BlockResult {
   const noMatchReasons: string[] = [];
   for (const rule of model.rules) {
     if (rule.phase !== phase || rule.target !== target) continue;
-    const bound = bindParameters(model, rule.parameters, args, env);
+    const bound = bindParameters(model, rule.parameters, args, env, effects);
     for (const ruleEnv of bound) {
-      const outcome = executeRuleBlock(model, rule, ruleEnv);
+      const outcome = executeRuleBlock(model, rule, ruleEnv, effects);
       if (outcome.status === "failed" && outcome.terminal === "fail") return outcome;
       if (outcome.status === "passed" && outcome.terminal === "pass") return outcome;
       // Surface only would-have-rescued reasons: a pass-rule whose when failed
@@ -125,8 +143,8 @@ function blockHasPass(block: Block): boolean {
   return false;
 }
 
-function executeRuleBlock(model: StoryModel, _rule: RuleStatement, env: Env): BlockResult {
-  return executeBlock(model, _rule.body, env);
+function executeRuleBlock(model: StoryModel, _rule: RuleStatement, env: Env, effects: Effect[]): BlockResult {
+  return executeBlock(model, _rule.body, env, effects);
 }
 
 function bindParameters(
@@ -134,6 +152,7 @@ function bindParameters(
   patterns: readonly ParameterPattern[],
   args: readonly GroundTerm[],
   baseEnv: Env,
+  effects: Effect[],
 ): Env[] {
   if (patterns.length !== args.length) return [];
   let envs: Env[] = [{ ...baseEnv }];
@@ -147,7 +166,7 @@ function bindParameters(
       if (!named) continue;
       let constrained = [named];
       for (const constraint of pattern.constraints) {
-        constrained = constrained.flatMap((candidate) => evalExpression(model, constraint, candidate));
+        constrained = constrained.flatMap((candidate) => evalExpression(model, constraint, candidate, effects));
       }
       next.push(...constrained);
     }
@@ -156,11 +175,11 @@ function bindParameters(
   return envs;
 }
 
-function executeBlock(model: StoryModel, block: Block, env: Env): BlockResult {
+function executeBlock(model: StoryModel, block: Block, env: Env, effects: Effect[]): BlockResult {
   let current = env;
   const reasons: string[] = [];
   for (const statement of block.statements) {
-    const result = executeBodyStatement(model, statement, current);
+    const result = executeBodyStatement(model, statement, current, effects);
     if (result.status === "no_match") {
       reasons.push(...result.reasons);
       continue;
@@ -173,12 +192,12 @@ function executeBlock(model: StoryModel, block: Block, env: Env): BlockResult {
   return { status: "passed", env: current, reasons: [] };
 }
 
-function executeBodyStatement(model: StoryModel, statement: BodyStatement, env: Env): BlockResult {
+function executeBodyStatement(model: StoryModel, statement: BodyStatement, env: Env, effects: Effect[]): BlockResult {
   switch (statement.kind) {
     case "when":
-      return executeWhen(model, statement, env);
+      return executeWhen(model, statement, env, effects);
     case "set":
-      applySet(model, statement, env);
+      applySet(model, statement, env, effects);
       return { status: "passed", env, reasons: [] };
     case "pass":
       return { status: "passed", env, reasons: [], terminal: "pass" };
@@ -187,13 +206,13 @@ function executeBodyStatement(model: StoryModel, statement: BodyStatement, env: 
   }
 }
 
-function executeWhen(model: StoryModel, statement: WhenStatement, env: Env): BlockResult {
-  const matches = evalExpression(model, statement.condition, env);
+function executeWhen(model: StoryModel, statement: WhenStatement, env: Env, effects: Effect[]): BlockResult {
+  const matches = evalExpression(model, statement.condition, env, effects);
   if (matches.length === 0) {
     return { status: "no_match", env, reasons: explainExpression(model, statement.condition, env) };
   }
   for (const match of matches) {
-    const body = executeBlock(model, statement.body, match);
+    const body = executeBlock(model, statement.body, match, effects);
     if (body.status === "passed" && body.terminal === "pass") return body;
     if (body.status === "failed" && body.terminal === "fail") {
       return {
@@ -206,30 +225,31 @@ function executeWhen(model: StoryModel, statement: WhenStatement, env: Env): Blo
   return { status: "failed", env, reasons: explainExpression(model, statement.condition, env) };
 }
 
-function applySet(model: StoryModel, statement: SetStatement, env: Env): void {
-  for (const effect of statement.effects) {
-    const atom = groundAtom(effect.atom, env);
+function applySet(model: StoryModel, statement: SetStatement, env: Env, effects: Effect[]): void {
+  for (const setEffect of statement.effects) {
+    const atom = groundAtom(setEffect.atom, env);
     const fact = factFromAtom(atom);
-    if (effect.polarity === "assert") model.assertFact(fact);
+    if (setEffect.polarity === "assert") model.assertFact(fact);
     else model.retractFact(fact);
+    effects.push({ polarity: setEffect.polarity, fact });
   }
 }
 
-function evalExpression(model: StoryModel, expression: Expression, env: Env): Env[] {
+function evalExpression(model: StoryModel, expression: Expression, env: Env, effects: Effect[]): Env[] {
   switch (expression.kind) {
     case "relation":
-      return evalRelation(model, expression.atom, env);
+      return evalRelation(model, expression.atom, env, effects);
     case "not":
-      return evalExpression(model, expression.operand, env).length === 0 ? [env] : [];
+      return evalExpression(model, expression.operand, env, effects).length === 0 ? [env] : [];
     case "binary": {
       if (expression.op === "&") {
-        return evalExpression(model, expression.left, env).flatMap((leftEnv) =>
-          evalExpression(model, expression.right, leftEnv),
+        return evalExpression(model, expression.left, env, effects).flatMap((leftEnv) =>
+          evalExpression(model, expression.right, leftEnv, effects),
         );
       }
       return dedupeEnvs([
-        ...evalExpression(model, expression.left, env),
-        ...evalExpression(model, expression.right, env),
+        ...evalExpression(model, expression.left, env, effects),
+        ...evalExpression(model, expression.right, env, effects),
       ]);
     }
     case "equal": {
@@ -249,12 +269,12 @@ function evalExpression(model: StoryModel, expression: Expression, env: Env): En
   }
 }
 
-function evalRelation(model: StoryModel, atom: RelationAtom, env: Env): Env[] {
+function evalRelation(model: StoryModel, atom: RelationAtom, env: Env, effects: Effect[]): Env[] {
   const predicate = model.predicates.get(atom.relation);
   if (predicate) {
     const args = atom.args.map((term) => resolveTerm(term, env));
     if (args.some((arg) => arg === undefined)) return [];
-    const result = executeCallable(model, predicate, args as GroundTerm[], "predicate", env);
+    const result = executeCallable(model, predicate, args as GroundTerm[], "predicate", env, effects);
     return result.status === "passed" ? [result.env] : [];
   }
 
@@ -367,13 +387,17 @@ function matchesType(model: StoryModel, value: GroundTerm, type: TypeExpr): bool
 }
 
 function explainExpression(model: StoryModel, expression: Expression, env: Env): string[] {
+  // Diagnostic re-evaluation: effects from this path are not surfaced because
+  // the action has already failed — counting them would double-report any
+  // mutating predicates that ran during the original evaluation.
+  const discard: Effect[] = [];
   switch (expression.kind) {
     case "relation": {
       const predicate = model.predicates.get(expression.atom.relation);
       if (predicate) {
         const args = expression.atom.args.map((term) => resolveTerm(term, env));
         if (args.every((arg) => arg !== undefined)) {
-          const result = executeCallable(model, predicate, args as GroundTerm[], "predicate", env);
+          const result = executeCallable(model, predicate, args as GroundTerm[], "predicate", env, discard);
           if (result.status === "failed" && result.reasons.length > 0) {
             return [...result.reasons];
           }
@@ -390,10 +414,10 @@ function explainExpression(model: StoryModel, expression: Expression, env: Env):
           ...explainExpression(model, expression.right, env),
         ];
       }
-      if (evalExpression(model, expression.left, env).length === 0) {
+      if (evalExpression(model, expression.left, env, discard).length === 0) {
         return explainExpression(model, expression.left, env);
       }
-      return evalExpression(model, expression.left, env).flatMap((leftEnv) =>
+      return evalExpression(model, expression.left, env, discard).flatMap((leftEnv) =>
         explainExpression(model, expression.right, leftEnv),
       );
     case "equal":
@@ -405,10 +429,10 @@ function explainPositiveCondition(expression: Expression, env: Env): string[] {
   return [emitExpression(expression, env)];
 }
 
-function failResult(reasons: readonly string[]): LanguagePlayResult {
+function failResult(reasons: readonly string[], effects: readonly Effect[]): LanguagePlayResult {
   const unique = [...new Set(reasons.filter((reason) => reason !== "fail"))];
   const body = unique.length > 0 ? ` ${unique.map((reason) => `${reason};`).join(" ")} ` : " ";
-  return { status: "failed", feedback: `fail {${body}}`, reasons: unique };
+  return { status: "failed", feedback: `fail {${body}}`, reasons: unique, effects };
 }
 
 function dedupeEnvs(envs: Env[]): Env[] {
@@ -459,5 +483,6 @@ function emitGroundTerm(term: GroundTerm): string {
 }
 
 export const languageRuntimeInternals = {
-  evalExpression,
+  evalExpression: (model: StoryModel, expression: Expression, env: Env): Env[] =>
+    evalExpression(model, expression, env, []),
 };

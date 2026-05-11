@@ -35,10 +35,10 @@ describe("tool handlers for the tutorial-era DSL", () => {
     expect(out.loaded.storyPaths).toEqual([TUTORIAL_PATH]);
     expect(out.loaded.counts).toMatchObject({
       traits: 10,
-      relations: 10,
+      relations: 12,
       predicates: 3,
-      actions: 9,
-      entities: 14,
+      actions: 10,
+      entities: 19,
     });
   });
 
