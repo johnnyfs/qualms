@@ -34,11 +34,11 @@ describe("tool handlers for the tutorial-era DSL", () => {
     expect(out.sessionId).toMatch(/[0-9a-f-]{8,}/);
     expect(out.loaded.storyPaths).toEqual([TUTORIAL_PATH]);
     expect(out.loaded.counts).toMatchObject({
-      traits: 8,
-      relations: 7,
+      traits: 10,
+      relations: 8,
       predicates: 1,
-      actions: 8,
-      entities: 7,
+      actions: 9,
+      entities: 10,
     });
   });
 
