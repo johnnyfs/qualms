@@ -16,12 +16,12 @@ describe("tutorial language parser", () => {
 
     expect(program.statements.filter((s) => s.kind === "trait")).toHaveLength(10);
     expect(program.statements.filter((s) => s.kind === "relation")).toHaveLength(12);
-    expect(program.statements.filter((s) => s.kind === "predicate")).toHaveLength(3);
-    expect(program.statements.filter((s) => s.kind === "action")).toHaveLength(11);
-    expect(program.statements.filter((s) => s.kind === "rule")).toHaveLength(12);
-    expect(program.statements.filter((s) => s.kind === "entity")).toHaveLength(19);
+    expect(program.statements.filter((s) => s.kind === "predicate")).toHaveLength(4);
+    expect(program.statements.filter((s) => s.kind === "action")).toHaveLength(12);
+    expect(program.statements.filter((s) => s.kind === "rule")).toHaveLength(14);
+    expect(program.statements.filter((s) => s.kind === "entity")).toHaveLength(20);
     expect(program.statements.filter((s) => s.kind === "extend")).toHaveLength(3);
-    expect(program.statements.filter((s) => s.kind === "set")).toHaveLength(8);
+    expect(program.statements.filter((s) => s.kind === "set")).toHaveLength(9);
   });
 
   it("parses constrained action parameters", () => {
@@ -45,6 +45,22 @@ describe("tutorial language parser", () => {
       kind: "relation",
       atom: { relation: "At" },
     });
+  });
+
+  it("parses bare type/entity in parameter slot as a typed wildcard", () => {
+    const program = parseProgram(`
+      trait Actor
+      entity Guard { Actor }
+      action Wave(a: Actor, Guard) { succeed; }
+    `);
+    const wave = program.statements.find((s) => s.kind === "action" && s.id === "Wave");
+    if (!wave || wave.kind !== "action") throw new Error("missing Wave action");
+
+    const second = wave.parameters[1]!;
+    expect(second.wildcard).toBe(true);
+    expect(second.name).toBeUndefined();
+    expect(second.type).toEqual({ kind: "named", id: "Guard" });
+    expect(second.constraints).toHaveLength(0);
   });
 
   it("parses relation-valued terms", () => {

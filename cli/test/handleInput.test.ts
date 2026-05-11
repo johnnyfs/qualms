@@ -13,6 +13,11 @@ const { loadStoryProgram } = language;
 describe("handleInput", () => {
   it("plays an action call and emits feedback + effects", () => {
     const model = loadStoryProgram(readFileSync(TUTORIAL_PATH, "utf-8"));
+    // The master key is with the guard in stage 9; walk to OfferAFavor to
+    // receive it before unlocking.
+    handleInput(model, "TalkAbout(Player, Guard, Whatever)");
+    handleInput(model, "TalkAbout(Player, Guard, Bribery)");
+    handleInput(model, "TalkAbout(Player, Guard, OfferAFavor)");
     const entries = handleInput(model, "Unlock(Player, Bars, MasterKey)");
     expect(entries[0]).toEqual({ kind: "feedback", text: "succeed;" });
     expect(entries).toContainEqual({ kind: "effect", text: "- Locked(Bars);" });
@@ -60,6 +65,11 @@ describe("handleInput", () => {
     const blocked = handleInput(model, "Go(Player, Corridor)");
     expect(blocked[0]!.kind).toBe("feedback");
     expect(blocked[0]!.text.startsWith("fail {")).toBe(true);
+
+    // Walk the stage-9 conversation to receive the master key.
+    handleInput(model, "TalkAbout(Player, Guard, Whatever)");
+    handleInput(model, "TalkAbout(Player, Guard, Bribery)");
+    handleInput(model, "TalkAbout(Player, Guard, OfferAFavor)");
 
     expect(handleInput(model, "Unlock(Player, Bars, MasterKey)")[0]).toEqual({
       kind: "feedback",

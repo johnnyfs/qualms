@@ -37,7 +37,7 @@ export interface CallableStatement {
 
 export interface RuleStatement {
   readonly kind: "rule";
-  readonly phase: "before" | "after";
+  readonly phase: "before" | "after" | "on";
   readonly target: string;
   readonly parameters: readonly ParameterPattern[];
   readonly body: Block;

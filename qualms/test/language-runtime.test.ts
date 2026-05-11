@@ -9,6 +9,15 @@ const TUTORIAL_PATH = resolve(__filename, "../../../stories/tutorial/tutorial.qu
 
 const { idTerm, loadStoryProgram, playLanguageCall } = language;
 
+// Stage 9 moves the master key from the cell floor onto the guard. To run
+// any test that needs the key, the player has to walk Whatever → Bribery →
+// OfferAFavor; the after-rule then transfers Carrying(MasterKey).
+function walkConversationToMasterKey(model: ReturnType<typeof loadStoryProgram>): void {
+  expect(playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)").status).toBe("passed");
+  expect(playLanguageCall(model, "TalkAbout(Player, Guard, Bribery)").status).toBe("passed");
+  expect(playLanguageCall(model, "TalkAbout(Player, Guard, OfferAFavor)").status).toBe("passed");
+}
+
 describe("tutorial language runtime", () => {
   it("runs minimal movement with compact failure feedback", () => {
     const model = loadStoryProgram(`
@@ -60,10 +69,21 @@ describe("tutorial language runtime", () => {
       feedback: "fail { Locked(Bars); }",
     });
 
+    // Without carrying any key, Unlock fails on the !Carrying clause first.
+    const noKey = playLanguageCall(model, "Unlock(Player, Bars, MakeshiftKey)");
+    expect(noKey).toMatchObject({
+      status: "failed",
+      feedback: "fail { !Carrying(Player, MakeshiftKey); }",
+    });
+
+    // The master key sits with the guard in stage 9; walk the conversation
+    // to receive it. The makeshift key is never placed in the world, so
+    // attempting to use it still surfaces the same !Carrying reason.
+    walkConversationToMasterKey(model);
     const wrongKey = playLanguageCall(model, "Unlock(Player, Bars, MakeshiftKey)");
     expect(wrongKey).toMatchObject({
       status: "failed",
-      feedback: "fail { !LockedWith(Bars, MakeshiftKey); }",
+      feedback: "fail { !Carrying(Player, MakeshiftKey); }",
     });
 
     expect(playLanguageCall(model, "Unlock(Player, Bars, MasterKey)").status).toBe("passed");
@@ -101,11 +121,16 @@ describe("tutorial language runtime", () => {
     expect(wrongTopic.reasons).toContain("!LeadsTo(Guard, Whatever, Checkers)");
 
     // Walk the Player into the Corridor: colocation now holds directly via
-    // IsVisibleTo's IsColocated branch.
+    // IsVisibleTo's IsColocated branch. The conversation walk both
+    // demonstrates section 8's tree and (via stage 9's after-rule) hands
+    // the master key over so Unlock can succeed.
+    walkConversationToMasterKey(model);
     expect(playLanguageCall(model, "Unlock(Player, Bars, MasterKey)").status).toBe("passed");
     expect(playLanguageCall(model, "Open(Player, Bars)").status).toBe("passed");
     expect(playLanguageCall(model, "Go(Player, Corridor)").status).toBe("passed");
     expect(model.hasFact("At", [idTerm("Player"), idTerm("Corridor")])).toBe(true);
+    // After moving to the corridor, the player is colocated with the guard
+    // and a new top-level conversation starts (after-rule resets the topic).
     expect(playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)").status).toBe("passed");
 
     // Move the Player to the Outside: no ConveysVisibility(Path(Outside, ...)),
@@ -161,6 +186,7 @@ describe("tutorial language runtime", () => {
     expect(blocked.reasons).toContain("!Opened(Bars)");
 
     // Open already-open Bars should fail with `Opened(Bars)`.
+    walkConversationToMasterKey(model);
     expect(playLanguageCall(model, "Unlock(Player, Bars, MasterKey)").status).toBe("passed");
     expect(playLanguageCall(model, "Open(Player, Bars)").status).toBe("passed");
     expect(playLanguageCall(model, "Open(Player, Bars)")).toMatchObject({
@@ -177,6 +203,18 @@ describe("tutorial language runtime", () => {
   it("section 5 — lock cycle: Unlock-when-unlocked and Lock-when-locked both fail", () => {
     const model = loadStoryProgram(readFileSync(TUTORIAL_PATH, "utf-8"));
 
+    // Unlock requires the actor to be carrying the key. Stage 9 puts the
+    // master key with the guard, so until the player walks the conversation
+    // to receive it, Unlock fails.
+    expect(playLanguageCall(model, "Unlock(Player, Bars, MasterKey)")).toMatchObject({
+      status: "failed",
+      feedback: "fail { !Carrying(Player, MasterKey); }",
+    });
+
+    walkConversationToMasterKey(model);
+    expect(model.hasFact("Carrying", [idTerm("Player"), idTerm("MasterKey")])).toBe(true);
+    expect(model.hasFact("Carrying", [idTerm("Guard"), idTerm("MasterKey")])).toBe(false);
+
     expect(playLanguageCall(model, "Unlock(Player, Bars, MasterKey)").status).toBe("passed");
     expect(playLanguageCall(model, "Unlock(Player, Bars, MasterKey)")).toMatchObject({
       status: "failed",
@@ -189,6 +227,15 @@ describe("tutorial language runtime", () => {
       status: "failed",
       feedback: "fail { Locked(Bars); }",
     });
+
+    // Dropping the master key revokes the carry condition: Unlock fails again
+    // even though the actor is still in the cell.
+    expect(playLanguageCall(model, "Unlock(Player, Bars, MasterKey)").status).toBe("passed");
+    expect(playLanguageCall(model, "Drop(Player, MasterKey)").status).toBe("passed");
+    expect(playLanguageCall(model, "Lock(Player, Bars, MasterKey)")).toMatchObject({
+      status: "failed",
+      feedback: "fail { !Carrying(Player, MasterKey); }",
+    });
   });
 
   it("section 6 — visibility crosses transparent gates and is blocked by opaque ones", () => {
@@ -199,6 +246,7 @@ describe("tutorial language runtime", () => {
 
     // Walk through to the Corridor and try to see the Mop in the Closet —
     // ClosetDoor is opaque and closed, so visibility fails.
+    walkConversationToMasterKey(model);
     expect(playLanguageCall(model, "Unlock(Player, Bars, MasterKey)").status).toBe("passed");
     expect(playLanguageCall(model, "Open(Player, Bars)").status).toBe("passed");
     expect(playLanguageCall(model, "Go(Player, Corridor)").status).toBe("passed");
@@ -244,24 +292,37 @@ describe("tutorial language runtime", () => {
       model.hasFact("InConversation", [idTerm("Player"), idTerm("Guard"), idTerm("Bribery")]),
     ).toBe(true);
 
-    // Step one more level deep.
-    expect(playLanguageCall(model, "TalkAbout(Player, Guard, OfferMoney)").status).toBe("passed");
+    // Step one more level deep. Stage 9 attaches an `on` rule to
+    // OfferMoney that fails when the actor isn't carrying Money. The on-rule
+    // runs after the body and before the after-rule, so when it fails the
+    // after-rule never runs and InConversation is not advanced — the player
+    // stays at Bribery and can try a different offer.
+    expect(playLanguageCall(model, "TalkAbout(Player, Guard, OfferMoney)").status).toBe("failed");
     expect(
       model.hasFact("InConversation", [idTerm("Player"), idTerm("Guard"), idTerm("OfferMoney")]),
+    ).toBe(false);
+    expect(
+      model.hasFact("InConversation", [idTerm("Player"), idTerm("Guard"), idTerm("Bribery")]),
     ).toBe(true);
 
-    // Off-tree from the current topic: no LeadsTo(Guard, OfferMoney, Weather)
+    // From Bribery, the actor can still walk to OfferAFavor — and stage 9's
+    // after-rule hands them the master key.
+    expect(playLanguageCall(model, "TalkAbout(Player, Guard, OfferAFavor)").status).toBe("passed");
+    expect(model.hasFact("Carrying", [idTerm("Player"), idTerm("MasterKey")])).toBe(true);
+    expect(model.hasFact("Carrying", [idTerm("Guard"), idTerm("MasterKey")])).toBe(false);
+
+    // Off-tree from the current topic: no LeadsTo(Guard, OfferAFavor, Weather)
     // and Weather isn't top-level either, so the call fails.
     expect(playLanguageCall(model, "TalkAbout(Player, Guard, Weather)").status).toBe("failed");
 
     // Returning to a top-level topic falls through (7) and the after-rule
-    // resets InConversation, with `one Topic` retracting the OfferMoney row.
+    // resets InConversation, with `one Topic` retracting the OfferAFavor row.
     expect(playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)").status).toBe("passed");
     expect(
       model.hasFact("InConversation", [idTerm("Player"), idTerm("Guard"), idTerm("Whatever")]),
     ).toBe(true);
     expect(
-      model.hasFact("InConversation", [idTerm("Player"), idTerm("Guard"), idTerm("OfferMoney")]),
+      model.hasFact("InConversation", [idTerm("Player"), idTerm("Guard"), idTerm("OfferAFavor")]),
     ).toBe(false);
 
     // StopTalking clears whatever current InConversation is in scope.
@@ -273,12 +334,11 @@ describe("tutorial language runtime", () => {
     // After Stop, a sub-topic call once again fails the (7) body.
     expect(playLanguageCall(model, "TalkAbout(Player, Guard, Bribery)").status).toBe("failed");
 
-    // Geographic gate is preserved: walk to Outside, lose IsVisibleTo, and
-    // even a top-level Whatever fails — the (8) rule didn't override the
-    // visibility precondition the (7) body relies on. Re-enter via Whatever
-    // and a sub-topic so InConversation is set during the walkout.
-    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)").status).toBe("passed");
-    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Bribery)").status).toBe("passed");
+    // Geographic gate is preserved: walk through to Outside, lose
+    // IsVisibleTo, and even a top-level Whatever fails — the (8) rule didn't
+    // override the visibility precondition the (7) body relies on. Walk the
+    // conversation tree to receive the master key, then unlock and exit.
+    walkConversationToMasterKey(model);
     expect(playLanguageCall(model, "Unlock(Player, Bars, MasterKey)").status).toBe("passed");
     expect(playLanguageCall(model, "Open(Player, Bars)").status).toBe("passed");
     expect(playLanguageCall(model, "Go(Player, Corridor)").status).toBe("passed");
@@ -357,5 +417,235 @@ describe("tutorial language runtime", () => {
     expect(
       model.hasFact("InConversation", [idTerm("Player"), idTerm("Guard"), idTerm("OfferMoney")]),
     ).toBe(true);
+  });
+
+  it("section 8 — OfferAFavor needs the player to walk Whatever → Bribery first", () => {
+    const model = loadStoryProgram(readFileSync(TUTORIAL_PATH, "utf-8"));
+
+    // No conversation yet: OfferAFavor isn't top-level and there's no
+    // current topic to lead from, so WillTalkAbout fails.
+    const cold = playLanguageCall(model, "TalkAbout(Player, Guard, OfferAFavor)");
+    expect(cold.status).toBe("failed");
+    expect(cold.reasons).toContain("!TalksAbout(Guard, OfferAFavor)");
+
+    // Top-level entry establishes Whatever as the current topic.
+    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)").status).toBe("passed");
+
+    // From Whatever, OfferAFavor is still two steps deep (Whatever → Bribery
+    // → OfferAFavor). LeadsTo(Guard, Whatever, OfferAFavor) doesn't hold.
+    const tooFar = playLanguageCall(model, "TalkAbout(Player, Guard, OfferAFavor)");
+    expect(tooFar.status).toBe("failed");
+    expect(tooFar.reasons).toContain("!LeadsTo(Guard, Whatever, OfferAFavor)");
+
+    // Step to Bribery: now LeadsTo(Guard, Bribery, OfferAFavor) holds.
+    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Bribery)").status).toBe("passed");
+    expect(playLanguageCall(model, "TalkAbout(Player, Guard, OfferAFavor)").status).toBe("passed");
+    expect(
+      model.hasFact("InConversation", [idTerm("Player"), idTerm("Guard"), idTerm("OfferAFavor")]),
+    ).toBe(true);
+  });
+
+  it("section 9 — reactions: OfferMoney rejects, OfferAFavor hands over the master key", () => {
+    const model = loadStoryProgram(readFileSync(TUTORIAL_PATH, "utf-8"));
+
+    // The guard starts carrying the master key; the player does not.
+    expect(model.hasFact("Carrying", [idTerm("Guard"), idTerm("MasterKey")])).toBe(true);
+    expect(model.hasFact("Carrying", [idTerm("Player"), idTerm("MasterKey")])).toBe(false);
+
+    // Unlock fails up front because the player isn't carrying anything.
+    expect(playLanguageCall(model, "Unlock(Player, Bars, MasterKey)")).toMatchObject({
+      status: "failed",
+      feedback: "fail { !Carrying(Player, MasterKey); }",
+    });
+
+    // Walk to the OfferMoney leaf: action body passes, after-rule does NOT
+    // run (the `on` rule fires first and fails for !Carrying(_, Money)), so
+    // InConversation does not advance past Bribery.
+    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)").status).toBe("passed");
+    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Bribery)").status).toBe("passed");
+    const moneyOffer = playLanguageCall(model, "TalkAbout(Player, Guard, OfferMoney)");
+    expect(moneyOffer.status).toBe("failed");
+    expect(moneyOffer.reasons).toContain("!Carrying(Player, Money)");
+    expect(
+      model.hasFact("InConversation", [idTerm("Player"), idTerm("Guard"), idTerm("Bribery")]),
+    ).toBe(true);
+    expect(
+      model.hasFact("InConversation", [idTerm("Player"), idTerm("Guard"), idTerm("OfferMoney")]),
+    ).toBe(false);
+
+    // From Bribery, OfferAFavor succeeds and the after-rule transfers the key.
+    expect(playLanguageCall(model, "TalkAbout(Player, Guard, OfferAFavor)").status).toBe("passed");
+    expect(model.hasFact("Carrying", [idTerm("Player"), idTerm("MasterKey")])).toBe(true);
+    expect(model.hasFact("Carrying", [idTerm("Guard"), idTerm("MasterKey")])).toBe(false);
+
+    // Now Unlock + Open + Go all succeed.
+    expect(playLanguageCall(model, "Unlock(Player, Bars, MasterKey)").status).toBe("passed");
+    expect(playLanguageCall(model, "Open(Player, Bars)").status).toBe("passed");
+    expect(playLanguageCall(model, "Go(Player, Corridor)").status).toBe("passed");
+  });
+
+  it("entity-literal parameter sugar binds only when the arg matches the entity", () => {
+    const model = loadStoryProgram(`
+      trait Actor
+      trait Target
+
+      relation Hit(Actor, Target)
+
+      action Punch(a: Actor, t: Target) { succeed; }
+
+      -- Sugar: bare 'Bob' in the third slot is desugared to '_: Bob' and
+      -- only fires for the entity Bob.
+      on Punch(a: Actor, Bob) {
+        when (a == Alice) { fail; }
+      }
+
+      entity Alice { Actor }
+      entity Bob { Target }
+      entity Carol { Target }
+    `);
+
+    // Alice punching Bob: the `on` rule binds (Bob slot matches), when
+    // (a==Alice) holds, action fails.
+    expect(playLanguageCall(model, "Punch(Alice, Bob)").status).toBe("failed");
+    // Alice punching Carol: the `on` rule's parameter constraint fails to
+    // bind (Carol != Bob), so the rule doesn't fire.
+    expect(playLanguageCall(model, "Punch(Alice, Carol)").status).toBe("passed");
+  });
+
+  it("bare trait/Any parameter sugar binds untyped wildcard against a trait", () => {
+    const model = loadStoryProgram(`
+      trait Actor
+      trait Item
+
+      relation Holds(Actor, Item)
+
+      action Try(a: Actor, t: Item) { succeed; }
+
+      -- Sugar: bare 'Item' in the second slot desugars to '_: Item'.
+      on Try(Actor, Item) {
+        fail;
+      }
+
+      entity Player { Actor }
+      entity Trinket { Item }
+
+      set {
+        Holds(Player, Trinket);
+      }
+    `);
+
+    // Both args match their bare type slots → on-rule fires → action fails.
+    expect(playLanguageCall(model, "Try(Player, Trinket)").status).toBe("failed");
+  });
+
+  it("`on` rule fires after a successful action body and can preempt with fail", () => {
+    const model = loadStoryProgram(`
+      trait Actor
+      trait Item
+
+      relation Holds(Actor, Item)
+      relation Marked(Item)
+
+      action Try(a: Actor, t: Item) {
+        when (Holds(a, t)) { succeed; }
+      }
+
+      on Try(a: Actor, t: Item) {
+        when (!Marked(t)) { fail; }
+      }
+
+      entity Player { Actor }
+      entity Trinket { Item }
+
+      set {
+        Holds(Player, Trinket);
+      }
+    `);
+
+    // Action body would pass (Holds), but the `on` rule fires after and
+    // fails because Trinket isn't Marked.
+    const blocked = playLanguageCall(model, "Try(Player, Trinket)");
+    expect(blocked.status).toBe("failed");
+
+    // Mark the trinket; now the `on` rule's when no longer matches, so the
+    // rule doesn't fire and the action passes through.
+    model.assertFact({ relation: "Marked", args: [idTerm("Trinket")] });
+    expect(playLanguageCall(model, "Try(Player, Trinket)").status).toBe("passed");
+  });
+
+  it("predicate before-rule env is isolated from the enclosing action's parameter bindings", () => {
+    // The outer action binds `a` to Player; the predicate it calls binds its
+    // own `a` to the same value (since args flow through positionally). But
+    // the predicate's before-rule uses a fresh name `a` in a parameter
+    // constraint that must bind from a fact lookup — if the action's `a`
+    // leaked into the rule's scope, the constraint would silently match the
+    // action's actor instead of the fact's actor.
+    const model = loadStoryProgram(`
+      trait Actor
+      trait Tag
+
+      relation Marks(Actor, Tag)
+
+      predicate IsMarked(target: Tag) {
+        when (Marks(_, target)) { succeed; }
+      }
+
+      -- The rule's a constraint variable must bind freshly from the Marks
+      -- fact, not inherit Player from the enclosing action.
+      before IsMarked(t: Tag { Marks(a, t) }) {
+        when (a == Witness) { succeed; }
+      }
+
+      action Probe(a: Actor, t: Tag) {
+        when (IsMarked(t)) { succeed; }
+      }
+
+      entity Player { Actor }
+      entity Witness { Actor }
+      entity Mystery { Tag }
+
+      set {
+        Marks(Witness, Mystery);
+      }
+    `);
+
+    // Player is not the marker — but the rule's `a` must still bind to
+    // Witness from the Marks fact, not be pinned to Player by leakage.
+    expect(playLanguageCall(model, "Probe(Player, Mystery)").status).toBe("passed");
+  });
+
+  it("after-rule env is isolated from the action body's env", () => {
+    // The action body binds a local name `secret` via its when-clause; the
+    // after-rule must not see `secret` and must rebind from its own params.
+    const model = loadStoryProgram(`
+      trait Actor
+      trait Item
+
+      relation Holds(Actor, Item)
+      relation Stamped(Item)
+
+      action Touch(a: Actor, t: Item) {
+        when (Holds(a, secret)) { succeed; }
+      }
+
+      -- If body env leaked, secret would be bound here from the body's
+      -- when. The after-rule must instead stamp the parameter target t.
+      after Touch(a: Actor, t: Item) {
+        set Stamped(t);
+      }
+
+      entity Player { Actor }
+      entity Key { Item }
+      entity Decoy { Item }
+
+      set {
+        Holds(Player, Key);
+      }
+    `);
+
+    expect(playLanguageCall(model, "Touch(Player, Decoy)").status).toBe("passed");
+    expect(model.hasFact("Stamped", [idTerm("Decoy")])).toBe(true);
+    // If leakage existed, Stamped(Key) would also exist (the body's secret).
+    expect(model.hasFact("Stamped", [idTerm("Key")])).toBe(false);
   });
 });

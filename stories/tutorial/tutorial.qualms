@@ -151,6 +151,10 @@ set {
 }
 
 -- (5) Extend doors to be lockable.
+-- Keys are portable items the actor must be carrying to use. The master key
+-- starts on the cell floor; until the actor takes it, Unlock fails with a
+-- !Carrying(...) reason. The makeshift key is never given out — it exists
+-- only so that mis-using it is a different failure than the master case.
 
 trait Key
 trait Lockable
@@ -165,7 +169,7 @@ before Open(_, door: Lockable) {
 }
 
 action Unlock(actor: Actor, door: Lockable, key: Key) {
-  when (IsColocated(actor, door) & LockedWith(door, key)) {
+  when (Carrying(actor, key) & IsColocated(actor, door) & LockedWith(door, key)) {
     set !Locked(door)
   }
 }
@@ -177,7 +181,7 @@ before Unlock(_, door: Lockable, _) {
 }
 
 action Lock(actor: Actor, door: Lockable, key: Key) {
-  when (IsColocated(actor, door) & LockedWith(door, key)) {
+  when (Carrying(actor, key) & IsColocated(actor, door) & LockedWith(door, key)) {
     set Locked(door)
   }
 }
@@ -189,11 +193,12 @@ before Lock(_, door: Lockable, _) {
 }
 
 extend Bars { Lockable }
-entity MasterKey { Key }
-entity MakeshiftKey { Key }
+entity MasterKey { Key, Portable, Locatable }
+entity MakeshiftKey { Key, Portable, Locatable }
 set {
   Locked(Bars);
   LockedWith(Bars, MasterKey);
+  At(MasterKey, Cell);
 }
 
 -- (6) Visibility
@@ -287,32 +292,43 @@ set {
 -- (8) Extend to conversation trees.
 -- Introduces: a `one`-cardinality state relation (InConversation) tracking the
 -- current conversation topic per (Actor, Speaker), a `LeadsTo` adjacency over
--- topics, and a before-rule whose parameter constraint binds the current
--- topic — making the rule fire only when a conversation is already in
--- progress. Top-level topics (those TalksAbout) still pass through the (7)
--- action body; sub-topics short-circuit here and advance the conversation.
+-- topics, and a predicate WillTalkAbout that holds when the actor can reach
+-- the topic either as a top-level entry (TalksAbout) or as a sub-topic of the
+-- current conversation (InConversation + LeadsTo). The (7) TalkAbout action
+-- is replaced to consult WillTalkAbout, and a single after-rule advances
+-- InConversation uniformly on every successful talk.
 
 relation InConversation(Actor, Speaker, one Topic)
 relation LeadsTo(Speaker, Topic, Topic)
 
--- Note: the fresh variable is named `current` (not `topic`) because the
--- enclosing action TalkAbout already binds `topic` to its third argument;
--- reusing the name would shadow it and the constraint would never find a
--- matching InConversation fact.
-before TalkAbout(
-  actor: Actor,
-  speaker: Speaker { InConversation(actor, speaker, current) },
-  subTopic: Topic
-) {
-  when (IsVisibleTo(actor, speaker) & LeadsTo(speaker, current, subTopic)) {
-    set InConversation(actor, speaker, subTopic);
+predicate WillTalkAbout(actor: Actor, speaker: Speaker, topic: Topic) {
+  when (TalksAbout(speaker, topic)) {
     succeed;
   }
 }
 
--- Entry case: a top-level TalkAbout passed (7)'s body; record the current
--- topic. Sub-topic walks set InConversation inline in the before rule above,
--- so the `one Topic` cardinality on InConversation handles displacement.
+-- Sub-topic branch: the speaker constraint binds `topic` from the current
+-- conversation fact, and the rule succeeds when LeadsTo connects it to the
+-- call-site sub-topic.
+before WillTalkAbout(
+  actor: Actor,
+  speaker: Speaker { InConversation(actor, speaker, topic) },
+  subTopic: Topic
+) {
+  when (LeadsTo(speaker, topic, subTopic)) {
+    succeed;
+  }
+}
+
+replace action TalkAbout(actor: Actor, speaker: Speaker, topic: Topic) {
+  when (IsVisibleTo(actor, speaker) & WillTalkAbout(actor, speaker, topic)) {
+    succeed;
+  }
+}
+
+-- Both top-level entries and sub-topic walks pass through the action body
+-- now, so a single after-rule records the new conversation topic. The
+-- `one Topic` cardinality on InConversation handles displacement.
 after TalkAbout(actor: Actor, speaker: Speaker, topic: Topic) {
   set InConversation(actor, speaker, topic);
 }
@@ -337,4 +353,39 @@ set {
   LeadsTo(Guard, Bribery, OfferMoney);
   LeadsTo(Guard, Bribery, OfferAFavor);
   LeadsTo(Guard, Bribery, BriberyIsWrong);
+}
+
+-- (9) Reactions to conversation.
+-- Introduces: the `on` rule, which fires after an action's body succeeds
+-- and can preempt the action by failing; the entity-literal sugar for
+-- parameter slots (`Guard`, `OfferMoney`); and a state transfer via an
+-- after-rule (the guard hands over the master key). Reactions are not
+-- first-class actors — they are rules attached to actions.
+
+entity Money { Portable, Locatable }
+
+-- Offering money requires the actor to actually have some. The on-rule
+-- fires after the talk body and after-rule succeed; failing here rolls
+-- the conversation back at the engine boundary (the InConversation update
+-- still applies — there is no transactional rollback today).
+on TalkAbout(actor: Actor, Guard, OfferMoney) {
+  when (!Carrying(actor, Money)) {
+    fail;
+  }
+}
+
+-- Offering a favor moves the master key from the guard to the actor.
+after TalkAbout(actor: Actor, Guard, OfferAFavor) {
+  set {
+    !Carrying(Guard, MasterKey);
+    Carrying(actor, MasterKey);
+  }
+}
+
+set {
+  -- The guard now starts carrying the master key; the player must walk
+  -- Whatever → Bribery → OfferAFavor to get it. Money is never placed in
+  -- the world, so offering it fails.
+  !At(MasterKey, Cell);
+  Carrying(Guard, MasterKey);
 }
