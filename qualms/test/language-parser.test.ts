@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { language } from "../src/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
-const TUTORIAL_PATH = resolve(__filename, "../../specs/tutorial.qualms");
+const TUTORIAL_PATH = resolve(__filename, "../../../stories/tutorial/tutorial.qualms");
 
 const { parseProgram } = language;
 

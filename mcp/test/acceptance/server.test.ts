@@ -6,7 +6,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 const __filename = fileURLToPath(import.meta.url);
 const REPO_ROOT = resolve(__filename, "../../../..");
-const TUTORIAL_PATH = resolve(REPO_ROOT, "qualms/specs/tutorial.qualms");
+const TUTORIAL_PATH = resolve(REPO_ROOT, "stories/tutorial/tutorial.qualms");
 const CLI_PATH = resolve(REPO_ROOT, "mcp/src/cli.ts");
 const TSX = resolve(REPO_ROOT, "mcp/node_modules/.bin/tsx");
 

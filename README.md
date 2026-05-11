@@ -1,6 +1,6 @@
 # Qualms
 
-Qualms is now centered on the prelude-free tutorial DSL in `qualms/specs/tutorial.qualms`.
+Qualms is now centered on the prelude-free tutorial DSL in `stories/tutorial/tutorial.qualms`.
 The active implementation is the TypeScript language package plus an MCP server that
 loads, mutates, queries, and plays stories written in that syntax.
 
@@ -11,7 +11,7 @@ of the supported runtime or test surface.
 ## Active Layout
 
 - `qualms/src/language/`: parser, model, emitter, and runtime for the current DSL.
-- `qualms/specs/tutorial.qualms`: conformance-style tutorial fixture for the current DSL features.
+- `stories/tutorial/tutorial.qualms`: conformance-style tutorial fixture for the current DSL features.
 - `qualms/test/`: language parser/model/runtime tests.
 - `mcp/src/`: MCP lifecycle, query, transaction, mutate, commit, rollback, and play tools for current-syntax `.qualms` stories.
 - `mcp/test/`: direct and subprocess MCP tests.

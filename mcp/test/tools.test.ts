@@ -20,7 +20,7 @@ import {
 } from "../src/tools.js";
 
 const __filename = fileURLToPath(import.meta.url);
-const TUTORIAL_PATH = resolve(__filename, "../../../qualms/specs/tutorial.qualms");
+const TUTORIAL_PATH = resolve(__filename, "../../../stories/tutorial/tutorial.qualms");
 
 describe("tool handlers for the tutorial-era DSL", () => {
   let manager: SessionManager;
