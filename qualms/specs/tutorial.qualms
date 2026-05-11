@@ -190,3 +190,49 @@ set {
   Locked(Bars);
   LockedWith(Bars, MasterKey);
 }
+
+-- (7) Simple conversation.
+-- Introduces: actions with multiple typed arguments, and overriding a
+-- predicate (IsColocated) for a specific entity via parameter equality.
+
+trait Speaker
+trait Topic
+
+relation TalksAbout(Speaker, Topic)
+
+action TalkAbout(actor: Actor, speaker: Speaker, topic: Topic) {
+  when (TalksAbout(speaker, topic)) {
+    pass;
+  }
+}
+
+-- Keep colocation a separate concern from Talking.
+before TalkAbout(
+  actor: (Actor & Locatable) { At(actor, here) },
+  speaker: Locatable,
+  _
+) {
+  when (!IsColocated(actor, speaker)) {
+    fail;
+  }
+}
+
+entity Guard { Speaker, Locatable }
+entity Bribery { Topic }
+entity Checkers { Topic }
+
+set {
+  At(Guard, Corridor);
+  TalksAbout(Guard, Bribery);
+}
+
+-- Talking to the guard "through the bars" works: when the actor is in the
+-- Cell and the target is the Guard, IsColocated short-circuits to pass.
+before IsColocated(
+  actor: (Actor & Locatable) { At(actor, here) },
+  target: Locatable { target == Guard }
+) {
+  when (here == Cell) {
+    pass;
+  }
+}

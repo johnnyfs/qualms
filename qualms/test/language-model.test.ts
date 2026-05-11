@@ -21,13 +21,13 @@ describe("tutorial language model", () => {
     const source = readFileSync(TUTORIAL_PATH, "utf-8");
     const model = loadStoryProgram(source);
 
-    expect(model.traits.size).toBe(8);
-    expect(model.relations.size).toBe(7);
+    expect(model.traits.size).toBe(10);
+    expect(model.relations.size).toBe(8);
     expect(model.predicates.size).toBe(1);
-    expect(model.actions.size).toBe(8);
-    expect(model.rules).toHaveLength(9);
-    expect(model.entities.size).toBe(7);
-    expect(model.listFacts()).toHaveLength(9);
+    expect(model.actions.size).toBe(9);
+    expect(model.rules).toHaveLength(11);
+    expect(model.entities.size).toBe(10);
+    expect(model.listFacts()).toHaveLength(11);
 
     expect(model.entityTraits("Bars")).toEqual(
       new Set(["Describable", "Locatable", "Openable", "Lockable"]),

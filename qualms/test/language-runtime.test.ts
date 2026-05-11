@@ -76,4 +76,39 @@ describe("tutorial language runtime", () => {
     expect(model.hasFact("At", [idTerm("Player"), idTerm("Corridor")])).toBe(true);
     expect(model.hasFact("At", [idTerm("Player"), idTerm("Cell")])).toBe(false);
   });
+
+  it("runs TalkAbout with the through-the-bars colocation override", () => {
+    const model = loadStoryProgram(readFileSync(TUTORIAL_PATH, "utf-8"));
+
+    // Player starts in the Cell, Guard is in the Corridor, Bars are locked.
+    expect(model.hasFact("At", [idTerm("Player"), idTerm("Cell")])).toBe(true);
+    expect(model.hasFact("At", [idTerm("Guard"), idTerm("Corridor")])).toBe(true);
+    expect(model.hasFact("Locked", [idTerm("Bars")])).toBe(true);
+
+    // Through the bars: actor in Cell, target == Guard, override fires and
+    // IsColocated short-circuits to pass; Guard knows about Bribery.
+    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Bribery)").status).toBe("passed");
+
+    // Wrong topic: the override still makes IsColocated pass, but the action
+    // body fails because !TalksAbout(Guard, Checkers).
+    const wrongTopic = playLanguageCall(model, "TalkAbout(Player, Guard, Checkers)");
+    expect(wrongTopic).toMatchObject({
+      status: "failed",
+      feedback: "fail { !TalksAbout(Guard, Checkers); }",
+    });
+
+    // Walk the Player into the Corridor: colocation now holds by the default
+    // predicate body (At(Guard, here)), no override needed.
+    expect(playLanguageCall(model, "Unlock(Player, Bars, MasterKey)").status).toBe("passed");
+    expect(playLanguageCall(model, "Open(Player, Bars)").status).toBe("passed");
+    expect(playLanguageCall(model, "Go(Player, Corridor)").status).toBe("passed");
+    expect(model.hasFact("At", [idTerm("Player"), idTerm("Corridor")])).toBe(true);
+    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Bribery)").status).toBe("passed");
+
+    // Move the Player to the Outside: neither the default colocation nor the
+    // Cell-specific override applies, so before TalkAbout triggers fail.
+    expect(playLanguageCall(model, "Go(Player, Outside)").status).toBe("passed");
+    expect(model.hasFact("At", [idTerm("Player"), idTerm("Outside")])).toBe(true);
+    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Bribery)").status).toBe("failed");
+  });
 });
