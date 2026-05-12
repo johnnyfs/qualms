@@ -4,8 +4,9 @@ const MODE_FLIGHT := "flight"
 const MODE_MAP := "map"
 const SHIP_MODEL_PATH := "res://assets/ships/canary/canary.glb"
 const SYSTEM_DATA_PATH := "res://data/sol_like_system.json"
-const SHIP_ALTITUDE := 100.0
+const SHIP_ALTITUDE := 0.0
 const SHIP_DISPLAY_SIZE := 3.2
+const SHIP_OVERLAY_RENDER_PRIORITY := 50
 const KM_PER_AU := 149597870.7
 const WORLD_UNITS_PER_AU := 640.0
 const BODY_WORLD_UNITS_PER_KM := 2.6738668e-7
@@ -23,7 +24,7 @@ const MAP_CAMERA_HEIGHT := 5000.0
 const MAP_CAMERA_INITIAL_SIZE := 56000.0
 const MIN_MAP_CAMERA_ORTHOGRAPHIC_SIZE := 6400.0
 const MAX_MAP_CAMERA_ORTHOGRAPHIC_SIZE := 70000.0
-const MAP_SHIP_ICON_ALTITUDE := 110.0
+const MAP_SHIP_ICON_ALTITUDE := 0.0
 const FLIGHT_ZOOM_UNITS_PER_SECOND := 120.0
 const MAP_ZOOM_UNITS_PER_SECOND := 30000.0
 const FLIGHT_WHEEL_STEP := 10.0
@@ -39,14 +40,22 @@ const RCS_NOSE_Z := 1.42
 const RCS_REAR_Z := -1.42
 const ORBIT_SEGMENTS := 192
 const ORBIT_RATE_AT_1_AU := TAU / 120.0
+const ORBIT_TIME_SCALE := 0.125
+const ORBIT_RADIUS_SCALE := 8.0
 const MIN_ORBIT_RATE_AXIS_AU := 0.2
 const PLAYFIELD_SIZE := 140000.0
 const FLIGHT_GRID_SIZE := 4000.0
 const FLIGHT_GRID_STEP := 8.0
 const MAP_GRID_SIZE := 140000.0
-const MAP_GRID_STEP := WORLD_UNITS_PER_AU * 8.0
+const MAP_GRID_STEP := WORLD_UNITS_PER_AU * 4.0
 const STAR_FIELD_SIZE := 4000.0
 const STAR_COUNT := 30000
+const VIEW_YAW_PER_PIXEL := 0.005
+const VIEW_PITCH_PER_PIXEL := 0.005
+const MIN_VIEW_PITCH := 0.0
+const MAX_VIEW_PITCH := PI * 0.42
+const FLIGHT_CAMERA_FAR := 100000.0
+const MAP_CAMERA_FAR := 300000.0
 
 @export_enum("flight", "map") var startup_mode := "flight"
 
@@ -71,6 +80,9 @@ var map_grid: MeshInstance3D
 var main_thrust: GPUParticles3D
 var main_thrust_light: OmniLight3D
 var rcs_jets: Dictionary = {}
+var view_pitch := 0.0
+var view_yaw := 0.0
+var is_dragging := false
 
 
 func _ready() -> void:
@@ -126,15 +138,26 @@ func _unhandled_input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 				return
 
-	if event is InputEventMouseButton and event.pressed:
+	if event is InputEventMouseButton:
 		var mouse_event := event as InputEventMouseButton
-		var step := MAP_WHEEL_STEP if active_mode == MODE_MAP else FLIGHT_WHEEL_STEP
-		if mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			_apply_zoom_step(-step)
+		if mouse_event.button_index == MOUSE_BUTTON_LEFT:
+			is_dragging = mouse_event.pressed
 			get_viewport().set_input_as_handled()
-		elif mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_apply_zoom_step(step)
-			get_viewport().set_input_as_handled()
+			return
+		if mouse_event.pressed:
+			var step := MAP_WHEEL_STEP if active_mode == MODE_MAP else FLIGHT_WHEEL_STEP
+			if mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP:
+				_apply_zoom_step(-step)
+				get_viewport().set_input_as_handled()
+			elif mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+				_apply_zoom_step(step)
+				get_viewport().set_input_as_handled()
+
+	if event is InputEventMouseMotion and is_dragging:
+		var motion_event := event as InputEventMouseMotion
+		view_yaw = wrapf(view_yaw - motion_event.relative.x * VIEW_YAW_PER_PIXEL, -PI, PI)
+		view_pitch = clampf(view_pitch + motion_event.relative.y * VIEW_PITCH_PER_PIXEL, MIN_VIEW_PITCH, MAX_VIEW_PITCH)
+		get_viewport().set_input_as_handled()
 
 
 func _resolve_start_mode() -> String:
@@ -292,20 +315,48 @@ func _update_flight_camera() -> void:
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	camera.size = flight_camera_size
 	camera.near = 0.05
-	camera.far = FLIGHT_CAMERA_HEIGHT + 200.0
+	camera.far = FLIGHT_CAMERA_FAR
 	camera.current = true
-	camera.global_position = ship_root.global_position + Vector3(0.0, FLIGHT_CAMERA_HEIGHT, 0.0)
-	camera.rotation = Vector3(-PI * 0.5, 0.0, 0.0)
+	var basis := _view_basis()
+	camera.basis = basis
+	camera.global_position = ship_root.global_position + basis.z * FLIGHT_CAMERA_HEIGHT
 
 
 func _update_map_camera() -> void:
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	camera.size = map_camera_size
 	camera.near = 0.05
-	camera.far = MAP_CAMERA_HEIGHT + 200.0
+	camera.far = MAP_CAMERA_FAR
 	camera.current = true
-	camera.global_position = Vector3(0.0, MAP_CAMERA_HEIGHT, 0.0)
-	camera.rotation = Vector3(-PI * 0.5, 0.0, 0.0)
+	var basis := _view_basis()
+	camera.basis = basis
+	camera.global_position = basis.z * MAP_CAMERA_HEIGHT
+
+
+func _view_basis() -> Basis:
+	var yaw_basis := Basis(Vector3.UP, view_yaw)
+	var pitch_basis := Basis(Vector3.RIGHT, -PI * 0.5 + view_pitch)
+	return yaw_basis * pitch_basis
+
+
+func _apply_overlay_flags(material: BaseMaterial3D) -> void:
+	# Ship visuals share the orbital plane (y=0) with bodies — draw them as an
+	# overlay so they always appear on top regardless of camera angle / depth.
+	material.no_depth_test = true
+	material.render_priority = SHIP_OVERLAY_RENDER_PRIORITY
+
+
+func _apply_overlay_to_subtree(root: Node) -> void:
+	for child in root.find_children("*", "MeshInstance3D", true, false):
+		var mi := child as MeshInstance3D
+		if mi.mesh == null:
+			continue
+		for surface_idx in range(mi.mesh.get_surface_count()):
+			var mat := mi.get_active_material(surface_idx)
+			if mat is BaseMaterial3D:
+				var dup := (mat as BaseMaterial3D).duplicate() as BaseMaterial3D
+				_apply_overlay_flags(dup)
+				mi.set_surface_override_material(surface_idx, dup)
 
 
 func _configure_world() -> void:
@@ -455,6 +506,7 @@ func _build_ship_map_icon() -> void:
 	material.emission_enabled = true
 	material.emission = Color(1.0, 0.62, 0.18)
 	material.emission_energy_multiplier = 0.45
+	_apply_overlay_flags(material)
 	mesh_instance.material_override = material
 
 	map_ship_icon.add_child(mesh_instance)
@@ -597,11 +649,12 @@ func _create_orbit_ring(body: Dictionary, parent_node: Node3D) -> void:
 
 
 func _update_orbits(delta: float) -> void:
+	var scaled_delta := delta * ORBIT_TIME_SCALE
 	for i in range(bodies.size()):
 		var body := bodies[i]
 		var angular_velocity := float(body.get("angular_velocity_rad_per_second", 0.0))
 		if angular_velocity != 0.0:
-			body["orbit_angle"] = fposmod(float(body.get("orbit_angle", 0.0)) + angular_velocity * delta, TAU)
+			body["orbit_angle"] = fposmod(float(body.get("orbit_angle", 0.0)) + angular_velocity * scaled_delta, TAU)
 			bodies[i] = body
 
 		var body_node := body.get("node") as Node3D
@@ -678,7 +731,7 @@ func _map_body_scale(physical_radius: float) -> float:
 func _orbit_radius_units(body: Dictionary, parent_index: int) -> float:
 	if parent_index < 0:
 		return 0.0
-	return _semi_major_axis_au(body) * WORLD_UNITS_PER_AU
+	return _semi_major_axis_au(body) * WORLD_UNITS_PER_AU * ORBIT_RADIUS_SCALE
 
 
 func _angular_velocity_rad_per_second(body: Dictionary) -> float:
@@ -710,6 +763,7 @@ func _build_main_thrust() -> void:
 	particle_material.emission_enabled = true
 	particle_material.emission = Color(0.34, 0.82, 1.0)
 	particle_material.emission_energy_multiplier = 1.25
+	_apply_overlay_flags(particle_material)
 	particle_mesh.material = particle_material
 
 	var process_material := ParticleProcessMaterial.new()
@@ -779,6 +833,7 @@ func _create_rcs_jet(jet_name: String, local_position: Vector3, direction: Vecto
 	particle_material.emission_enabled = true
 	particle_material.emission = Color.WHITE
 	particle_material.emission_energy_multiplier = 0.75
+	_apply_overlay_flags(particle_material)
 	particle_mesh.material = particle_material
 
 	var process_material := ParticleProcessMaterial.new()
@@ -839,6 +894,7 @@ func _load_ship_model() -> void:
 			ship_model.name = "Canary"
 			ship_model_root.add_child(ship_model)
 			_fit_ship_model(ship_model)
+			_apply_overlay_to_subtree(ship_model)
 			return
 
 	push_warning("Could not load ship model at %s. Using placeholder mesh." % SHIP_MODEL_PATH)
@@ -889,6 +945,7 @@ func _create_placeholder_ship() -> void:
 	material.albedo_color = Color(0.95, 0.82, 0.28)
 	material.metallic = 0.15
 	material.roughness = 0.42
+	_apply_overlay_flags(material)
 	placeholder.material_override = material
 	ship_model_root.add_child(placeholder)
 
@@ -922,7 +979,7 @@ func _update_hud() -> void:
 	var speed := ship_velocity.length()
 	var body_factor := BODY_VISIBILITY_FACTOR * body_size_multiplier
 	if active_mode == MODE_MAP:
-		hud_label.text = "%s — map view\nShip   %.1f, %.1f u\nBodies %d   Body× %.0f\nZoom   %.0f u   (M: flight  wheel/+-: zoom  {/}: bodies)" % [
+		hud_label.text = "%s — map view\nShip   %.1f, %.1f u\nBodies %d   Body× %.0f\nZoom   %.0f u   (M: flight  wheel/+-: zoom  drag: tilt  {/}: bodies)" % [
 			system_name,
 			ship_root.position.x,
 			ship_root.position.z,
@@ -932,7 +989,7 @@ func _update_hud() -> void:
 		]
 		return
 
-	hud_label.text = "%s — flight\nVelocity %.1f u/s\nPosition %.1f, %.1f u\nBody× %.0f   Zoom %.0f u   (M: map  arrows: fly  wheel/+-: zoom  {/}: bodies)" % [
+	hud_label.text = "%s — flight\nVelocity %.1f u/s\nPosition %.1f, %.1f u\nBody× %.0f   Zoom %.0f u   (M: map  arrows: fly  wheel/+-: zoom  drag: tilt  {/}: bodies)" % [
 		system_name,
 		speed,
 		ship_root.position.x,
