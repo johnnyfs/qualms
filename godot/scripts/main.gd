@@ -41,6 +41,7 @@ const RCS_REAR_Z := -1.42
 const ORBIT_SEGMENTS := 192
 const ORBIT_RATE_AT_1_AU := TAU / 120.0
 const ORBIT_TIME_SCALE := 0.125
+const ORBIT_RADIUS_SCALE := 8.0
 const MIN_ORBIT_RATE_AXIS_AU := 0.2
 const PLAYFIELD_SIZE := 140000.0
 const FLIGHT_GRID_SIZE := 4000.0
@@ -730,7 +731,7 @@ func _map_body_scale(physical_radius: float) -> float:
 func _orbit_radius_units(body: Dictionary, parent_index: int) -> float:
 	if parent_index < 0:
 		return 0.0
-	return _semi_major_axis_au(body) * WORLD_UNITS_PER_AU
+	return _semi_major_axis_au(body) * WORLD_UNITS_PER_AU * ORBIT_RADIUS_SCALE
 
 
 func _angular_velocity_rad_per_second(body: Dictionary) -> float:
