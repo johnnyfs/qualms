@@ -319,7 +319,6 @@ func _update_flight_camera() -> void:
 	var basis := _view_basis()
 	camera.basis = basis
 	camera.global_position = ship_root.global_position + basis.z * FLIGHT_CAMERA_HEIGHT
-	_align_grids_to_view(ship_root.global_position)
 
 
 func _update_map_camera() -> void:
@@ -331,7 +330,6 @@ func _update_map_camera() -> void:
 	var basis := _view_basis()
 	camera.basis = basis
 	camera.global_position = basis.z * MAP_CAMERA_HEIGHT
-	_align_grids_to_view(Vector3.ZERO)
 
 
 func _view_basis() -> Basis:
@@ -358,18 +356,6 @@ func _apply_overlay_to_subtree(root: Node) -> void:
 				var dup := (mat as BaseMaterial3D).duplicate() as BaseMaterial3D
 				_apply_overlay_flags(dup)
 				mi.set_surface_override_material(surface_idx, dup)
-
-
-func _align_grids_to_view(focal: Vector3) -> void:
-	# Keep grids unaffected by view angle by orienting them perpendicular to the camera —
-	# the grid pattern looks the same on screen regardless of pitch/yaw. Other things in
-	# the world (ship, orbitals, paths, starfield) rotate naturally with the camera.
-	var basis := _view_basis()
-	var screen_aligned := Basis(basis.x, basis.z, -basis.y)
-	if flight_grid != null:
-		flight_grid.global_transform = Transform3D(screen_aligned, Vector3(focal.x, 0.0, focal.z))
-	if map_grid != null:
-		map_grid.global_transform = Transform3D(screen_aligned, Vector3.ZERO)
 
 
 func _configure_world() -> void:
