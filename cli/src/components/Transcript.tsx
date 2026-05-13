@@ -1,8 +1,8 @@
 import { Static, Text } from "ink";
-import type { TranscriptEntry } from "../types.js";
+import type { KeyedTranscriptEntry, TranscriptEntry } from "../types.js";
 
 interface Props {
-  readonly entries: readonly TranscriptEntry[];
+  readonly entries: readonly KeyedTranscriptEntry[];
 }
 
 function entryColor(entry: TranscriptEntry): string | undefined {
@@ -18,15 +18,22 @@ function entryColor(entry: TranscriptEntry): string | undefined {
       return "red";
     case "info":
       return "magenta";
+    case "title":
+      return "white";
+    case "narrative":
+      return undefined;
   }
 }
 
+function entryBold(entry: TranscriptEntry): boolean {
+  return entry.kind === "title";
+}
+
 export function Transcript({ entries }: Props) {
-  const indexed = entries.map((entry, index) => ({ ...entry, index }));
   return (
-    <Static items={indexed}>
-      {(entry) => (
-        <Text key={entry.index} color={entryColor(entry)}>
+    <Static items={entries as KeyedTranscriptEntry[]}>
+      {(entry: KeyedTranscriptEntry) => (
+        <Text key={entry.seq} color={entryColor(entry)} bold={entryBold(entry)}>
           {entry.text}
         </Text>
       )}

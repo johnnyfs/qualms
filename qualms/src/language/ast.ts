@@ -7,6 +7,7 @@ export type TopLevelStatement =
   | RelationStatement
   | ExternPredicateStatement
   | CallableStatement
+  | QueryStatement
   | RuleStatement
   | EntityStatement
   | ExtendStatement
@@ -43,6 +44,13 @@ export interface ExternPredicateStatement {
   readonly kind: "externPredicate";
   readonly id: string;
   readonly parameters: readonly ParameterPattern[];
+}
+
+export interface QueryStatement {
+  readonly kind: "query";
+  readonly id: string;
+  readonly parameters: readonly ParameterPattern[];
+  readonly body: Expression;
 }
 
 export interface RuleStatement {

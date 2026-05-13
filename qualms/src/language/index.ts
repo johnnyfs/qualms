@@ -23,10 +23,12 @@ export {
   evalLanguageAtom,
   languageRuntimeInternals,
   playLanguageCall,
+  playLanguageQuery,
   runLanguageValidations,
 } from "./runtime.js";
 export type {
   LanguagePlayResult,
+  LanguageQueryResult,
   LanguageEvent,
   LanguageFailure,
   LanguageHostAdapter,

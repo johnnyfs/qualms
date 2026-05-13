@@ -126,6 +126,139 @@ export function evalLanguageAtom(
   });
 }
 
+export interface LanguageQueryResult {
+  readonly status: "passed" | "failed";
+  readonly bindings: readonly Record<string, GroundTerm>[];
+  readonly outputs: readonly string[];
+  readonly reasons: readonly string[];
+  readonly failures: readonly LanguageFailure[];
+}
+
+export function playLanguageQuery(
+  model: StoryModel,
+  call: string | RelationAtom,
+  options: LanguageRuntimeOptions = {},
+): LanguageQueryResult {
+  const atom = typeof call === "string" ? parseRelationAtom(call) : call;
+  const query = model.queries.get(atom.relation);
+  if (!query) {
+    return {
+      status: "failed",
+      bindings: [],
+      outputs: [],
+      reasons: [`!${emitRelationAtom(atom, {})}`],
+      failures: [
+        {
+          kind: "unknown_action",
+          message: `unknown query '${atom.relation}'`,
+          callable: atom.relation,
+        },
+      ],
+    };
+  }
+
+  const args = atom.args.map(groundTermFromTerm);
+  const effects: Effect[] = [];
+  const events: LanguageEvent[] = [];
+  const bound = bindParameters(model, query.parameters, args, effects, events, options);
+  const paramNames = new Set<string>();
+  for (const param of query.parameters) {
+    if (param.name) paramNames.add(param.name);
+  }
+  const outputs = collectFreeVariables(query.body, paramNames);
+
+  if (bound.length === 0) {
+    return {
+      status: "failed",
+      bindings: [],
+      outputs,
+      reasons: [`!${emitRelationAtom(atom, {})}`],
+      failures: [
+        {
+          kind: "action_failed",
+          message: `query '${atom.relation}' parameter bind failed`,
+          callable: atom.relation,
+        },
+      ],
+    };
+  }
+
+  const bindings: Record<string, GroundTerm>[] = [];
+  for (const env of bound) {
+    const matches = evalExpression(model, query.body, env, effects, events, options);
+    for (const match of matches) {
+      const projection: Record<string, GroundTerm> = {};
+      for (const name of outputs) {
+        const value = match[name];
+        if (value !== undefined) projection[name] = value;
+      }
+      bindings.push(projection);
+    }
+  }
+
+  return {
+    status: "passed",
+    bindings: dedupeBindings(bindings),
+    outputs,
+    reasons: [],
+    failures: [],
+  };
+}
+
+function collectFreeVariables(
+  expression: Expression,
+  bound: ReadonlySet<string>,
+): readonly string[] {
+  const seen = new Set<string>();
+  const order: string[] = [];
+  const visitTerm = (term: Term) => {
+    if (term.kind === "variable") {
+      if (bound.has(term.id) || seen.has(term.id)) return;
+      seen.add(term.id);
+      order.push(term.id);
+      return;
+    }
+    if (term.kind === "relationInstance") {
+      for (const arg of term.atom.args) visitTerm(arg);
+    }
+  };
+  const visitExpression = (expr: Expression) => {
+    switch (expr.kind) {
+      case "relation":
+        for (const arg of expr.atom.args) visitTerm(arg);
+        return;
+      case "not":
+        visitExpression(expr.operand);
+        return;
+      case "binary":
+        visitExpression(expr.left);
+        visitExpression(expr.right);
+        return;
+      case "equal":
+        visitTerm(expr.left);
+        visitTerm(expr.right);
+        return;
+    }
+  };
+  visitExpression(expression);
+  return order;
+}
+
+function dedupeBindings(
+  bindings: readonly Record<string, GroundTerm>[],
+): readonly Record<string, GroundTerm>[] {
+  const seen = new Set<string>();
+  const out: Record<string, GroundTerm>[] = [];
+  for (const binding of bindings) {
+    const sortedKeys = Object.keys(binding).sort();
+    const key = JSON.stringify(sortedKeys.map((k) => [k, binding[k]]));
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(binding);
+  }
+  return out;
+}
+
 export function runLanguageValidations(
   model: StoryModel,
   options: LanguageRuntimeOptions = {},

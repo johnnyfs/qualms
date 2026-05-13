@@ -11,6 +11,7 @@ import type {
   NotExpression,
   ParameterPattern,
   Program,
+  QueryStatement,
   RelationAtom,
   RelationExpression,
   RelationParameter,
@@ -51,6 +52,7 @@ export function programFromModel(model: StoryModel): Program {
     ...model.externalPredicates.values(),
     ...model.predicates.values(),
     ...model.actions.values(),
+    ...model.queries.values(),
     ...model.rules,
   ];
   for (const [id, traits] of model.entities) {
@@ -99,6 +101,8 @@ export function emitTopLevelStatement(statement: TopLevelStatement): string {
     case "predicate":
     case "action":
       return emitCallable(statement);
+    case "query":
+      return emitQuery(statement);
     case "rule":
       return emitRule(statement);
     case "entity":
@@ -135,6 +139,10 @@ function emitExternPredicate(statement: ExternPredicateStatement): string {
 function emitCallable(statement: CallableStatement): string {
   const prefix = statement.replace ? "replace " : "";
   return `${prefix}${statement.kind} ${statement.id}(${statement.parameters.map(emitParameter).join(", ")}) ${emitBlock(statement.body)}`;
+}
+
+function emitQuery(statement: QueryStatement): string {
+  return `query ${statement.id}(${statement.parameters.map(emitParameter).join(", ")}) {\n${indent(emitExpression(statement.body))}\n}`;
 }
 
 function emitRule(statement: RuleStatement): string {

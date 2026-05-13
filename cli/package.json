@@ -19,7 +19,8 @@
     "@quealm/qualms": "workspace:*",
     "ink": "latest",
     "ink-text-input": "latest",
-    "react": "latest"
+    "react": "latest",
+    "yaml": "^2.5.0"
   },
   "devDependencies": {
     "@types/node": "^22.19.17",

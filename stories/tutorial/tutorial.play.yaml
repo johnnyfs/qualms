@@ -1,0 +1,49 @@
+player: Player
+
+names:
+  BoneShard: bone shard
+  MasterKey: master key
+  MakeshiftKey: makeshift key
+  ClosetDoor: closet door
+
+synonyms:
+  MasterKey: [key, master, brass key]
+  MakeshiftKey: [shiv, makeshift]
+  Bars: [door, gate, iron bars]
+  ClosetDoor: [closet]
+
+descriptions:
+  Cell: "A cramped stone cell. Iron bars seal the only exit; a corridor lies beyond."
+  Corridor: "A narrow corridor. The cell door is at one end and a closet at the other."
+  Outside: "Cold open air. You taste freedom."
+  Closet: "A janitor's closet, cluttered with junk."
+
+presentations:
+  BoneShard: "A jagged bone shard glints in the dust."
+  MasterKey: "A heavy brass key lies on the floor."
+  MakeshiftKey: "A makeshift key has been wedged into a crack."
+  Bars: "Iron bars seal the way to the corridor."
+  ClosetDoor: "A scuffed wooden door leads into a closet."
+  Guard: "A guard slouches against the corridor wall, watching you."
+  Mop: "A grimy mop leans in the corner."
+  Money: "A small purse of coins sits here."
+
+verbs:
+  Go:          { words: [go, walk, move], prepositions: { 0: to } }
+  Take:        { words: [take, grab, get, pick up] }
+  Drop:        { words: [drop, put down] }
+  Examine:     { words: [examine, look at, x, l] }
+  Open:        { words: [open] }
+  Close:       { words: [close, shut] }
+  Unlock:      { words: [unlock], prepositions: { 1: with } }
+  Lock:        { words: [lock],   prepositions: { 1: with } }
+  TalkAbout:   { words: [talk to, ask], prepositions: { 1: about } }
+  StopTalking: { words: [stop talking to, leave] }
+  Inventory:   { words: [inventory, i] }
+
+visibility:
+  predicate: IsVisibleTo
+  locationFact: At
+
+view:
+  kind: infocom

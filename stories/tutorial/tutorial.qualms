@@ -62,6 +62,10 @@ trait Portable
 
 relation Carrying(Actor, Portable)
 
+query Inventory(actor: Actor) {
+  Carrying(actor, ?item)
+}
+
 action Take(actor: Actor, target: Portable) {
   when (IsColocated(actor, target)) {
     set Carrying(actor, target)

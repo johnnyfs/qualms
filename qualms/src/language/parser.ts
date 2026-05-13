@@ -10,6 +10,7 @@ import type {
   FailStatement,
   EmitStatement,
   ParameterPattern,
+  QueryStatement,
   SucceedStatement,
   Program,
   RelationAtom,
@@ -242,6 +243,7 @@ class Parser {
     if (this.matchKeyword("replace")) return this.replaceStatement();
     if (this.matchKeyword("action")) return this.callableStatement("action");
     if (this.matchKeyword("predicate")) return this.callableStatement("predicate");
+    if (this.matchKeyword("query")) return this.queryStatement();
     if (this.matchKeyword("before")) return this.ruleStatement("before");
     if (this.matchKeyword("after")) return this.ruleStatement("after");
     if (this.matchKeyword("entity")) return this.entityStatement();
@@ -319,6 +321,17 @@ class Parser {
     const parameters = this.callParameters();
     const body = this.block();
     return { kind, id, parameters, body };
+  }
+
+  private queryStatement(): QueryStatement {
+    this.expectKeyword("query");
+    const id = this.identifier();
+    const parameters = this.callParameters();
+    this.expect("lbrace");
+    const body = this.expression();
+    this.skipSemis();
+    this.expect("rbrace");
+    return { kind: "query", id, parameters, body };
   }
 
   private ruleStatement(phase: "before" | "after"): RuleStatement {

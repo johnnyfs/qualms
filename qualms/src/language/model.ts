@@ -6,6 +6,7 @@ import type {
   ExternPredicateStatement,
   ExtendStatement,
   Program,
+  QueryStatement,
   RelationAtom,
   RelationParameter,
   RelationStatement,
@@ -47,6 +48,7 @@ export class StoryModel {
   readonly externalPredicates = new Map<string, ExternPredicateStatement>();
   readonly predicates = new Map<string, CallableStatement>();
   readonly actions = new Map<string, CallableStatement>();
+  readonly queries = new Map<string, QueryStatement>();
   readonly rules: RuleStatement[] = [];
   readonly validations = new Map<string, ValidationStatement>();
   readonly entities = new Map<string, Set<string>>();
@@ -59,6 +61,7 @@ export class StoryModel {
     for (const [id, predicate] of this.externalPredicates) clone.externalPredicates.set(id, predicate);
     for (const [id, predicate] of this.predicates) clone.predicates.set(id, predicate);
     for (const [id, action] of this.actions) clone.actions.set(id, action);
+    for (const [id, query] of this.queries) clone.queries.set(id, query);
     clone.rules.push(...this.rules);
     for (const [id, validation] of this.validations) clone.validations.set(id, validation);
     for (const [id, traits] of this.entities) clone.entities.set(id, new Set(traits));
@@ -85,6 +88,9 @@ export class StoryModel {
           break;
         case "action":
           this.addCallable(this.actions, statement, "action");
+          break;
+        case "query":
+          this.addQuery(statement);
           break;
         case "rule":
           this.validateRule(statement);
@@ -192,10 +198,22 @@ export class StoryModel {
 
   private addExternPredicate(statement: ExternPredicateStatement): void {
     this.validateCallableTypes(statement);
-    if (this.predicates.has(statement.id) || this.actions.has(statement.id)) {
+    if (this.predicates.has(statement.id) || this.actions.has(statement.id) || this.queries.has(statement.id)) {
       throw new LanguageModelError(`duplicate callable '${statement.id}'`);
     }
     this.addUnique(this.externalPredicates, statement.id, statement, "external predicate");
+  }
+
+  private addQuery(statement: QueryStatement): void {
+    this.validateCallableTypes(statement);
+    if (
+      this.predicates.has(statement.id) ||
+      this.actions.has(statement.id) ||
+      this.externalPredicates.has(statement.id)
+    ) {
+      throw new LanguageModelError(`duplicate callable '${statement.id}'`);
+    }
+    this.addUnique(this.queries, statement.id, statement, "query");
   }
 
   private validateRulePurity(statement: RuleStatement): void {
