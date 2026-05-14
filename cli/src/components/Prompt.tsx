@@ -12,6 +12,7 @@ interface Props {
   readonly mode: "dsl" | "play" | "coauthor";
   readonly onSubmit: (text: string) => void;
   readonly onCycleMode: () => void;
+  readonly onExit: () => void;
   readonly pendingQuestion?: string | null;
 }
 
@@ -19,10 +20,14 @@ type Reducer = (state: InputState, event: InputEvent) => InputState;
 
 const reducer: Reducer = (state, event) => inputReducer(state, event).state;
 
-export function Prompt({ mode, onSubmit, onCycleMode, pendingQuestion }: Props) {
+export function Prompt({ mode, onSubmit, onCycleMode, onExit, pendingQuestion }: Props) {
   const [state, dispatch] = useReducer(reducer, initialInputState);
 
   useInput((input, key) => {
+    if (key.ctrl && input === "d") {
+      onExit();
+      return;
+    }
     if (key.shift && key.tab) {
       onCycleMode();
       return;

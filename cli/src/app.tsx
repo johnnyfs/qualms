@@ -277,6 +277,7 @@ export function App({
         state={playUiState}
         setState={setPlayUiState}
         onCycleMode={onCycleMode}
+        onExit={exit}
       />
     );
   }
@@ -289,6 +290,7 @@ export function App({
         mode={mode}
         onSubmit={onSubmit}
         onCycleMode={onCycleMode}
+        onExit={exit}
         pendingQuestion={pendingQuestion}
       />
       <Footer mode={mode} />

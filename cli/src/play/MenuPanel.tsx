@@ -3,9 +3,10 @@ import type { MenuFrame } from "./menuState.js";
 
 interface Props {
   readonly frame: MenuFrame;
+  readonly selectedIndex: number;
 }
 
-export function MenuPanel({ frame }: Props) {
+export function MenuPanel({ frame, selectedIndex }: Props) {
   const numbered = frame.options.slice(0, 9);
   const overflow = frame.options.length > 9;
   return (
@@ -16,13 +17,17 @@ export function MenuPanel({ frame }: Props) {
         </Text>
       ))}
       <Text> </Text>
-      {numbered.map((option, i) => (
-        <Text key={i}>
-          {`  ${i + 1}. `}
-          {labelOf(option)}
-        </Text>
-      ))}
-      {overflow ? <Text dimColor>  ...and more (refine via DSL mode for now)</Text> : null}
+      {numbered.map((option, i) => {
+        const selected = i === selectedIndex;
+        const marker = selected ? "▶" : " ";
+        const label = labelOf(option);
+        return (
+          <Text key={i} bold={selected} inverse={selected} color={selected ? "yellow" : undefined}>
+            {`${marker} ${i + 1}. ${label}`}
+          </Text>
+        );
+      })}
+      {overflow ? <Text dimColor>  ...and more</Text> : null}
       {frame.backOption ? (
         <Text dimColor>{`  0. ${labelOf(frame.backOption)}`}</Text>
       ) : null}
