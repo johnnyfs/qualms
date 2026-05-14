@@ -29,21 +29,27 @@ presentations:
   Money: "A small purse of coins sits here."
 
 verbs:
-  Go:          { words: [go, walk, move], prepositions: { 0: to } }
-  Take:        { words: [take, grab, get, pick up] }
-  Drop:        { words: [drop, put down] }
-  Examine:     { words: [examine, look at, x, l] }
+  Go:          { words: [go] }
+  Take:        { words: [take] }
+  Drop:        { words: [drop] }
+  Examine:     { words: [examine] }
   Open:        { words: [open] }
-  Close:       { words: [close, shut] }
-  Unlock:      { words: [unlock], prepositions: { 1: with } }
-  Lock:        { words: [lock],   prepositions: { 1: with } }
-  TalkAbout:   { words: [talk to, ask], prepositions: { 1: about } }
-  StopTalking: { words: [stop talking to, leave] }
-  Inventory:   { words: [inventory, i] }
+  Close:       { words: [close] }
+  Unlock:      { words: [unlock] }
+  Lock:        { words: [lock] }
+  TalkAbout:   { words: [talk to] }
+  StopTalking: { words: [stop talking to] }
+  Inventory:   { words: [inventory] }
 
 visibility:
   predicate: IsVisibleTo
   locationFact: At
 
+conversation:
+  startVerb: TalkAbout
+  stopVerb: StopTalking
+  topicsQuery: Topics
+  currentTopicQuery: CurrentTopic
+
 view:
-  kind: infocom
+  kind: menu

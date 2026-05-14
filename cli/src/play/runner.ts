@@ -2,7 +2,6 @@ import { language } from "@quealm/qualms";
 import type { TranscriptEntry } from "../types.js";
 import type { PlayConfig } from "./config.js";
 import { buildNameIndex, type NameIndex } from "./naming.js";
-import { parsePlayInput, type ParseError } from "./parse.js";
 import { buildVerbTable, type VerbTable } from "./verbs.js";
 import { infocomView } from "./infocomView.js";
 import type { View } from "./view.js";
@@ -40,71 +39,55 @@ export function renderInitialView(session: PlaySession): readonly TranscriptEntr
   });
 }
 
-export function handlePlayInput(
+export interface MenuSubmitResult {
+  readonly entries: readonly TranscriptEntry[];
+  readonly atom: language.RelationAtom;
+  readonly result?: language.LanguagePlayResult;
+  readonly queryResult?: language.LanguageQueryResult;
+}
+
+/**
+ * Runs a menu-built atom against the model and renders the result via the session view.
+ * Dispatches to playLanguageCall (action) or playLanguageQuery (query) based on the
+ * relation's kind in model. Unknown relations return a parser-free "unknown" message.
+ */
+export function handleMenuSubmit(
   session: PlaySession,
-  input: string,
-): readonly TranscriptEntry[] {
-  const trimmed = input.trim();
-  if (!trimmed) return [];
-
-  const parsed = parsePlayInput(trimmed, {
-    verbs: session.verbs,
-    names: session.names,
-    config: session.config,
-  });
-
-  if (parsed.kind !== "ok") {
-    return session.view.renderTurn({
+  atom: language.RelationAtom,
+): MenuSubmitResult {
+  if (session.model.actions.has(atom.relation)) {
+    const result = playLanguageCall(session.model, atom);
+    const entries = session.view.renderTurn({
       model: session.model,
       config: session.config,
       names: session.names,
       verbs: session.verbs,
-      lastError: parseErrorMessage(parsed, session.names),
+      lastAtom: atom,
+      lastResult: result,
     });
+    return { entries, atom, result };
   }
-
-  if (parsed.verb.kind === "query") {
-    const queryResult = playLanguageQuery(session.model, parsed.atom);
-    return session.view.renderTurn({
+  if (session.model.queries.has(atom.relation)) {
+    const queryResult = playLanguageQuery(session.model, atom);
+    const entries = session.view.renderTurn({
       model: session.model,
       config: session.config,
       names: session.names,
       verbs: session.verbs,
-      lastAtom: parsed.atom,
+      lastAtom: atom,
       lastQueryResult: queryResult,
     });
+    return { entries, atom, queryResult };
   }
-
-  const result = playLanguageCall(session.model, parsed.atom);
-  return session.view.renderTurn({
-    model: session.model,
-    config: session.config,
-    names: session.names,
-    verbs: session.verbs,
-    lastAtom: parsed.atom,
-    lastResult: result,
-  });
+  return {
+    entries: session.view.renderTurn({
+      model: session.model,
+      config: session.config,
+      names: session.names,
+      verbs: session.verbs,
+      lastError: `unknown action or query '${atom.relation}'`,
+    }),
+    atom,
+  };
 }
 
-function parseErrorMessage(err: ParseError, names: NameIndex): string {
-  switch (err.kind) {
-    case "empty":
-      return "Say something.";
-    case "unknown_verb":
-      return `I don't know how to "${err.text}".`;
-    case "missing_preposition":
-      return `Try "${err.preposition}" — I didn't see a "${err.preposition}" in there.`;
-    case "missing_noun":
-      return err.parameterName
-        ? `What ${err.parameterName}?`
-        : "What did you mean?";
-    case "unknown_noun":
-      return `I don't see any "${err.phrase}" here.`;
-    case "ambiguous_noun": {
-      const list = err.candidates.map((id) => `the ${names.displayName(id)}`).join(" or ");
-      return `Do you mean ${list}?`;
-    }
-    case "trailing_text":
-      return `I didn't understand "${err.text}".`;
-  }
-}

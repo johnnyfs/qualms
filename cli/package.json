@@ -16,11 +16,16 @@
     "node": ">=22"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^2.0.0",
+    "@ai-sdk/openai": "^2.0.0",
     "@quealm/qualms": "workspace:*",
+    "ai": "^5.0.0",
+    "dotenv": "^16.4.5",
     "ink": "latest",
     "ink-text-input": "latest",
     "react": "latest",
-    "yaml": "^2.5.0"
+    "yaml": "^2.5.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^22.19.17",

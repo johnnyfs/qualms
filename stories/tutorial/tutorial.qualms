@@ -249,6 +249,24 @@ replace action Examine(actor: Actor, target) {
   }
 }
 
+-- Enumerable counterpart to IsVisibleTo. Engine clients (menus, GUIs)
+-- call this to populate "what can I see?" lists. The body inlines the
+-- IsVisibleTo + IsColocated matching logic so the runtime can enumerate
+-- ?target — predicates with variable arguments aren't yet enumerable.
+-- The fourth clause covers gated doors (Bars are colocated with the
+-- actor by virtue of gating a path from here); the fifth clause covers
+-- cross-room targets through transparent or open gates (the Guard in
+-- the Corridor as seen from the Cell).
+query Visible(actor: Actor) {
+  At(actor, ?target)
+  | (At(actor, ?here) & At(?target, ?here))
+  | Carrying(actor, ?target)
+  | (At(actor, ?here) & Gated(Path(?here, _), ?target))
+  | (At(actor, ?here) & At(?target, ?location) & Path(?here, ?location)
+     & ConveysVisibility(Path(?here, ?location))
+     & !(Gated(Path(?here, ?location), ?door) & !Transparent(?door) & !Opened(?door)))
+}
+
 entity Guard { Actor, Locatable, Describable }
 entity Closet { Location, Describable }
 entity ClosetDoor { Openable, Locatable, Describable }
@@ -342,6 +360,19 @@ action StopTalking(actor: Actor, speaker: Speaker) {
   when (InConversation(actor, speaker, ?topic)) {
     set !InConversation(actor, speaker, ?topic);
   }
+}
+
+-- Enumerable counterpart to WillTalkAbout. Engine clients call this to
+-- populate the conversation menu. Top-level entries plus sub-topics off
+-- the current conversation, mirroring WillTalkAbout's body.
+query Topics(actor: Actor, speaker: Speaker) {
+  TalksAbout(speaker, ?topic)
+  | (InConversation(actor, speaker, ?current) & LeadsTo(speaker, ?current, ?topic))
+}
+
+-- Current conversation header — used to render "Talking about <topic>".
+query CurrentTopic(actor: Actor, speaker: Speaker) {
+  InConversation(actor, speaker, ?topic)
 }
 
 entity Whatever { Topic }

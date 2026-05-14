@@ -250,10 +250,22 @@ class Parser {
     if (this.matchKeyword("extend")) return this.extendStatement();
     if (this.matchKeyword("set")) return this.setStatement();
     if (this.matchKeyword("validation")) return this.validationStatement();
+    if (this.matchKeyword("begin")) {
+      this.expectKeyword("begin");
+      return { kind: "begin" };
+    }
+    if (this.matchKeyword("commit")) {
+      this.expectKeyword("commit");
+      return { kind: "commit" };
+    }
+    if (this.matchKeyword("rollback")) {
+      this.expectKeyword("rollback");
+      return { kind: "rollback" };
+    }
     this.fail(`expected top-level statement, got '${this.peek().image}'`);
   }
 
-  private replaceStatement(): CallableStatement {
+  private replaceStatement(): CallableStatement | ValidationStatement {
     this.expectKeyword("replace");
     if (this.matchKeyword("action")) {
       return { ...this.callableStatement("action"), replace: true };
@@ -261,7 +273,12 @@ class Parser {
     if (this.matchKeyword("predicate")) {
       return { ...this.callableStatement("predicate"), replace: true };
     }
-    this.fail(`expected 'action' or 'predicate' after 'replace', got '${this.peek().image}'`);
+    if (this.matchKeyword("validation")) {
+      return { ...this.validationStatement(), replace: true };
+    }
+    this.fail(
+      `expected 'action', 'predicate', or 'validation' after 'replace', got '${this.peek().image}'`,
+    );
   }
 
   private traitStatement(): TraitStatement {

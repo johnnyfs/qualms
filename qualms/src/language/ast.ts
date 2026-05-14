@@ -12,7 +12,22 @@ export type TopLevelStatement =
   | EntityStatement
   | ExtendStatement
   | SetStatement
-  | ValidationStatement;
+  | ValidationStatement
+  | BeginStatement
+  | CommitStatement
+  | RollbackStatement;
+
+export interface BeginStatement {
+  readonly kind: "begin";
+}
+
+export interface CommitStatement {
+  readonly kind: "commit";
+}
+
+export interface RollbackStatement {
+  readonly kind: "rollback";
+}
 
 export interface TraitStatement {
   readonly kind: "trait";
@@ -82,6 +97,7 @@ export interface ValidationStatement {
   readonly kind: "validation";
   readonly id: string;
   readonly assertions: readonly ValidationAssertion[];
+  readonly replace?: boolean;
 }
 
 export type ValidationAssertion =

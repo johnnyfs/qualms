@@ -8,6 +8,7 @@ export {
 } from "./emitter.js";
 export {
   LanguageModelError,
+  LanguageValidationFailedError,
   StoryModel,
   factFromAtom,
   factKey,

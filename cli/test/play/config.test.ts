@@ -20,7 +20,29 @@ describe("parsePlayConfig", () => {
     expect(config.player).toBe("Player");
     expect(config.names.size).toBe(0);
     expect(config.visibility).toEqual({ predicate: "IsVisibleTo", locationFact: "At" });
-    expect(config.view).toEqual({ kind: "infocom" });
+    expect(config.view).toEqual({ kind: "menu" });
+    expect(config.conversation).toEqual({
+      startVerb: "TalkAbout",
+      stopVerb: "StopTalking",
+      topicsQuery: "Topics",
+      currentTopicQuery: "CurrentTopic",
+    });
+  });
+
+  it("parses an explicit conversation block", () => {
+    const config = parsePlayConfig(`
+conversation:
+  startVerb: Speak
+  stopVerb: Hush
+`);
+    expect(config.conversation.startVerb).toBe("Speak");
+    expect(config.conversation.stopVerb).toBe("Hush");
+    expect(config.conversation.topicsQuery).toBe("Topics");
+    expect(config.conversation.currentTopicQuery).toBe("CurrentTopic");
+  });
+
+  it("rejects unsupported view kinds", () => {
+    expect(() => parsePlayConfig("view:\n  kind: nethack")).toThrow(PlayConfigError);
   });
 
   it("parses a full config", () => {
@@ -72,7 +94,8 @@ view:
     expect(() => parsePlayConfig("verbs:\n  Take:\n    prepositions:\n      foo: bar")).toThrow(
       PlayConfigError,
     );
-    expect(() => parsePlayConfig("view:\n  kind: menu")).toThrow(PlayConfigError);
+    expect(() => parsePlayConfig("view:\n  kind: nethack")).toThrow(PlayConfigError);
+    expect(() => parsePlayConfig("conversation:\n  startVerb: \"\"")).toThrow(PlayConfigError);
   });
 });
 
@@ -176,6 +199,6 @@ describe("defaultPlayConfig", () => {
     expect(config.player).toBe("Player");
     expect(config.visibility.predicate).toBe("IsVisibleTo");
     expect(config.visibility.locationFact).toBe("At");
-    expect(config.view.kind).toBe("infocom");
+    expect(config.view.kind).toBe("menu");
   });
 });

@@ -14,13 +14,25 @@ import {
 } from "./play/config.js";
 import {
   createPlaySession,
-  handlePlayInput,
-  renderInitialView,
   type PlaySession,
 } from "./play/runner.js";
-import { suggest, type Suggestion } from "./play/suggest.js";
+import {
+  MenuController,
+  initialPlayUiState,
+  type PlayUiState,
+} from "./play/MenuController.js";
+import {
+  isCoauthorConfigError,
+  type CoauthorConfigResult,
+} from "./coauthor/config.js";
+import {
+  cancelCoauthor,
+  createCoauthorSession,
+  handleCoauthorInput,
+  type CoauthorSession,
+} from "./coauthor/runner.js";
 
-type Mode = "dsl" | "play";
+type Mode = "dsl" | "play" | "coauthor";
 
 interface AppProps {
   readonly initialModel: language.StoryModel;
@@ -28,6 +40,7 @@ interface AppProps {
   readonly playConfig?: PlayConfig;
   readonly playConfigSource?: string;
   readonly playWarnings?: readonly string[];
+  readonly coauthorConfig?: CoauthorConfigResult;
 }
 
 const DSL_HELP_LINES: readonly string[] = [
@@ -48,23 +61,46 @@ const PLAY_HELP_LINES: readonly string[] = [
   "  /mode dsl    switch back to DSL mode (shift-tab also cycles)",
 ];
 
+const COAUTHOR_HELP_LINES: readonly string[] = [
+  "Coauthor mode — describe a change in natural language. The agent",
+  "runs queries, plays actions, and applies DSL mutations against the",
+  "live model. All tool calls stream as pure DSL.",
+  "  /cancel      abort an in-flight agent turn or pending question",
+  "  /mode dsl    switch back to DSL mode (shift-tab also cycles)",
+  "Configure provider/model via .env (see .env.template).",
+];
+
 export function App({
   initialModel,
   storyPaths,
   playConfig,
   playConfigSource,
   playWarnings,
+  coauthorConfig,
 }: AppProps) {
   const { exit } = useApp();
   const [model, setModel] = useState(initialModel);
   const [mode, setMode] = useState<Mode>("dsl");
-  const [hasLooked, setHasLooked] = useState(false);
+  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
+  const [playUiState, setPlayUiState] = useState<PlayUiState>(initialPlayUiState);
 
   const config = useMemo(() => playConfig ?? defaultPlayConfig(), [playConfig]);
   const session = useMemo<PlaySession>(
     () => createPlaySession(model, config),
     [model, config],
   );
+
+  const coauthorSessionRef = useRef<CoauthorSession | null>(null);
+  const getCoauthorSession = useCallback((): CoauthorSession | null => {
+    if (!coauthorConfig || isCoauthorConfigError(coauthorConfig)) return null;
+    if (
+      !coauthorSessionRef.current ||
+      coauthorSessionRef.current.model !== model
+    ) {
+      coauthorSessionRef.current = createCoauthorSession(model, coauthorConfig);
+    }
+    return coauthorSessionRef.current;
+  }, [coauthorConfig, model]);
 
   const seqRef = useRef(0);
   const keyed = useCallback(
@@ -92,7 +128,12 @@ export function App({
     [keyed],
   );
 
-  const helpLines = mode === "play" ? PLAY_HELP_LINES : DSL_HELP_LINES;
+  const helpLines =
+    mode === "play"
+      ? PLAY_HELP_LINES
+      : mode === "coauthor"
+        ? COAUTHOR_HELP_LINES
+        : DSL_HELP_LINES;
 
   const runSlash = useCallback(
     (command: string): readonly TranscriptEntry[] => {
@@ -119,7 +160,7 @@ export function App({
           try {
             const reloaded = loadStories(storyPaths);
             setModel(reloaded.model);
-            setHasLooked(false);
+            setPlayUiState(initialPlayUiState);
             return [{ kind: "info", text: `reloaded ${storyPaths.length} story file(s)` }];
           } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
@@ -128,8 +169,10 @@ export function App({
         }
         case "/mode": {
           const target = parts[1]?.toLowerCase();
-          if (target !== "dsl" && target !== "play") {
-            return [{ kind: "error", text: "usage: /mode dsl | /mode play" }];
+          if (target !== "dsl" && target !== "play" && target !== "coauthor") {
+            return [
+              { kind: "error", text: "usage: /mode dsl | /mode play | /mode coauthor" },
+            ];
           }
           if (target === mode) {
             return [{ kind: "info", text: `already in ${mode} mode` }];
@@ -140,7 +183,23 @@ export function App({
           if (mode !== "play") {
             return [{ kind: "error", text: "/look is only available in play mode" }];
           }
-          return renderInitialView(session);
+          return [
+            {
+              kind: "info",
+              text: "(in play mode, the room is always visible in the room panel)",
+            },
+          ];
+        }
+        case "/cancel": {
+          if (mode !== "coauthor") {
+            return [{ kind: "error", text: "/cancel is only available in coauthor mode" }];
+          }
+          const cs = coauthorSessionRef.current;
+          if (!cs || (!cs.running && !cs.pending)) {
+            return [{ kind: "info", text: "nothing to cancel" }];
+          }
+          cancelCoauthor(cs, { append, setPendingQuestion });
+          return [{ kind: "info", text: "cancel requested" }];
         }
         default:
           return [{ kind: "error", text: `error: unknown command '${head}'` }];
@@ -155,25 +214,27 @@ export function App({
       const entries: TranscriptEntry[] = [
         { kind: "info", text: `mode: ${next}` },
       ];
-      if (next === "play" && !hasLooked) {
-        setHasLooked(true);
-        entries.push(...renderInitialView(session));
+      if (next === "coauthor" && coauthorConfig && isCoauthorConfigError(coauthorConfig)) {
+        entries.push({
+          kind: "error",
+          text: `error: ${coauthorConfig.error}`,
+        });
+      } else if (next === "coauthor" && !coauthorConfig) {
+        entries.push({
+          kind: "error",
+          text: "error: coauthor mode is not configured (missing .env)",
+        });
       }
       return entries;
     },
-    [hasLooked, session],
+    [coauthorConfig],
   );
 
   const onCycleMode = useCallback(() => {
-    const next: Mode = mode === "dsl" ? "play" : "dsl";
+    const next: Mode =
+      mode === "dsl" ? "play" : mode === "play" ? "coauthor" : "dsl";
     append(cycleTo(next));
   }, [append, cycleTo, mode]);
-
-  const suggestFn = useCallback(
-    (value: string): readonly Suggestion[] =>
-      suggest(value, session.verbs, session.names),
-    [session],
-  );
 
   const onSubmit = useCallback(
     (raw: string) => {
@@ -185,15 +246,40 @@ export function App({
         return;
       }
       if (mode === "play") {
-        const entries = handlePlayInput(session, text);
-        append([echo, ...entries]);
+        // Play mode is menu-driven; text input is impossible (this branch
+        // is unreachable since MenuController replaces the prompt).
+        return;
+      }
+      if (mode === "coauthor") {
+        append([echo]);
+        const cs = getCoauthorSession();
+        if (!cs) {
+          const reason =
+            coauthorConfig && isCoauthorConfigError(coauthorConfig)
+              ? coauthorConfig.error
+              : "coauthor mode is not configured (missing .env)";
+          append([{ kind: "error", text: `error: ${reason}` }]);
+          return;
+        }
+        void handleCoauthorInput(cs, text, { append, setPendingQuestion });
         return;
       }
       const entries = handleInput(model, text);
       append([echo, ...entries]);
     },
-    [append, mode, model, runSlash, session],
+    [append, coauthorConfig, getCoauthorSession, mode, model, runSlash],
   );
+
+  if (mode === "play") {
+    return (
+      <MenuController
+        session={session}
+        state={playUiState}
+        setState={setPlayUiState}
+        onCycleMode={onCycleMode}
+      />
+    );
+  }
 
   return (
     <Box flexDirection="column">
@@ -203,7 +289,7 @@ export function App({
         mode={mode}
         onSubmit={onSubmit}
         onCycleMode={onCycleMode}
-        suggest={suggestFn}
+        pendingQuestion={pendingQuestion}
       />
       <Footer mode={mode} />
     </Box>

@@ -18,6 +18,7 @@ import type {
   ValidationStatement,
 } from "./ast.js";
 import { parseProgram } from "./parser.js";
+import { runLanguageValidations, type LanguageValidationFailure } from "./runtime.js";
 
 export type GroundTerm =
   | { readonly kind: "id"; readonly id: string }
@@ -42,6 +43,17 @@ export class LanguageModelError extends Error {
   }
 }
 
+export class LanguageValidationFailedError extends LanguageModelError {
+  constructor(public readonly failures: readonly LanguageValidationFailure[]) {
+    super(
+      `validation failed: ${failures
+        .map((failure) => `${failure.validation}#${failure.assertion}: ${failure.message}`)
+        .join("; ")}`,
+    );
+    this.name = "LanguageValidationFailedError";
+  }
+}
+
 export class StoryModel {
   readonly traits = new Map<string, TraitStatement>();
   readonly relations = new Map<string, RelationStatement>();
@@ -53,6 +65,11 @@ export class StoryModel {
   readonly validations = new Map<string, ValidationStatement>();
   readonly entities = new Map<string, Set<string>>();
   private readonly facts = new Map<string, Fact>();
+  private snapshot: StoryModel | null = null;
+
+  get inTransaction(): boolean {
+    return this.snapshot !== null;
+  }
 
   clone(): StoryModel {
     const clone = new StoryModel();
@@ -71,47 +88,105 @@ export class StoryModel {
 
   apply(program: Program): Effect[] {
     const effects: Effect[] = [];
-    for (const statement of program.statements) {
-      switch (statement.kind) {
-        case "trait":
-          this.addUnique(this.traits, statement.id, statement, "trait");
-          break;
-        case "relation":
-          this.validateRelation(statement);
-          this.addUnique(this.relations, statement.id, statement, "relation");
-          break;
-        case "externPredicate":
-          this.addExternPredicate(statement);
-          break;
-        case "predicate":
-          this.addCallable(this.predicates, statement, "predicate");
-          break;
-        case "action":
-          this.addCallable(this.actions, statement, "action");
-          break;
-        case "query":
-          this.addQuery(statement);
-          break;
-        case "rule":
-          this.validateRule(statement);
-          this.validateRulePurity(statement);
-          this.rules.push(statement);
-          break;
-        case "entity":
-          this.addEntity(statement);
-          break;
-        case "extend":
-          this.extendEntity(statement);
-          break;
-        case "set":
-          this.applySet(statement.effects, effects);
-          break;
-        case "validation":
-          this.addValidation(statement);
-          break;
+    const preCall = this.snapshot !== null ? this.clone() : null;
+    try {
+      for (const statement of program.statements) {
+        switch (statement.kind) {
+          case "trait":
+            this.addUnique(this.traits, statement.id, statement, "trait");
+            break;
+          case "relation":
+            this.validateRelation(statement);
+            this.addUnique(this.relations, statement.id, statement, "relation");
+            break;
+          case "externPredicate":
+            this.addExternPredicate(statement);
+            break;
+          case "predicate":
+            this.addCallable(this.predicates, statement, "predicate");
+            break;
+          case "action":
+            this.addCallable(this.actions, statement, "action");
+            break;
+          case "query":
+            this.addQuery(statement);
+            break;
+          case "rule":
+            this.validateRule(statement);
+            this.validateRulePurity(statement);
+            this.rules.push(statement);
+            break;
+          case "entity":
+            this.addEntity(statement);
+            break;
+          case "extend":
+            this.extendEntity(statement);
+            break;
+          case "set":
+            this.applySet(statement.effects, effects);
+            break;
+          case "validation":
+            this.addValidation(statement);
+            break;
+          case "begin":
+            this.beginTransaction();
+            break;
+          case "commit":
+            this.commitTransaction();
+            break;
+          case "rollback":
+            this.rollbackTransaction();
+            break;
+        }
       }
+    } catch (e) {
+      if (preCall) this.restoreFrom(preCall);
+      throw e;
     }
     return effects;
+  }
+
+  private beginTransaction(): void {
+    if (this.snapshot) throw new LanguageModelError("transaction already open");
+    this.snapshot = this.clone();
+  }
+
+  private commitTransaction(): void {
+    if (!this.snapshot) throw new LanguageModelError("no open transaction to commit");
+    const result = runLanguageValidations(this);
+    if (result.status === "failed") {
+      throw new LanguageValidationFailedError(result.failures);
+    }
+    this.snapshot = null;
+  }
+
+  private rollbackTransaction(): void {
+    if (!this.snapshot) throw new LanguageModelError("no open transaction to rollback");
+    this.restoreFrom(this.snapshot);
+    this.snapshot = null;
+  }
+
+  private restoreFrom(other: StoryModel): void {
+    this.traits.clear();
+    for (const [id, v] of other.traits) this.traits.set(id, v);
+    this.relations.clear();
+    for (const [id, v] of other.relations) this.relations.set(id, v);
+    this.externalPredicates.clear();
+    for (const [id, v] of other.externalPredicates) this.externalPredicates.set(id, v);
+    this.predicates.clear();
+    for (const [id, v] of other.predicates) this.predicates.set(id, v);
+    this.actions.clear();
+    for (const [id, v] of other.actions) this.actions.set(id, v);
+    this.queries.clear();
+    for (const [id, v] of other.queries) this.queries.set(id, v);
+    this.rules.length = 0;
+    this.rules.push(...other.rules);
+    this.validations.clear();
+    for (const [id, v] of other.validations) this.validations.set(id, v);
+    this.entities.clear();
+    for (const [id, v] of other.entities) this.entities.set(id, new Set(v));
+    this.facts.clear();
+    for (const [k, v] of other.facts) this.facts.set(k, v);
   }
 
   hasFact(relation: string, args: readonly GroundTerm[]): boolean {
@@ -226,7 +301,13 @@ export class StoryModel {
   }
 
   private addValidation(statement: ValidationStatement): void {
-    if (this.validations.has(statement.id)) {
+    if (statement.replace) {
+      if (!this.validations.has(statement.id)) {
+        throw new LanguageModelError(
+          `replace validation '${statement.id}' has no prior definition`,
+        );
+      }
+    } else if (this.validations.has(statement.id)) {
       throw new LanguageModelError(`duplicate validation '${statement.id}'`);
     }
     for (const assertion of statement.assertions) {

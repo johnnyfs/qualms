@@ -13,6 +13,7 @@ import {
   validatePlayConfig,
   type PlayConfig,
 } from "./play/config.js";
+import { loadCoauthorConfig } from "./coauthor/config.js";
 
 interface ParsedArgs {
   storyPaths: string[];
@@ -108,6 +109,7 @@ function main(): void {
   }
 
   const playWarnings = validatePlayConfig(playConfig, initialModel);
+  const coauthorConfig = loadCoauthorConfig();
 
   render(
     React.createElement(App, {
@@ -116,6 +118,7 @@ function main(): void {
       playConfig,
       playConfigSource,
       playWarnings,
+      coauthorConfig,
     }),
   );
 }

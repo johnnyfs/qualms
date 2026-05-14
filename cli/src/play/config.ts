@@ -16,7 +16,13 @@ export interface PlayConfig {
   readonly verbs: ReadonlyMap<string, VerbConfig>;
   readonly queries: ReadonlyMap<string, QueryConfig>;
   readonly events: ReadonlyMap<string, string>;
-  readonly view: { readonly kind: "infocom" };
+  readonly view: { readonly kind: "menu" | "infocom" };
+  readonly conversation: {
+    readonly startVerb: string;
+    readonly stopVerb: string;
+    readonly topicsQuery: string;
+    readonly currentTopicQuery: string;
+  };
   readonly source?: string;
 }
 
@@ -53,7 +59,13 @@ export function defaultPlayConfig(player = "Player"): PlayConfig {
     verbs: new Map(),
     queries: new Map(),
     events: new Map(),
-    view: { kind: "infocom" },
+    view: { kind: "menu" },
+    conversation: {
+      startVerb: "TalkAbout",
+      stopVerb: "StopTalking",
+      topicsQuery: "Topics",
+      currentTopicQuery: "CurrentTopic",
+    },
   };
 }
 
@@ -95,6 +107,7 @@ export function parsePlayConfig(text: string, source?: string): PlayConfig {
   const events = readStringMap(obj.events, "events");
   const visibility = readVisibility(obj.visibility);
   const view = readView(obj.view);
+  const conversation = readConversation(obj.conversation);
 
   return {
     player,
@@ -107,6 +120,7 @@ export function parsePlayConfig(text: string, source?: string): PlayConfig {
     queries,
     events,
     view,
+    conversation,
     ...(source ? { source } : {}),
   };
 }
@@ -131,8 +145,8 @@ export function validatePlayConfig(
   checkEntityMap(config.descriptions, "descriptions");
   checkEntityMap(config.presentations, "presentations");
   for (const id of config.verbs.keys()) {
-    if (!model.actions.has(id)) {
-      warnings.push(`play config: verbs.${id} is not a declared action`);
+    if (!model.actions.has(id) && !model.queries.has(id)) {
+      warnings.push(`play config: verbs.${id} is not a declared action or query`);
     }
   }
   if (
@@ -291,15 +305,42 @@ function readVisibility(raw: unknown): PlayConfig["visibility"] {
 }
 
 function readView(raw: unknown): PlayConfig["view"] {
-  if (raw === undefined || raw === null) return { kind: "infocom" };
+  if (raw === undefined || raw === null) return { kind: "menu" };
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new PlayConfigError("play config: view must be a mapping");
   }
   const kind = (raw as Record<string, unknown>).kind;
-  if (kind !== undefined && kind !== "infocom") {
-    throw new PlayConfigError(`play config: view.kind '${String(kind)}' is not supported (only 'infocom')`);
+  if (kind === undefined) return { kind: "menu" };
+  if (kind !== "menu" && kind !== "infocom") {
+    throw new PlayConfigError(
+      `play config: view.kind '${String(kind)}' is not supported (must be 'menu' or 'infocom')`,
+    );
   }
-  return { kind: "infocom" };
+  return { kind };
+}
+
+function readConversation(raw: unknown): PlayConfig["conversation"] {
+  const defaults: PlayConfig["conversation"] = {
+    startVerb: "TalkAbout",
+    stopVerb: "StopTalking",
+    topicsQuery: "Topics",
+    currentTopicQuery: "CurrentTopic",
+  };
+  if (raw === undefined || raw === null) return defaults;
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new PlayConfigError("play config: conversation must be a mapping");
+  }
+  const obj = raw as Record<string, unknown>;
+  const out = { ...defaults };
+  for (const field of ["startVerb", "stopVerb", "topicsQuery", "currentTopicQuery"] as const) {
+    const value = obj[field];
+    if (value === undefined) continue;
+    if (typeof value !== "string" || value.length === 0) {
+      throw new PlayConfigError(`play config: conversation.${field} must be a non-empty string`);
+    }
+    (out as Record<string, string>)[field] = value;
+  }
+  return out;
 }
 
 function expectString(value: unknown, label: string): string {

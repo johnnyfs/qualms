@@ -1,8 +1,11 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   LanguageModelError,
   loadStoryProgram,
   parseProgram,
+  playLanguageCall,
   playLanguageQuery,
 } from "../src/language/index.js";
 
@@ -112,5 +115,70 @@ describe("playLanguageQuery — evaluation", () => {
       item: b.item?.kind === "id" ? b.item.id : "",
     }));
     expect(hereItems).toContainEqual({ here: "Cell", item: "Player" });
+  });
+});
+
+describe("tutorial engine queries", () => {
+  const TUTORIAL = readFileSync(
+    join(import.meta.dirname, "../../stories/tutorial/tutorial.qualms"),
+    "utf-8",
+  );
+
+  function idsOf(bindings: ReadonlyArray<Record<string, unknown>>, key: string): string[] {
+    return bindings
+      .map((b) => {
+        const v = b[key] as { kind?: string; id?: string } | undefined;
+        return v?.kind === "id" && typeof v.id === "string" ? v.id : "";
+      })
+      .filter((id) => id.length > 0)
+      .sort();
+  }
+
+  describe("Visible", () => {
+    it("includes co-located items and cross-room targets through transparent bars", () => {
+      const model = loadStoryProgram(TUTORIAL);
+      const result = playLanguageQuery(model, "Visible(Player)");
+      expect(result.status).toBe("passed");
+      const ids = idsOf(result.bindings, "target");
+      // Co-located (Cell): Bars, BoneShard
+      expect(ids).toContain("Bars");
+      expect(ids).toContain("BoneShard");
+      // Cross-room via transparent bars + ConveysVisibility: Guard in Corridor
+      expect(ids).toContain("Guard");
+      // The Mop is behind an opaque closed door (ClosetDoor) — not visible
+      expect(ids).not.toContain("Mop");
+    });
+  });
+
+  describe("Topics", () => {
+    it("returns the top-level entry topic before any conversation", () => {
+      const model = loadStoryProgram(TUTORIAL);
+      const result = playLanguageQuery(model, "Topics(Player, Guard)");
+      expect(result.status).toBe("passed");
+      const topics = idsOf(result.bindings, "topic");
+      expect(topics).toEqual(["Whatever"]);
+    });
+
+    it("returns sub-topics after a conversation has been opened", () => {
+      const model = loadStoryProgram(TUTORIAL);
+      const opened = playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)");
+      expect(opened.status).toBe("passed");
+      const result = playLanguageQuery(model, "Topics(Player, Guard)");
+      const topics = idsOf(result.bindings, "topic");
+      // Whatever still matches via TalksAbout, plus its sub-topics via LeadsTo
+      expect(topics).toContain("Bribery");
+      expect(topics).toContain("Weather");
+    });
+  });
+
+  describe("CurrentTopic", () => {
+    it("is empty before a conversation and reflects InConversation after", () => {
+      const model = loadStoryProgram(TUTORIAL);
+      expect(playLanguageQuery(model, "CurrentTopic(Player, Guard)").bindings).toEqual([]);
+      playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)");
+      const after = playLanguageQuery(model, "CurrentTopic(Player, Guard)");
+      const topics = idsOf(after.bindings, "topic");
+      expect(topics).toEqual(["Whatever"]);
+    });
   });
 });

@@ -113,6 +113,12 @@ export function emitTopLevelStatement(statement: TopLevelStatement): string {
       return emitSet(statement);
     case "validation":
       return emitValidation(statement);
+    case "begin":
+      return "begin;";
+    case "commit":
+      return "commit;";
+    case "rollback":
+      return "rollback;";
   }
 }
 
@@ -158,8 +164,9 @@ function emitExtend(statement: ExtendStatement): string {
 }
 
 function emitValidation(statement: ValidationStatement): string {
-  if (statement.assertions.length === 0) return `validation ${statement.id} {}`;
-  return `validation ${statement.id} {\n${statement.assertions.map((assertion) => indent(emitValidationAssertion(assertion))).join("\n")}\n}`;
+  const prefix = statement.replace ? "replace " : "";
+  if (statement.assertions.length === 0) return `${prefix}validation ${statement.id} {}`;
+  return `${prefix}validation ${statement.id} {\n${statement.assertions.map((assertion) => indent(emitValidationAssertion(assertion))).join("\n")}\n}`;
 }
 
 function emitValidationAssertion(assertion: ValidationAssertion): string {
