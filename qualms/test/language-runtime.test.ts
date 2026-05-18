@@ -109,21 +109,24 @@ describe("tutorial language runtime", () => {
       feedback: "fail { Locked(Bars); }",
     });
 
-    // Without carrying any key, Unlock fails on the !Carrying clause first.
+    // Unlock now gates on Reachable(actor, key). The makeshift key is never
+    // placed in the world, so it is neither carried nor colocated — both
+    // branches of the Reachable disjunction surface their failure reasons.
     const noKey = playLanguageCall(model, "Unlock(Player, Bars, MakeshiftKey)");
     expect(noKey).toMatchObject({
       status: "failed",
-      feedback: "fail { !Carrying(Player, MakeshiftKey); }",
+      feedback:
+        "fail { !At(MakeshiftKey, Cell); !MakeshiftKey == Bars; !Carrying(Player, MakeshiftKey); }",
     });
 
-    // The master key sits with the guard in stage 9; walk the conversation
-    // to receive it. The makeshift key is never placed in the world, so
-    // attempting to use it still surfaces the same !Carrying reason.
+    // Walk the conversation to receive the master key. The makeshift key
+    // remains unreachable, so the same Reachable failure set still surfaces.
     walkConversationToMasterKey(model);
     const wrongKey = playLanguageCall(model, "Unlock(Player, Bars, MakeshiftKey)");
     expect(wrongKey).toMatchObject({
       status: "failed",
-      feedback: "fail { !Carrying(Player, MakeshiftKey); }",
+      feedback:
+        "fail { !At(MakeshiftKey, Cell); !MakeshiftKey == Bars; !Carrying(Player, MakeshiftKey); }",
     });
 
     expect(playLanguageCall(model, "Unlock(Player, Bars, MasterKey)").status).toBe("passed");
@@ -241,12 +244,14 @@ describe("tutorial language runtime", () => {
   it("section 5 — lock cycle: Unlock-when-unlocked and Lock-when-locked both fail", () => {
     const model = loadStoryProgram(readFileSync(TUTORIAL_PATH, "utf-8"));
 
-    // Unlock requires the actor to be carrying the key. Stage 9 puts the
-    // master key with the guard, so until the player walks the conversation
-    // to receive it, Unlock fails.
+    // Unlock requires the key to be reachable (carried or on the floor of
+    // the same room). Stage 9 puts the master key with the guard, so until
+    // the player walks the conversation to receive it the key is neither
+    // colocated nor carried — Reachable fails on both branches.
     expect(playLanguageCall(model, "Unlock(Player, Bars, MasterKey)")).toMatchObject({
       status: "failed",
-      feedback: "fail { !Carrying(Player, MasterKey); }",
+      feedback:
+        "fail { !At(MasterKey, Cell); !MasterKey == Bars; !Carrying(Player, MasterKey); }",
     });
 
     walkConversationToMasterKey(model);
@@ -266,13 +271,20 @@ describe("tutorial language runtime", () => {
       feedback: "fail { Locked(Bars); }",
     });
 
-    // Dropping the master key revokes the carry condition: Unlock fails again
-    // even though the actor is still in the cell.
+    // Dropping the master key in the same room does NOT revoke access: Lock
+    // gates on Reachable, and the key on the floor of the Cell is still
+    // colocated with the actor. Walking away to the Corridor finally puts
+    // the key out of reach.
     expect(playLanguageCall(model, "Unlock(Player, Bars, MasterKey)").status).toBe("passed");
     expect(playLanguageCall(model, "Drop(Player, MasterKey)").status).toBe("passed");
+    expect(playLanguageCall(model, "Lock(Player, Bars, MasterKey)").status).toBe("passed");
+    expect(playLanguageCall(model, "Unlock(Player, Bars, MasterKey)").status).toBe("passed");
+    expect(playLanguageCall(model, "Open(Player, Bars)").status).toBe("passed");
+    expect(playLanguageCall(model, "Go(Player, Corridor)").status).toBe("passed");
     expect(playLanguageCall(model, "Lock(Player, Bars, MasterKey)")).toMatchObject({
       status: "failed",
-      feedback: "fail { !Carrying(Player, MasterKey); }",
+      feedback:
+        "fail { !At(MasterKey, Corridor); !MasterKey == Bars; !MasterKey == ClosetDoor; !Carrying(Player, MasterKey); }",
     });
   });
 
@@ -499,10 +511,12 @@ describe("tutorial language runtime", () => {
     expect(model.hasFact("Carrying", [idTerm("Guard"), idTerm("MasterKey")])).toBe(true);
     expect(model.hasFact("Carrying", [idTerm("Player"), idTerm("MasterKey")])).toBe(false);
 
-    // Unlock fails up front because the player isn't carrying anything.
+    // Unlock fails up front because the master key is with the guard — not
+    // reachable from the cell on either branch of Reachable.
     expect(playLanguageCall(model, "Unlock(Player, Bars, MasterKey)")).toMatchObject({
       status: "failed",
-      feedback: "fail { !Carrying(Player, MasterKey); }",
+      feedback:
+        "fail { !At(MasterKey, Cell); !MasterKey == Bars; !Carrying(Player, MasterKey); }",
     });
 
     // Walk to the OfferMoney leaf: action body passes, but the failing

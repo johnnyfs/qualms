@@ -88,6 +88,21 @@ query Inventory(actor: Actor) {
   Carrying(actor, ?item)
 }
 
+-- Reachable is defined as colocation OR carrying. We keep it as its own
+-- predicate (rather than inlining `IsColocated(...) | Carrying(...)` at every
+-- callsite) for two reasons:
+--   1. Some rules need carrying-or-colocated reach where bare colocation is
+--      not precise enough — locks that you can also operate with the key in
+--      hand are the canonical case.
+--   2. Future reachability extensions (a magical reach, a trapdoor overhead,
+--      a tool that extends grasp) can be added as `before Reachable` rules
+--      in one place instead of patching every consumer.
+predicate Reachable(actor: (Actor & Locatable) { At(actor, ?here) }, target: Locatable) {
+  when (IsColocated(actor, target) | Carrying(actor, target)) {
+    succeed;
+  }
+}
+
 action Take(actor: Actor, target: Portable) {
   when (IsColocated(actor, target)) {
     set Carrying(actor, target)
@@ -168,8 +183,13 @@ before IsColocated(
   }
 }
 
+-- We use Reachable rather than IsColocated for Open/Close. The distinction
+-- is currently immaterial — doors are not Portable, so Reachable collapses to
+-- IsColocated for them — but it lets a future before-rule on Reachable
+-- broaden access (a ceiling trapdoor, a remote pull-cord) without touching
+-- Open or Close.
 action Open(actor: Actor, door: Openable) {
-  when (IsColocated(actor, door)) {
+  when (Reachable(actor, door)) {
     set Opened(door)
   }
 }
@@ -181,7 +201,7 @@ before Open(_, door: Openable) {
 }
 
 action Close(actor: Actor, door: Openable) {
-  when (IsColocated(actor, door)) {
+  when (Reachable(actor, door)) {
     set !Opened(door)
   }
 }
@@ -200,10 +220,11 @@ set {
 }
 
 -- (5) Extend doors to be lockable.
--- Keys are portable items the actor must be carrying to use. The master key
--- starts on the cell floor; until the actor takes it, Unlock fails with a
--- !Carrying(...) reason. The makeshift key is never given out — it exists
--- only so that mis-using it is a different failure than the master case.
+-- Unlock/Lock gate on Reachable(actor, key) rather than Carrying — the
+-- player can use the key while it sits on the floor of the same room, not
+-- only while holding it. The master key starts on the cell floor; the
+-- makeshift key is never given out and exists only so that mis-using it is
+-- a different failure than the master case.
 
 trait Key
 trait Lockable
@@ -218,7 +239,7 @@ before Open(_, door: Lockable) {
 }
 
 action Unlock(actor: Actor, door: Lockable, key: Key) {
-  when (Carrying(actor, key) & IsColocated(actor, door) & LockedWith(door, key)) {
+  when (Reachable(actor, key) & Reachable(actor, door) & LockedWith(door, key)) {
     set !Locked(door)
   }
 }
@@ -230,7 +251,7 @@ before Unlock(_, door: Lockable, _) {
 }
 
 action Lock(actor: Actor, door: Lockable, key: Key) {
-  when (Carrying(actor, key) & IsColocated(actor, door) & LockedWith(door, key)) {
+  when (Reachable(actor, key) & Reachable(actor, door) & LockedWith(door, key)) {
     set Locked(door)
   }
 }
