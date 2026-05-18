@@ -16,6 +16,7 @@ import {
   type Effect,
   type Fact,
   type GroundTerm,
+  type StoredActionCaseStatement,
   StoryModel,
   factFromAtom,
   groundTermFromTerm,
@@ -348,6 +349,146 @@ function executeCallable(
   events: LanguageEvent[],
   options: LanguageRuntimeOptions,
 ): BlockResult {
+  if (mode === "action") {
+    return executeActionCallable(model, callable, args, effects, events, options);
+  }
+  return executePredicateCallable(model, callable, args, effects, events, options);
+}
+
+function executeActionCallable(
+  model: StoryModel,
+  callable: CallableStatement,
+  args: readonly GroundTerm[],
+  effects: Effect[],
+  events: LanguageEvent[],
+  options: LanguageRuntimeOptions,
+): BlockResult {
+  const bound = bindParameters(model, callable.parameters, args, effects, events, options);
+  if (bound.length === 0) {
+    return {
+      status: "failed",
+      env: {},
+      reasons: [`!${callable.id}(${args.map(emitGroundTerm).join(", ")})`],
+      callable: callable.id,
+    };
+  }
+
+  const failureReasons: string[] = [];
+  for (const env of bound) {
+    // Parameter scopes are fresh: rules attached to this callable do not
+    // inherit names from the caller's env, and after-rules do not inherit
+    // names from the body's env. Rule parameter constraints re-introduce
+    // any names they need.
+    const beforeModel = model.clone();
+    const beforeEffects: Effect[] = [];
+    const beforeEvents: LanguageEvent[] = [];
+    const before = runRules(beforeModel, "before", callable.id, args, beforeEffects, beforeEvents, options);
+    if (before.status === "failed" && before.terminal === "fail") return before;
+    if (before.status === "passed" && before.terminal === "succeed") {
+      effects.push(...beforeEffects);
+      events.push(...beforeEvents);
+      return before;
+    }
+
+    const body = executeActionBranch(
+      beforeModel,
+      beforeEffects,
+      beforeEvents,
+      callable.id,
+      callable.body,
+      env,
+      args,
+      options,
+    );
+    if (body.result.status === "passed") {
+      effects.push(...body.effects);
+      events.push(...body.events);
+      return body.result;
+    }
+    failureReasons.push(...body.result.reasons, ...before.reasons);
+
+    for (const actionCase of model.actionCases) {
+      if (actionCase.target !== callable.id) continue;
+      const outcome = executeActionCase(
+        beforeModel,
+        beforeEffects,
+        beforeEvents,
+        actionCase,
+        args,
+        options,
+      );
+      if (!outcome) continue;
+      if (outcome.result.status === "passed") {
+        effects.push(...outcome.effects);
+        events.push(...outcome.events);
+        return outcome.result;
+      }
+      failureReasons.push(...outcome.result.reasons);
+    }
+  }
+
+  return {
+    status: "failed",
+    env: {},
+    reasons: failureReasons.length > 0
+      ? failureReasons
+      : [`!${callable.id}(${args.map(emitGroundTerm).join(", ")})`],
+    callable: callable.id,
+  };
+}
+
+function executeActionCase(
+  model: StoryModel,
+  baseEffects: readonly Effect[],
+  baseEvents: readonly LanguageEvent[],
+  actionCase: StoredActionCaseStatement,
+  args: readonly GroundTerm[],
+  options: LanguageRuntimeOptions,
+): { readonly result: BlockResult; readonly effects: readonly Effect[]; readonly events: readonly LanguageEvent[] } | undefined {
+  const bound = bindParameters(model, actionCase.parameters, args, [], [], options);
+  let failed: BlockResult | undefined;
+  const reasons: string[] = [];
+  for (const env of bound) {
+    const branch = executeActionBranch(model, baseEffects, baseEvents, actionCase.target, actionCase.body, env, args, options);
+    if (branch.result.status === "passed") return branch;
+    failed = branch.result;
+    reasons.push(...branch.result.reasons);
+  }
+  if (failed) return { result: { ...failed, reasons }, effects: [], events: [] };
+  return undefined;
+}
+
+function executeActionBranch(
+  model: StoryModel,
+  baseEffects: readonly Effect[],
+  baseEvents: readonly LanguageEvent[],
+  target: string,
+  body: Block,
+  env: Env,
+  args: readonly GroundTerm[],
+  options: LanguageRuntimeOptions,
+): { readonly result: BlockResult; readonly effects: readonly Effect[]; readonly events: readonly LanguageEvent[] } {
+  const branchModel = model.clone();
+  const branchEffects = [...baseEffects];
+  const branchEvents = [...baseEvents];
+  const result = executeBlock(branchModel, body, env, branchEffects, branchEvents, options);
+  if (result.status === "passed") {
+    const after = runRules(branchModel, "after", target, args, branchEffects, branchEvents, options);
+    if (after.status === "failed" && after.terminal === "fail") {
+      return { result: after, effects: branchEffects, events: branchEvents };
+    }
+  }
+  return { result, effects: branchEffects, events: branchEvents };
+}
+
+function executePredicateCallable(
+  model: StoryModel,
+  callable: CallableStatement,
+  args: readonly GroundTerm[],
+  effects: Effect[],
+  events: LanguageEvent[],
+  options: LanguageRuntimeOptions,
+): BlockResult {
   const bound = bindParameters(model, callable.parameters, args, effects, events, options);
   if (bound.length === 0) {
     return {
@@ -359,10 +500,6 @@ function executeCallable(
   }
 
   for (const env of bound) {
-    // Parameter scopes are fresh: rules attached to this callable do not
-    // inherit names from the caller's env, and after-rules do not inherit
-    // names from the body's env. Rule parameter constraints re-introduce
-    // any names they need.
     const before = runRules(model, "before", callable.id, args, effects, events, options);
     if (before.status === "failed" && before.terminal === "fail") return before;
     if (before.status === "passed" && before.terminal === "succeed") return before;
@@ -373,11 +510,6 @@ function executeCallable(
         return { ...body, reasons: [...body.reasons, ...before.reasons] };
       }
       return body;
-    }
-
-    if (mode === "action") {
-      const after = runRules(model, "after", callable.id, args, effects, events, options);
-      if (after.status === "failed" && after.terminal === "fail") return after;
     }
     return body;
   }

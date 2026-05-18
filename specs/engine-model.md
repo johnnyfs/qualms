@@ -54,6 +54,26 @@ classDiagram
     +replace?: boolean
   }
 
+  class ActionCaseStatement {
+    +kind: "case"
+    +target: string
+    +id?: string
+    +parameters: ParameterPattern[]
+    +body: Block
+  }
+
+  class ReplaceActionCaseStatement {
+    +kind: "replaceCase"
+    +id: string
+    +parameters?: ParameterPattern[]
+    +body: Block
+  }
+
+  class UndefCaseStatement {
+    +kind: "undefCase"
+    +id: string
+  }
+
   class RuleStatement {
     +kind: "rule"
     +phase: "before" | "after"
@@ -157,6 +177,9 @@ classDiagram
   Program --> "*" RelationStatement
   Program --> "*" ExternPredicateStatement
   Program --> "*" CallableStatement
+  Program --> "*" ActionCaseStatement
+  Program --> "*" ReplaceActionCaseStatement
+  Program --> "*" UndefCaseStatement
   Program --> "*" RuleStatement
   Program --> "*" EntityStatement
   Program --> "*" ExtendStatement
@@ -166,6 +189,10 @@ classDiagram
   RelationParameter --> "1" TypeExpr
   CallableStatement --> "*" ParameterPattern
   CallableStatement --> "1" Block
+  ActionCaseStatement --> "*" ParameterPattern
+  ActionCaseStatement --> "1" Block
+  ReplaceActionCaseStatement --> "*" ParameterPattern
+  ReplaceActionCaseStatement --> "1" Block
   RuleStatement --> "*" ParameterPattern
   RuleStatement --> "1" Block
   ParameterPattern --> "0..1" TypeExpr
@@ -205,6 +232,7 @@ classDiagram
     +externalPredicates: Map~string, ExternPredicateStatement~
     +predicates: Map~string, CallableStatement~
     +actions: Map~string, CallableStatement~
+    +actionCases: ActionCaseStatement[]
     +rules: RuleStatement[]
     +validations: Map~string, ValidationStatement~
     +entities: Map~string, Set~string~~
@@ -249,6 +277,10 @@ Invariants:
   `replace` modifier on a `CallableStatement` overwrites the existing
   entry in place; non-`replace` redeclaration raises
   `LanguageModelError`.
+- `actionCases` is order-preserving. Each stored case has a globally
+  unique id, either authored with `as <id>` or generated during model
+  application. `replace case` updates an existing case in place; `undef
+  case` removes it by id.
 - `rules` is order-preserving and never deduplicated — order is the
   authoring order, and rule evaluation follows that order
   (`runtime.ts:runRules`).

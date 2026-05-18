@@ -1,6 +1,7 @@
 import type {
   Block,
   BodyStatement,
+  ActionCaseStatement,
   CallableStatement,
   EntityStatement,
   ExternPredicateStatement,
@@ -11,6 +12,7 @@ import type {
   EmitStatement,
   ParameterPattern,
   QueryStatement,
+  ReplaceActionCaseStatement,
   SucceedStatement,
   Program,
   RelationAtom,
@@ -23,6 +25,7 @@ import type {
   TopLevelStatement,
   TraitStatement,
   TypeExpr,
+  UndefCaseStatement,
   ValidationAssertion,
   ValidationStatement,
   WhenStatement,
@@ -241,6 +244,8 @@ class Parser {
     if (this.matchKeyword("relation")) return this.relationStatement();
     if (this.matchKeyword("extern")) return this.externStatement();
     if (this.matchKeyword("replace")) return this.replaceStatement();
+    if (this.matchKeyword("case")) return this.actionCaseStatement();
+    if (this.matchKeyword("undef")) return this.undefStatement();
     if (this.matchKeyword("action")) return this.callableStatement("action");
     if (this.matchKeyword("predicate")) return this.callableStatement("predicate");
     if (this.matchKeyword("query")) return this.queryStatement();
@@ -265,8 +270,11 @@ class Parser {
     this.fail(`expected top-level statement, got '${this.peek().image}'`);
   }
 
-  private replaceStatement(): CallableStatement | ValidationStatement {
+  private replaceStatement(): CallableStatement | ValidationStatement | ReplaceActionCaseStatement {
     this.expectKeyword("replace");
+    if (this.matchKeyword("case")) {
+      return this.replaceActionCaseStatement();
+    }
     if (this.matchKeyword("action")) {
       return { ...this.callableStatement("action"), replace: true };
     }
@@ -277,8 +285,18 @@ class Parser {
       return { ...this.validationStatement(), replace: true };
     }
     this.fail(
-      `expected 'action', 'predicate', or 'validation' after 'replace', got '${this.peek().image}'`,
+      `expected 'case', 'action', 'predicate', or 'validation' after 'replace', got '${this.peek().image}'`,
     );
+  }
+
+  private undefStatement(): UndefCaseStatement {
+    this.expectKeyword("undef");
+    if (this.consumeKeywordIf("case")) {
+      const id = this.identifier();
+      this.consumeIf("semi");
+      return { kind: "undefCase", id };
+    }
+    this.fail(`expected 'case' after 'undef', got '${this.peek().image}'`);
   }
 
   private traitStatement(): TraitStatement {
@@ -338,6 +356,27 @@ class Parser {
     const parameters = this.callParameters();
     const body = this.block();
     return { kind, id, parameters, body };
+  }
+
+  private actionCaseStatement(): ActionCaseStatement {
+    this.expectKeyword("case");
+    const target = this.identifier();
+    const parameters = this.callParameters();
+    const id = this.consumeKeywordIf("as") ? this.identifier() : undefined;
+    const body = this.block();
+    return id
+      ? { kind: "case", target, parameters, id, body }
+      : { kind: "case", target, parameters, body };
+  }
+
+  private replaceActionCaseStatement(): ReplaceActionCaseStatement {
+    this.expectKeyword("case");
+    const id = this.identifier();
+    const parameters = this.at("lparen") ? this.callParameters() : undefined;
+    const body = this.block();
+    return parameters
+      ? { kind: "replaceCase", id, parameters, body }
+      : { kind: "replaceCase", id, body };
   }
 
   private queryStatement(): QueryStatement {

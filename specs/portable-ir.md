@@ -16,6 +16,9 @@ type Statement =
   | { kind: "relation"; id: string; parameters: RelationParameter[]; unique?: string[] }
   | { kind: "externPredicate"; id: string; parameters: Parameter[] }
   | { kind: "action" | "predicate"; id: string; parameters: Parameter[]; body: Block; replace?: boolean }
+  | { kind: "case"; target: string; id?: string; parameters: Parameter[]; body: Block }
+  | { kind: "replaceCase"; id: string; parameters?: Parameter[]; body: Block }
+  | { kind: "undefCase"; id: string }
   | { kind: "rule"; phase: "before" | "after"; target: string; parameters: Parameter[]; body: Block }
   | { kind: "entity"; id: string; traits: string[] }
   | { kind: "extend"; id: string; traits: string[] }
@@ -58,14 +61,15 @@ A loaded world model contains:
 - `externalPredicates`: pure host-adapter predicate signatures.
 - `predicates`: pure callable definitions.
 - `actions`: mutating callable definitions.
+- `actionCases`: ordered action-extension branches with globally unique case ids.
 - `rules`: ordered rule declarations.
 - `entities`: entity id to trait-id set.
 - `facts`: structural fact set.
 - `validations`: validation declarations.
 
 All model mutations must pass semantic validation: known declarations, valid
-arity, valid type references, valid relation-valued terms, and valid rule
-targets.
+arity, valid type references, valid relation-valued terms, valid rule targets,
+and valid case targets.
 
 ## Runtime Operations
 
@@ -82,7 +86,7 @@ A compliant interpreter must provide these operations:
 
 `query` and validation evaluation must not mutate `world`. `play` stages effects
 and events against a candidate world and commits/returns them only when the
-action body and all applicable `after` rules pass.
+action body or one applicable action case and all applicable `after` rules pass.
 
 Action results must expose both human-readable and structured data:
 

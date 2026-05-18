@@ -39,10 +39,11 @@ matches them by image at fixed grammatical positions. Authors should avoid
 using these names for traits, relations, predicates, actions, or entities:
 
 ```
-action  after   assert  before  bindings emit   entity  extend
+action  after   as      assert  before  bindings case    emit
+entity  extend
 extern  fact    fail    failed  not      one    passed  play
 predicate       query   reasons relation replace set     succeed
-trait   unique  validation
+trait   undef   unique  validation
 when    _
 ```
 
@@ -63,6 +64,9 @@ TopLevel       ::= TraitDecl
                  | RelationDecl
                  | ExternPredicateDecl
                  | CallableDecl
+                 | ActionCaseDecl
+                 | ReplaceCaseDecl
+                 | UndefCaseDecl
                  | RuleDecl
                  | EntityDecl
                  | ExtendDecl
@@ -78,6 +82,10 @@ ExternPredicateDecl
                ::= "extern" "predicate" <id> ParamList [ ";" ]
 
 CallableDecl   ::= [ "replace" ] ( "action" | "predicate" ) <id> ParamList Block
+ActionCaseDecl ::= "case" <id> ParamList [ "as" <id> ] Block
+ReplaceCaseDecl
+               ::= "replace" "case" <id> [ ParamList ] Block
+UndefCaseDecl  ::= "undef" "case" <id> [ ";" ]
 RuleDecl       ::= ( "before" | "after" ) <id> ParamList Block
 
 EntityDecl     ::= "entity" <id> TraitSet
@@ -263,7 +271,46 @@ matches. Wildcards and renames are common.
 Rules must target an existing callable. `after` rules may target actions only;
 `before` rules may target actions or predicates.
 
-### 3.6 `entity` and `extend`
+### 3.6 `case`, `replace case`, and `undef case`
+
+```
+case Take(actor: Actor, target: Portable { At(target, ?here) }) as TakeFromGround {
+  when (At(actor, ?here)) {
+    set Carrying(actor, target)
+  }
+}
+
+replace case TakeFromGround {
+  when (At(actor, ?here)) {
+    set Carrying(actor, target)
+    emit Took(target);
+  }
+}
+
+undef case TakeFromGround;
+```
+
+An action case defines an additional normal-behavior branch for an existing
+action. Cases are not `before` interceptors: they run only after the action's
+own body fails to pass, and successful cases still run the action's `after`
+rules.
+
+Cases are stored in declaration order and have globally unique case ids. The
+optional `as <id>` gives the case an author-facing id for later mutation. If it
+is omitted, the model assigns a deterministic id such as `Take_0001`; canonical
+emission includes the assigned id.
+
+`replace case <id> Block` replaces the body of an existing case while preserving
+its target, parameter patterns, id, and declaration position. `replace case
+<id> ParamList Block` also replaces the case parameter patterns. `undef case
+<id>` removes the case by id. Pattern-addressed replacement or removal is not
+part of the language.
+
+Cases must target existing actions, not predicates. Their arity must match the
+target action's arity, but their parameter names, types, and constraints may be
+more specific.
+
+### 3.7 `entity` and `extend`
 
 ```
 entity Cell { Location }
@@ -280,7 +327,7 @@ already exist; unknown traits raise `LanguageModelError`.
 Entities are global, immutable identifiers — they cannot be retracted, and
 their trait set is monotonically additive once declared.
 
-### 3.7 `set` (top-level)
+### 3.8 `set` (top-level)
 
 ```
 set { At(Player, Cell); Path(Cell, Corridor); }
@@ -298,7 +345,7 @@ asserts.
 All identifiers inside a top-level `set` must be ground (entity ids or
 literals). Wildcards and free variables are not legal here.
 
-### 3.8 `validation`
+### 3.9 `validation`
 
 ```
 validation TutorialSmoke {
@@ -408,6 +455,7 @@ A `StoryModel` holds:
 
 - maps of declared traits, relations, predicates, and actions, indexed by
   identifier;
+- an ordered list of action cases;
 - an ordered list of rules (`before` and `after`);
 - a map of entities to their trait sets;
 - a fact base — a set of `(relation, args)` ground tuples.
@@ -456,12 +504,15 @@ from `when` conditions (§ 5.5). The execution flow for a single call is:
    binding — the action's parameter names are not visible inside the
    rule. Execute the rule body (§ 5.3.1).
 
-3. **Body.** If no `before` rule emitted a terminal `succeed` or `fail`,
-   execute the callable's own body in the candidate environment (§ 5.3.2).
+3. **Body and action cases.** If no `before` rule emitted a terminal
+   `succeed` or `fail`, execute the callable's own body in the candidate
+   environment (§ 5.3.2). For actions only, if the body does not pass, try
+   matching action cases in declaration order. Each case binds the original
+   positional arguments against its own parameter patterns.
 
 4. **`after` rules.** Only for actions (not predicates), and only if the
-   body produced a passed result, gather and run `after` rules using the
-   environment after the body executed.
+   body or a case produced a passed result, gather and run `after` rules using
+   the candidate world after the successful branch executed.
 
 5. **Return.** The first candidate environment that produces a non-failure
    outcome short-circuits the search. Otherwise the runtime returns the
@@ -487,7 +538,21 @@ that exist purely to fail (no `succeed;` in the body) do not emit reasons
 when their `when` clause fails to match — their non-firing is a non-event,
 not an error.
 
-#### 5.3.2 Body block semantics
+#### 5.3.2 Action case fallback
+
+Action cases participate in the normal action behavior, after `before` rules
+and before `after` rules. The action body is attempted first. If it passes, no
+case is evaluated. If it fails, each case whose parameter patterns bind is
+attempted in declaration order until one passes. A successful case short-circuits
+later cases and then runs `after` rules.
+
+Failed body and case attempts are isolated from one another: effects from a
+failed body do not leak into later cases, and effects from a failed case do not
+leak into later cases. Effects from non-terminal `before` rules are visible to
+the body and to each case attempt and are committed only if the overall action
+passes.
+
+#### 5.3.3 Body block semantics
 
 A block executes its statements in order. A `set` statement always
 succeeds and updates the model. A `when` statement evaluates its condition
@@ -503,7 +568,7 @@ A block whose statements all succeeded and which accumulated no failure
 reasons returns `passed` in the resulting environment. A block that
 accumulated failure reasons returns `failed` with those reasons.
 
-#### 5.3.3 Failure reason discipline
+#### 5.3.4 Failure reason discipline
 
 Failure reasons are surfaced as compact DSL fragments. Examples produced
 by the runtime today:
@@ -520,7 +585,7 @@ its own internal failure reasons in place of `!PredicateName(args)` so
 that the chain of `succeed`-rules that *could have rescued* the call is
 visible to the caller.
 
-#### 5.3.4 Action vs predicate
+#### 5.3.5 Action vs predicate
 
 Both actions and predicates run their `before` rules. Only actions run
 `after` rules. Predicates that fail produce a `[]` evaluation result for

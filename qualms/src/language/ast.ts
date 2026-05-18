@@ -7,6 +7,9 @@ export type TopLevelStatement =
   | RelationStatement
   | ExternPredicateStatement
   | CallableStatement
+  | ActionCaseStatement
+  | ReplaceActionCaseStatement
+  | UndefCaseStatement
   | QueryStatement
   | RuleStatement
   | EntityStatement
@@ -53,6 +56,26 @@ export interface CallableStatement {
   readonly parameters: readonly ParameterPattern[];
   readonly body: Block;
   readonly replace?: boolean;
+}
+
+export interface ActionCaseStatement {
+  readonly kind: "case";
+  readonly target: string;
+  readonly parameters: readonly ParameterPattern[];
+  readonly body: Block;
+  readonly id?: string;
+}
+
+export interface ReplaceActionCaseStatement {
+  readonly kind: "replaceCase";
+  readonly id: string;
+  readonly parameters?: readonly ParameterPattern[];
+  readonly body: Block;
+}
+
+export interface UndefCaseStatement {
+  readonly kind: "undefCase";
+  readonly id: string;
 }
 
 export interface ExternPredicateStatement {

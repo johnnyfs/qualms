@@ -1,4 +1,5 @@
 import type {
+  ActionCaseStatement,
   BinaryExpression,
   Block,
   BodyStatement,
@@ -16,6 +17,7 @@ import type {
   RelationExpression,
   RelationParameter,
   RelationStatement,
+  ReplaceActionCaseStatement,
   RuleStatement,
   SetEffect,
   SetStatement,
@@ -24,6 +26,7 @@ import type {
   TopLevelStatement,
   TraitStatement,
   TypeExpr,
+  UndefCaseStatement,
   ValidationAssertion,
   ValidationStatement,
   WhenStatement,
@@ -52,6 +55,7 @@ export function programFromModel(model: StoryModel): Program {
     ...model.externalPredicates.values(),
     ...model.predicates.values(),
     ...model.actions.values(),
+    ...model.actionCases,
     ...model.queries.values(),
     ...model.rules,
   ];
@@ -101,6 +105,12 @@ export function emitTopLevelStatement(statement: TopLevelStatement): string {
     case "predicate":
     case "action":
       return emitCallable(statement);
+    case "case":
+      return emitActionCase(statement);
+    case "replaceCase":
+      return emitReplaceActionCase(statement);
+    case "undefCase":
+      return emitUndefActionCase(statement);
     case "query":
       return emitQuery(statement);
     case "rule":
@@ -145,6 +155,22 @@ function emitExternPredicate(statement: ExternPredicateStatement): string {
 function emitCallable(statement: CallableStatement): string {
   const prefix = statement.replace ? "replace " : "";
   return `${prefix}${statement.kind} ${statement.id}(${statement.parameters.map(emitParameter).join(", ")}) ${emitBlock(statement.body)}`;
+}
+
+function emitActionCase(statement: ActionCaseStatement): string {
+  const id = statement.id ? ` as ${statement.id}` : "";
+  return `case ${statement.target}(${statement.parameters.map(emitParameter).join(", ")})${id} ${emitBlock(statement.body)}`;
+}
+
+function emitReplaceActionCase(statement: ReplaceActionCaseStatement): string {
+  const parameters = statement.parameters
+    ? `(${statement.parameters.map(emitParameter).join(", ")})`
+    : "";
+  return `replace case ${statement.id}${parameters} ${emitBlock(statement.body)}`;
+}
+
+function emitUndefActionCase(statement: UndefCaseStatement): string {
+  return `undef case ${statement.id};`;
 }
 
 function emitQuery(statement: QueryStatement): string {

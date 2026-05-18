@@ -1,4 +1,5 @@
 import type {
+  ActionCaseStatement,
   Block,
   BodyStatement,
   CallableStatement,
@@ -10,11 +11,13 @@ import type {
   RelationAtom,
   RelationParameter,
   RelationStatement,
+  ReplaceActionCaseStatement,
   RuleStatement,
   SetEffect,
   Term,
   TraitStatement,
   TypeExpr,
+  UndefCaseStatement,
   ValidationStatement,
 } from "./ast.js";
 import { parseProgram } from "./parser.js";
@@ -34,6 +37,10 @@ export interface Fact {
 export interface Effect {
   readonly polarity: "assert" | "retract";
   readonly fact: Fact;
+}
+
+export interface StoredActionCaseStatement extends ActionCaseStatement {
+  readonly id: string;
 }
 
 export class LanguageModelError extends Error {
@@ -60,6 +67,7 @@ export class StoryModel {
   readonly externalPredicates = new Map<string, ExternPredicateStatement>();
   readonly predicates = new Map<string, CallableStatement>();
   readonly actions = new Map<string, CallableStatement>();
+  readonly actionCases: StoredActionCaseStatement[] = [];
   readonly queries = new Map<string, QueryStatement>();
   readonly rules: RuleStatement[] = [];
   readonly validations = new Map<string, ValidationStatement>();
@@ -78,6 +86,7 @@ export class StoryModel {
     for (const [id, predicate] of this.externalPredicates) clone.externalPredicates.set(id, predicate);
     for (const [id, predicate] of this.predicates) clone.predicates.set(id, predicate);
     for (const [id, action] of this.actions) clone.actions.set(id, action);
+    clone.actionCases.push(...this.actionCases);
     for (const [id, query] of this.queries) clone.queries.set(id, query);
     clone.rules.push(...this.rules);
     for (const [id, validation] of this.validations) clone.validations.set(id, validation);
@@ -107,6 +116,15 @@ export class StoryModel {
             break;
           case "action":
             this.addCallable(this.actions, statement, "action");
+            break;
+          case "case":
+            this.addActionCase(statement);
+            break;
+          case "replaceCase":
+            this.replaceActionCase(statement);
+            break;
+          case "undefCase":
+            this.undefActionCase(statement);
             break;
           case "query":
             this.addQuery(statement);
@@ -177,6 +195,8 @@ export class StoryModel {
     for (const [id, v] of other.predicates) this.predicates.set(id, v);
     this.actions.clear();
     for (const [id, v] of other.actions) this.actions.set(id, v);
+    this.actionCases.length = 0;
+    this.actionCases.push(...other.actionCases);
     this.queries.clear();
     for (const [id, v] of other.queries) this.queries.set(id, v);
     this.rules.length = 0;
@@ -291,6 +311,46 @@ export class StoryModel {
     this.addUnique(this.queries, statement.id, statement, "query");
   }
 
+  private addActionCase(statement: ActionCaseStatement): void {
+    const id = statement.id ?? this.nextGeneratedCaseId(statement.target);
+    if (this.caseIndex(id) >= 0) throw new LanguageModelError(`duplicate case '${id}'`);
+    const stored: StoredActionCaseStatement = { ...statement, id };
+    this.validateActionCase(stored);
+    this.actionCases.push(stored);
+  }
+
+  private replaceActionCase(statement: ReplaceActionCaseStatement): void {
+    const index = this.caseIndex(statement.id);
+    if (index < 0) {
+      throw new LanguageModelError(`replace case '${statement.id}' has no prior definition`);
+    }
+    const existing = this.actionCases[index]!;
+    const replacement: StoredActionCaseStatement = {
+      ...existing,
+      ...(statement.parameters ? { parameters: statement.parameters } : {}),
+      body: statement.body,
+    };
+    this.validateActionCase(replacement);
+    this.actionCases[index] = replacement;
+  }
+
+  private undefActionCase(statement: UndefCaseStatement): void {
+    const index = this.caseIndex(statement.id);
+    if (index < 0) throw new LanguageModelError(`undef case '${statement.id}' has no prior definition`);
+    this.actionCases.splice(index, 1);
+  }
+
+  private caseIndex(id: string): number {
+    return this.actionCases.findIndex((actionCase) => actionCase.id === id);
+  }
+
+  private nextGeneratedCaseId(target: string): string {
+    for (let index = 1; ; index++) {
+      const id = `${target}_${String(index).padStart(4, "0")}`;
+      if (this.caseIndex(id) < 0) return id;
+    }
+  }
+
   private validateRulePurity(statement: RuleStatement): void {
     if (!this.predicates.has(statement.target)) return;
     if (blockContainsImpureStatement(statement.body)) {
@@ -370,6 +430,19 @@ export class StoryModel {
     if (target.parameters.length !== statement.parameters.length) {
       throw new LanguageModelError(
         `rule for '${statement.target}' has arity ${statement.parameters.length}, expected ${target.parameters.length}`,
+      );
+    }
+    for (const parameter of statement.parameters) {
+      if (parameter.type) this.validateTypeExpr(parameter.type);
+    }
+  }
+
+  private validateActionCase(statement: StoredActionCaseStatement): void {
+    const target = this.actions.get(statement.target);
+    if (!target) throw new LanguageModelError(`unknown case action '${statement.target}'`);
+    if (target.parameters.length !== statement.parameters.length) {
+      throw new LanguageModelError(
+        `case for '${statement.target}' has arity ${statement.parameters.length}, expected ${target.parameters.length}`,
       );
     }
     for (const parameter of statement.parameters) {
