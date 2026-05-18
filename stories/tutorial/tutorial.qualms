@@ -132,6 +132,13 @@ trait Openable
 relation Opened(Openable)
 
 -- Relations may also be defined in reference to other relations.
+-- Nested relations are by-reference: the Gated fact stays in storage
+-- even if its Path is unset, but it only *matches* (in queries, when
+-- clauses, parameter binding) while the referenced Path exists. So
+-- Gated(Path(Corridor, Closet), ClosetDoor) reads as "any path from
+-- Corridor to Closet that ever exists is gated by ClosetDoor": retract
+-- the Path and the gate goes dormant; re-assert it and the gate is
+-- back, with no instance identity in between.
 relation Gated(path: Path, door: Openable) unique(path)
 
 -- before rules run before the action is processed. They run for any

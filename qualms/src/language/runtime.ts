@@ -631,13 +631,13 @@ function evalRelation(
 
   const out: Env[] = [];
   for (const fact of model.listFacts(atom.relation)) {
-    const matched = matchAtom(atom, fact, env);
+    const matched = matchAtom(atom, fact, env, model);
     if (matched) out.push(matched);
   }
   return dedupeEnvs(out);
 }
 
-function matchAtom(atom: RelationAtom, fact: Fact, env: Env): Env | undefined {
+function matchAtom(atom: RelationAtom, fact: Fact, env: Env, model: StoryModel): Env | undefined {
   if (atom.args.length !== fact.args.length) return undefined;
   let current = env;
   for (let i = 0; i < atom.args.length; i++) {
@@ -645,7 +645,18 @@ function matchAtom(atom: RelationAtom, fact: Fact, env: Env): Env | undefined {
     if (!next) return undefined;
     current = next;
   }
+  // Reference semantics: a relation-valued fact arg must point at an existing
+  // fact. A Gated fact whose Path is unset stays in storage but is unreachable.
+  for (const arg of fact.args) {
+    if (!referenceFactsExist(arg, model)) return undefined;
+  }
   return current;
+}
+
+function referenceFactsExist(value: GroundTerm, model: StoryModel): boolean {
+  if (value.kind !== "relation") return true;
+  if (!model.hasFact(value.relation, value.args)) return false;
+  return value.args.every((arg) => referenceFactsExist(arg, model));
 }
 
 function matchTerm(pattern: Term, value: GroundTerm, env: Env): Env | undefined {
@@ -742,7 +753,8 @@ function matchesType(model: StoryModel, value: GroundTerm, type: TypeExpr): bool
     return value.kind === "id" && model.entities.get(value.id)?.has(type.id) === true;
   }
   if (model.relations.has(type.id)) {
-    return value.kind === "relation" && value.relation === type.id;
+    if (value.kind !== "relation" || value.relation !== type.id) return false;
+    return referenceFactsExist(value, model);
   }
   if (model.entities.has(type.id)) {
     // Entity-literal slot: parameter only binds when the arg is this entity.

@@ -591,6 +591,21 @@ denotes a ground relation reference (e.g. `Gated(Path(?here, target),
 argument to `Gated`). A relation-instance term used as the top of an
 expression is a relation lookup or predicate call.
 
+Nested relations are interpreted as references at match time: a fact such
+as `Gated(Path(Corridor, Closet), ClosetDoor)` matches only when the
+referenced inner fact (`Path(Corridor, Closet)`) is also present in the
+store. Assertion does not require the inner fact — a `Gated` may be set
+before its `Path` exists and persists if the `Path` is later retracted —
+but every match-time use (queries, `when` clauses, relation-typed
+parameter binding) consults the inner fact. Retracting the inner fact
+makes the outer fact unreachable; re-asserting it makes the outer fact
+reachable again. There is no instance identity: two `Path(Corridor,
+Closet)` assertions separated by a retraction are indistinguishable.
+
+The raw storage form is still observable through `validate { fact: … }`
+assertions and through `model.hasFact`, which deliberately bypass the
+reachability check.
+
 Wildcard terms are legal inside relation patterns where they match any
 value without binding. They are not legal in ground positions such as
 top-level `set` effects.

@@ -183,7 +183,10 @@ Notes:
 
 - `Term` of kind `relationInstance` carries a nested `RelationAtom`,
   enabling relation-valued arguments such as `Gated(Path(?here, target),
-  ?door)`.
+  ?door)`. Nested relations are by-reference: the runtime treats the
+  embedded tuple as a pointer to a fact in the store, and a wrapper match
+  succeeds only when the referenced inner fact is present. See
+  `language.md` § 5.5.1.
 - `ParameterPattern` constraints are arbitrary `Expression` trees; they
   share grammar with `when` conditions (see `language.md` § 5.5).
 
