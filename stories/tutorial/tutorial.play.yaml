@@ -35,21 +35,30 @@ verbs:
   Examine:     { words: [examine] }
   Open:        { words: [open] }
   Close:       { words: [close] }
-  Unlock:      { words: [unlock] }
-  Lock:        { words: [lock] }
-  TalkAbout:   { words: [talk to] }
-  StopTalking: { words: [stop talking to] }
-  Inventory:   { words: [inventory] }
+  Unlock:      { words: [unlock], prepositions: { 1: with } }
+  Lock:        { words: [lock],   prepositions: { 1: with } }
+  TalkTo:        { words: [talk to] }
+  TalkAbout:     { words: [talk about] }
+  SwitchTopics:  { words: [change topics] }
+  StopTalking:   { words: [stop talking to] }
+  Inventory:     { words: [inventory] }
+  Visible:       { hidden: true }
+
+events:
+  GuardHandsOver: "The guard slips you the $arg1."
 
 visibility:
   predicate: IsVisibleTo
   locationFact: At
 
 conversation:
-  startVerb: TalkAbout
+  startVerb: TalkTo
+  navigateVerb: TalkAbout
+  switchVerb: SwitchTopics
   stopVerb: StopTalking
   topicsQuery: Topics
   currentTopicQuery: CurrentTopic
+  previousTopicQuery: PreviousTopic
 
 view:
   kind: menu

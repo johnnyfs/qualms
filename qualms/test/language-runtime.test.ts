@@ -10,10 +10,11 @@ const TUTORIAL_PATH = resolve(__filename, "../../../stories/tutorial/tutorial.qu
 const { evalLanguageAtom, idTerm, loadStoryProgram, playLanguageCall } = language;
 
 // Stage 9 moves the master key from the cell floor onto the guard. To run
-// any test that needs the key, the player has to walk Whatever → Bribery →
-// OfferAFavor; the after-rule then transfers Carrying(MasterKey).
+// any test that needs the key, the player has to open the conversation with
+// TalkTo (which sets current=Whatever) and then walk Bribery → OfferAFavor
+// via TalkAbout; the after-rule then transfers Carrying(MasterKey).
 function walkConversationToMasterKey(model: ReturnType<typeof loadStoryProgram>): void {
-  expect(playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)").status).toBe("passed");
+  expect(playLanguageCall(model, "TalkTo(Player, Guard)").status).toBe("passed");
   expect(playLanguageCall(model, "TalkAbout(Player, Guard, Bribery)").status).toBe("passed");
   expect(playLanguageCall(model, "TalkAbout(Player, Guard, OfferAFavor)").status).toBe("passed");
 }
@@ -145,18 +146,15 @@ describe("tutorial language runtime", () => {
     expect(model.hasFact("Locked", [idTerm("Bars")])).toBe(true);
 
     // Through the bars: IsVisibleTo passes because Bars are transparent and
-    // the Cell↔Corridor path conveys visibility; Guard knows about Whatever.
-    // (Section 8 retracts TalksAbout(Guard, Bribery) and makes Whatever the
-    // top-level entry topic — see the conversation-tree test below.)
-    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)").status).toBe("passed");
+    // the Cell↔Corridor path conveys visibility; Guard knows about Whatever,
+    // so TalkTo opens the conversation on the Whatever small-talk topic.
+    expect(playLanguageCall(model, "TalkTo(Player, Guard)").status).toBe("passed");
 
-    // Wrong topic: visibility still holds, but neither (7) nor (8) accept
-    // Checkers — the (7) body fails because !TalksAbout(Guard, Checkers),
-    // and the (8) before-rule's pass-when fails because !LeadsTo(Guard,
-    // Whatever, Checkers), so both reasons surface in the failure chain.
+    // Wrong topic: visibility still holds, conversation is open on Whatever,
+    // but Checkers isn't a LeadsTo child of Whatever, so navigation fails on
+    // !LeadsTo(Guard, Whatever, Checkers).
     const wrongTopic = playLanguageCall(model, "TalkAbout(Player, Guard, Checkers)");
     expect(wrongTopic.status).toBe("failed");
-    expect(wrongTopic.reasons).toContain("!TalksAbout(Guard, Checkers)");
     expect(wrongTopic.reasons).toContain("!LeadsTo(Guard, Whatever, Checkers)");
 
     // Walk the Player into the Corridor: colocation now holds directly via
@@ -169,14 +167,15 @@ describe("tutorial language runtime", () => {
     expect(playLanguageCall(model, "Go(Player, Corridor)").status).toBe("passed");
     expect(model.hasFact("At", [idTerm("Player"), idTerm("Corridor")])).toBe(true);
     // After moving to the corridor, the player is colocated with the guard
-    // and a new top-level conversation starts (after-rule resets the topic).
-    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)").status).toBe("passed");
+    // and can re-open a conversation; TalkTo overwrites InConversation back
+    // to Whatever via uniqueness on (actor, speaker).
+    expect(playLanguageCall(model, "TalkTo(Player, Guard)").status).toBe("passed");
 
     // Move the Player to the Outside: no ConveysVisibility(Path(Outside, ...)),
-    // so IsVisibleTo fails and TalkAbout fails with it.
+    // so IsVisibleTo fails and TalkTo fails with it.
     expect(playLanguageCall(model, "Go(Player, Outside)").status).toBe("passed");
     expect(model.hasFact("At", [idTerm("Player"), idTerm("Outside")])).toBe(true);
-    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)").status).toBe("failed");
+    expect(playLanguageCall(model, "TalkTo(Player, Guard)").status).toBe("failed");
   });
 
   it("section 1 — Go fails with !Path when there is no adjacency", () => {
@@ -302,33 +301,39 @@ describe("tutorial language runtime", () => {
     expect(playLanguageCall(model, "Examine(Player, Mop)").status).toBe("passed");
   });
 
-  it("section 8 — TalkAbout walks a conversation tree gated by InConversation", () => {
+  it("section 8 — TalkTo opens a conversation; TalkAbout walks the tree; SwitchTopics backs up", () => {
     const model = loadStoryProgram(readFileSync(TUTORIAL_PATH, "utf-8"));
 
-    // Sub-topic with no InConversation: the (8) before-rule's speaker
-    // constraint fails (no InConversation fact to bind `topic`), the rule
-    // doesn't fire, and the (7) action body fails on !TalksAbout.
+    // TalkAbout requires an open conversation: without InConversation, the
+    // WillTalkAbout predicate fails on its InConversation lookup.
     expect(playLanguageCall(model, "TalkAbout(Player, Guard, Bribery)")).toMatchObject({
       status: "failed",
-      feedback: "fail { !TalksAbout(Guard, Bribery); }",
+      feedback: "fail { !InConversation(Player, Guard, ?topic); }",
     });
 
-    // Top-level entry: TalksAbout(Guard, Whatever) holds; the (7) body
-    // passes; the (8) after-rule records the new conversation.
-    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)").status).toBe("passed");
+    // TalkTo opens the conversation on the Whatever small-talk topic.
+    expect(playLanguageCall(model, "TalkTo(Player, Guard)").status).toBe("passed");
     expect(
       model.hasFact("InConversation", [idTerm("Player"), idTerm("Guard"), idTerm("Whatever")]),
     ).toBe(true);
 
-    // Walk to a sub-topic: (8) before-rule binds topic=Whatever via the
-    // speaker constraint, the body's LeadsTo check passes, and the inline
-    // set + `one Topic` cardinality displaces Whatever with Bribery.
+    // Walk to a sub-topic: WillTalkAbout's LeadsTo branch matches; the
+    // after-rule records TopicHistory(Bribery → Whatever) and uniqueness on
+    // InConversation displaces Whatever with Bribery.
     expect(playLanguageCall(model, "TalkAbout(Player, Guard, Bribery)").status).toBe("passed");
     expect(
       model.hasFact("InConversation", [idTerm("Player"), idTerm("Guard"), idTerm("Whatever")]),
     ).toBe(false);
     expect(
       model.hasFact("InConversation", [idTerm("Player"), idTerm("Guard"), idTerm("Bribery")]),
+    ).toBe(true);
+    expect(
+      model.hasFact("TopicHistory", [
+        idTerm("Player"),
+        idTerm("Guard"),
+        idTerm("Bribery"),
+        idTerm("Whatever"),
+      ]),
     ).toBe(true);
 
     // Step one more level deep. Stage 9 attaches an after-rule to OfferMoney
@@ -349,19 +354,25 @@ describe("tutorial language runtime", () => {
     expect(model.hasFact("Carrying", [idTerm("Player"), idTerm("MasterKey")])).toBe(true);
     expect(model.hasFact("Carrying", [idTerm("Guard"), idTerm("MasterKey")])).toBe(false);
 
-    // Off-tree from the current topic: no LeadsTo(Guard, OfferAFavor, Weather)
-    // and Weather isn't top-level either, so the call fails.
+    // Off-tree from the current topic: no LeadsTo(Guard, OfferAFavor, …), so
+    // navigation fails — top-level isn't a fallback any more.
     expect(playLanguageCall(model, "TalkAbout(Player, Guard, Weather)").status).toBe("failed");
+    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)").status).toBe("failed");
 
-    // Returning to a top-level topic falls through (7) and the after-rule
-    // resets InConversation, with `one Topic` retracting the OfferAFavor row.
-    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)").status).toBe("passed");
+    // SwitchTopics walks back along the history chain: OfferAFavor → Bribery.
+    expect(playLanguageCall(model, "SwitchTopics(Player, Guard)").status).toBe("passed");
+    expect(
+      model.hasFact("InConversation", [idTerm("Player"), idTerm("Guard"), idTerm("Bribery")]),
+    ).toBe(true);
+
+    // And again: Bribery → Whatever (root of the tree).
+    expect(playLanguageCall(model, "SwitchTopics(Player, Guard)").status).toBe("passed");
     expect(
       model.hasFact("InConversation", [idTerm("Player"), idTerm("Guard"), idTerm("Whatever")]),
     ).toBe(true);
-    expect(
-      model.hasFact("InConversation", [idTerm("Player"), idTerm("Guard"), idTerm("OfferAFavor")]),
-    ).toBe(false);
+
+    // No more history at the root: SwitchTopics fails.
+    expect(playLanguageCall(model, "SwitchTopics(Player, Guard)").status).toBe("failed");
 
     // StopTalking clears whatever current InConversation is in scope.
     expect(playLanguageCall(model, "StopTalking(Player, Guard)").status).toBe("passed");
@@ -369,20 +380,19 @@ describe("tutorial language runtime", () => {
       model.hasFact("InConversation", [idTerm("Player"), idTerm("Guard"), idTerm("Whatever")]),
     ).toBe(false);
 
-    // After Stop, a sub-topic call once again fails the (7) body.
+    // After Stop, a sub-topic call once again fails the InConversation check.
     expect(playLanguageCall(model, "TalkAbout(Player, Guard, Bribery)").status).toBe("failed");
 
     // Geographic gate is preserved: walk through to Outside, lose
-    // IsVisibleTo, and even a top-level Whatever fails — the (8) rule didn't
-    // override the visibility precondition the (7) body relies on. Walk the
-    // conversation tree to receive the master key, then unlock and exit.
+    // IsVisibleTo, and TalkTo fails. Walk the conversation tree to receive
+    // the master key, then unlock and exit.
     walkConversationToMasterKey(model);
     expect(playLanguageCall(model, "Unlock(Player, Bars, MasterKey)").status).toBe("passed");
     expect(playLanguageCall(model, "Open(Player, Bars)").status).toBe("passed");
     expect(playLanguageCall(model, "Go(Player, Corridor)").status).toBe("passed");
     expect(playLanguageCall(model, "Go(Player, Outside)").status).toBe("passed");
+    expect(playLanguageCall(model, "TalkTo(Player, Guard)").status).toBe("failed");
     expect(playLanguageCall(model, "TalkAbout(Player, Guard, OfferMoney)").status).toBe("failed");
-    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)").status).toBe("failed");
   });
 
   it("before-rule env is isolated from the action's parameter bindings", () => {
@@ -460,14 +470,13 @@ describe("tutorial language runtime", () => {
   it("section 8 — OfferAFavor needs the player to walk Whatever → Bribery first", () => {
     const model = loadStoryProgram(readFileSync(TUTORIAL_PATH, "utf-8"));
 
-    // No conversation yet: OfferAFavor isn't top-level and there's no
-    // current topic to lead from, so WillTalkAbout fails.
+    // No conversation yet: TalkAbout has nothing to navigate from.
     const cold = playLanguageCall(model, "TalkAbout(Player, Guard, OfferAFavor)");
     expect(cold.status).toBe("failed");
-    expect(cold.reasons).toContain("!TalksAbout(Guard, OfferAFavor)");
+    expect(cold.reasons).toContain("!InConversation(Player, Guard, ?topic)");
 
-    // Top-level entry establishes Whatever as the current topic.
-    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)").status).toBe("passed");
+    // TalkTo establishes Whatever as the current topic.
+    expect(playLanguageCall(model, "TalkTo(Player, Guard)").status).toBe("passed");
 
     // From Whatever, OfferAFavor is still two steps deep (Whatever → Bribery
     // → OfferAFavor). LeadsTo(Guard, Whatever, OfferAFavor) doesn't hold.
@@ -499,7 +508,7 @@ describe("tutorial language runtime", () => {
     // Walk to the OfferMoney leaf: action body passes, but the failing
     // after-rule rolls back the whole action, so InConversation does not
     // advance past Bribery.
-    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)").status).toBe("passed");
+    expect(playLanguageCall(model, "TalkTo(Player, Guard)").status).toBe("passed");
     expect(playLanguageCall(model, "TalkAbout(Player, Guard, Bribery)").status).toBe("passed");
     const moneyOffer = playLanguageCall(model, "TalkAbout(Player, Guard, OfferMoney)");
     expect(moneyOffer.status).toBe("failed");

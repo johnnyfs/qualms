@@ -28,7 +28,7 @@ export function MessagePanel({
   const failed =
     (result && result.status !== "passed") ||
     (queryResult && queryResult.status !== "passed");
-  const message = formatResult(atom, {
+  const lines = formatResult(atom, {
     model,
     config,
     names,
@@ -38,6 +38,7 @@ export function MessagePanel({
   });
   const borderColor = failed ? "red" : "green";
   const mark = failed ? "✗" : "✓";
+  const [headline, ...consequences] = lines;
   return (
     <Box
       borderStyle="round"
@@ -48,7 +49,10 @@ export function MessagePanel({
       <Text color={borderColor} bold>
         {mark}
       </Text>
-      <Text>{message}</Text>
+      {headline ? <Text>{headline}</Text> : null}
+      {consequences.map((line, i) => (
+        <Text key={i}>· {line}</Text>
+      ))}
     </Box>
   );
 }

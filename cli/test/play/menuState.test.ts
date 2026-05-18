@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { language } from "@quealm/qualms";
-import { defaultPlayConfig, parsePlayConfig } from "../../src/play/config.js";
+import { parsePlayConfig } from "../../src/play/config.js";
 import { buildNameIndex } from "../../src/play/naming.js";
 import { buildVerbTable } from "../../src/play/verbs.js";
 import {
@@ -13,7 +13,7 @@ import {
   type MenuState,
 } from "../../src/play/menuState.js";
 
-const { loadStoryProgram } = language;
+const { loadStoryProgram, playLanguageCall } = language;
 
 const TUTORIAL = readFileSync(
   join(import.meta.dirname, "../../../stories/tutorial/tutorial.qualms"),
@@ -25,8 +25,10 @@ player: Player
 verbs:
   Take: { words: [take] }
   Go: { words: [go] }
-  Unlock: { words: [unlock] }
-  TalkAbout: { words: [talk to] }
+  Unlock: { words: [unlock], prepositions: { 1: with } }
+  TalkTo: { words: [talk to] }
+  TalkAbout: { words: [talk about] }
+  SwitchTopics: { words: [change topics] }
   StopTalking: { words: [stop talking to] }
   Inventory: { words: [inventory] }
 `;
@@ -41,7 +43,7 @@ function setup() {
 }
 
 describe("buildFrame — root", () => {
-  it("lists verbs (excluding the conversation stopVerb)", () => {
+  it("lists verbs (excluding mid-conversation actions and conversation queries)", () => {
     const { ctx } = setup();
     const frame = buildFrame({ kind: "root" }, ctx);
     expect(frame.headers).toEqual(["What do you do?"]);
@@ -49,8 +51,11 @@ describe("buildFrame — root", () => {
       .filter((o) => o.kind === "verb")
       .map((o) => (o.kind === "verb" ? o.verbId : ""));
     expect(verbIds).toContain("Take");
-    expect(verbIds).toContain("TalkAbout");
+    expect(verbIds).toContain("TalkTo");
     expect(verbIds).toContain("Inventory");
+    // Navigation / back-up / tear-down belong inside a conversation.
+    expect(verbIds).not.toContain("TalkAbout");
+    expect(verbIds).not.toContain("SwitchTopics");
     expect(verbIds).not.toContain("StopTalking");
     expect(frame.backOption).toBeUndefined();
   });
@@ -76,6 +81,35 @@ describe("buildFrame — slot", () => {
     expect(ids).not.toContain("Player");
     expect(ids).not.toContain("Cell");
     expect(frame.backOption?.kind).toBe("back");
+  });
+
+  it("slot 0 header has no preposition or filled arg", () => {
+    const { ctx } = setup();
+    const unlock = ctx.verbs.getById("Unlock")!;
+    const state: MenuState = {
+      kind: "slot",
+      verb: unlock,
+      slot: 0,
+      args: [{ kind: "identifier", id: "Player" }],
+    };
+    const frame = buildFrame(state, ctx);
+    expect(frame.headers).toEqual(["Unlock what?"]);
+  });
+
+  it("slot 1 header includes prior arg and per-slot preposition", () => {
+    const { ctx } = setup();
+    const unlock = ctx.verbs.getById("Unlock")!;
+    const state: MenuState = {
+      kind: "slot",
+      verb: unlock,
+      slot: 1,
+      args: [
+        { kind: "identifier", id: "Player" },
+        { kind: "identifier", id: "Bars" },
+      ],
+    };
+    const frame = buildFrame(state, ctx);
+    expect(frame.headers).toEqual(["Unlock the bars with what?"]);
   });
 });
 
@@ -164,9 +198,9 @@ describe("selectOption — slot → submit / next slot", () => {
 });
 
 describe("selectOption — conversation flow", () => {
-  it("picking a speaker for TalkAbout enters conversation state (does not submit)", () => {
+  it("picking a speaker for TalkTo fires the action AND enters conversation", () => {
     const { ctx } = setup();
-    const talk = ctx.verbs.getById("TalkAbout")!;
+    const talk = ctx.verbs.getById("TalkTo")!;
     const state: MenuState = {
       kind: "slot",
       verb: talk,
@@ -178,29 +212,63 @@ describe("selectOption — conversation flow", () => {
       { kind: "candidate", id: "Guard", label: "guard" },
       ctx,
     );
-    expect(transition.kind).toBe("state");
-    if (transition.kind === "state") {
-      expect(transition.state).toEqual({ kind: "conversation", speaker: "Guard" });
+    expect(transition.kind).toBe("submit");
+    if (transition.kind === "submit") {
+      expect(transition.atom.relation).toBe("TalkTo");
+      expect(transition.atom.args).toEqual([
+        { kind: "identifier", id: "Player" },
+        { kind: "identifier", id: "Guard" },
+      ]);
+      expect(transition.nextState).toEqual({ kind: "conversation", speaker: "Guard" });
     }
   });
 
-  it("conversation frame lists topics from the Topics query", () => {
+  it("Topics is empty before TalkTo opens the conversation", () => {
     const { ctx } = setup();
     const frame = buildFrame({ kind: "conversation", speaker: "Guard" }, ctx);
     expect(frame.headers[0]).toContain("guard");
-    const topics = frame.options
-      .filter((o) => o.kind === "topic")
-      .map((o) => (o.kind === "topic" ? o.id : ""));
-    // Pre-conversation: only "Whatever" is available.
-    expect(topics).toEqual(["Whatever"]);
+    const topics = frame.options.filter((o) => o.kind === "topic");
+    expect(topics).toEqual([]);
+    // No history → back option is "leave".
     expect(frame.backOption?.kind).toBe("stop_talking");
+    expect(frame.backOption?.label).toBe("leave");
+  });
+
+  it("Topics returns LeadsTo children of the current topic after TalkTo", () => {
+    const { model, ctx } = setup();
+    expect(playLanguageCall(model, "TalkTo(Player, Guard)").status).toBe("passed");
+    const frame = buildFrame({ kind: "conversation", speaker: "Guard" }, ctx);
+    const topicIds = frame.options
+      .filter((o) => o.kind === "topic")
+      .map((o) => (o.kind === "topic" ? o.id : ""))
+      .sort();
+    expect(topicIds).toEqual(["Bribery", "Weather"]);
+    // Root of tree: still no TopicHistory → back is "leave".
+    expect(frame.backOption?.kind).toBe("stop_talking");
+    expect(frame.backOption?.label).toBe("leave");
+  });
+
+  it("back option flips to 'change topics' after navigating to a sub-topic", () => {
+    const { model, ctx } = setup();
+    expect(playLanguageCall(model, "TalkTo(Player, Guard)").status).toBe("passed");
+    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Bribery)").status).toBe(
+      "passed",
+    );
+    const frame = buildFrame({ kind: "conversation", speaker: "Guard" }, ctx);
+    const topicIds = frame.options
+      .filter((o) => o.kind === "topic")
+      .map((o) => (o.kind === "topic" ? o.id : ""))
+      .sort();
+    expect(topicIds).toEqual(["BriberyIsWrong", "OfferAFavor", "OfferMoney"]);
+    expect(frame.backOption?.kind).toBe("switch_topics");
+    expect(frame.backOption?.label).toBe("change topics");
   });
 
   it("picking a topic submits TalkAbout and stays in conversation", () => {
     const { ctx } = setup();
     const transition = selectOption(
       { kind: "conversation", speaker: "Guard" },
-      { kind: "topic", id: "Whatever", label: "whatever" },
+      { kind: "topic", id: "Bribery", label: "bribery" },
       ctx,
     );
     expect(transition.kind).toBe("submit");
@@ -209,7 +277,25 @@ describe("selectOption — conversation flow", () => {
       expect(transition.atom.args).toEqual([
         { kind: "identifier", id: "Player" },
         { kind: "identifier", id: "Guard" },
-        { kind: "identifier", id: "Whatever" },
+        { kind: "identifier", id: "Bribery" },
+      ]);
+      expect(transition.nextState).toEqual({ kind: "conversation", speaker: "Guard" });
+    }
+  });
+
+  it("switch_topics submits SwitchTopics and stays in conversation", () => {
+    const { ctx } = setup();
+    const transition = selectOption(
+      { kind: "conversation", speaker: "Guard" },
+      { kind: "switch_topics", label: "change topics" },
+      ctx,
+    );
+    expect(transition.kind).toBe("submit");
+    if (transition.kind === "submit") {
+      expect(transition.atom.relation).toBe("SwitchTopics");
+      expect(transition.atom.args).toEqual([
+        { kind: "identifier", id: "Player" },
+        { kind: "identifier", id: "Guard" },
       ]);
       expect(transition.nextState).toEqual({ kind: "conversation", speaker: "Guard" });
     }
@@ -219,7 +305,7 @@ describe("selectOption — conversation flow", () => {
     const { ctx } = setup();
     const transition = selectOption(
       { kind: "conversation", speaker: "Guard" },
-      { kind: "stop_talking", label: "stop talking" },
+      { kind: "stop_talking", label: "leave" },
       ctx,
     );
     expect(transition.kind).toBe("submit");

@@ -4,30 +4,52 @@ import type { MenuFrame } from "./menuState.js";
 interface Props {
   readonly frame: MenuFrame;
   readonly selectedIndex: number;
+  readonly scrollOffset: number;
+  readonly windowSize: number;
+  readonly borderColor?: string;
 }
 
-export function MenuPanel({ frame, selectedIndex }: Props) {
-  const numbered = frame.options.slice(0, 9);
-  const overflow = frame.options.length > 9;
+export function MenuPanel({
+  frame,
+  selectedIndex,
+  scrollOffset,
+  windowSize,
+  borderColor = "yellow",
+}: Props) {
+  const total = frame.options.length;
+  const visible = frame.options.slice(scrollOffset, scrollOffset + windowSize);
+  const hiddenAbove = scrollOffset;
+  const hiddenBelow = Math.max(0, total - scrollOffset - windowSize);
   return (
-    <Box borderStyle="round" borderColor="yellow" paddingX={1} flexDirection="column">
+    <Box borderStyle="round" borderColor={borderColor} paddingX={1} flexDirection="column">
       {frame.headers.map((header, i) => (
         <Text key={i} bold={i === 0}>
           {header}
         </Text>
       ))}
       <Text> </Text>
-      {numbered.map((option, i) => {
-        const selected = i === selectedIndex;
+      {hiddenAbove > 0 ? (
+        <Text dimColor>{`  ↑ ${hiddenAbove} more above`}</Text>
+      ) : null}
+      {visible.map((option, i) => {
+        const absoluteIndex = scrollOffset + i;
+        const selected = absoluteIndex === selectedIndex;
         const marker = selected ? "▶" : " ";
         const label = labelOf(option);
         return (
-          <Text key={i} bold={selected} inverse={selected} color={selected ? "yellow" : undefined}>
+          <Text
+            key={absoluteIndex}
+            bold={selected}
+            inverse={selected}
+            color={selected ? "yellow" : undefined}
+          >
             {`${marker} ${i + 1}. ${label}`}
           </Text>
         );
       })}
-      {overflow ? <Text dimColor>  ...and more</Text> : null}
+      {hiddenBelow > 0 ? (
+        <Text dimColor>{`  ↓ ${hiddenBelow} more below`}</Text>
+      ) : null}
       {frame.backOption ? (
         <Text dimColor>{`  0. ${labelOf(frame.backOption)}`}</Text>
       ) : null}

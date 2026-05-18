@@ -151,31 +151,31 @@ describe("tutorial engine queries", () => {
   });
 
   describe("Topics", () => {
-    it("returns the top-level entry topic before any conversation", () => {
+    it("is empty before a conversation has been opened", () => {
       const model = loadStoryProgram(TUTORIAL);
       const result = playLanguageQuery(model, "Topics(Player, Guard)");
       expect(result.status).toBe("passed");
-      const topics = idsOf(result.bindings, "topic");
-      expect(topics).toEqual(["Whatever"]);
+      expect(result.bindings).toEqual([]);
     });
 
-    it("returns sub-topics after a conversation has been opened", () => {
+    it("returns sub-topics of the current topic after TalkTo opens the conversation", () => {
       const model = loadStoryProgram(TUTORIAL);
-      const opened = playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)");
-      expect(opened.status).toBe("passed");
+      expect(playLanguageCall(model, "TalkTo(Player, Guard)").status).toBe("passed");
       const result = playLanguageQuery(model, "Topics(Player, Guard)");
       const topics = idsOf(result.bindings, "topic");
-      // Whatever still matches via TalksAbout, plus its sub-topics via LeadsTo
+      // LeadsTo(Guard, Whatever, …) covers Bribery and Weather.
       expect(topics).toContain("Bribery");
       expect(topics).toContain("Weather");
+      // Whatever is the root, not a child of itself.
+      expect(topics).not.toContain("Whatever");
     });
   });
 
   describe("CurrentTopic", () => {
-    it("is empty before a conversation and reflects InConversation after", () => {
+    it("is empty before a conversation and reflects InConversation after TalkTo", () => {
       const model = loadStoryProgram(TUTORIAL);
       expect(playLanguageQuery(model, "CurrentTopic(Player, Guard)").bindings).toEqual([]);
-      playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)");
+      playLanguageCall(model, "TalkTo(Player, Guard)");
       const after = playLanguageQuery(model, "CurrentTopic(Player, Guard)");
       const topics = idsOf(after.bindings, "topic");
       expect(topics).toEqual(["Whatever"]);

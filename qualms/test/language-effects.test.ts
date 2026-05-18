@@ -17,7 +17,7 @@ describe("engine-tracked effects", () => {
     // so the after-rule transfers it; the intervening calls have their own
     // effects that we don't assert on here — the Unlock set below is the
     // focus.
-    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Whatever)").status).toBe("passed");
+    expect(playLanguageCall(model, "TalkTo(Player, Guard)").status).toBe("passed");
     expect(playLanguageCall(model, "TalkAbout(Player, Guard, Bribery)").status).toBe("passed");
     expect(playLanguageCall(model, "TalkAbout(Player, Guard, OfferAFavor)").status).toBe("passed");
 

@@ -44,8 +44,17 @@ function menuStateKey(state: MenuState): string {
   }
 }
 
-function visibleOptionCount(frame: MenuFrame): number {
-  return Math.min(frame.options.length, 9);
+const WINDOW_SIZE = 9;
+
+function clampScrollOffset(selectedIndex: number, total: number): number {
+  if (total <= WINDOW_SIZE) return 0;
+  // Anchor the selection roughly at the center of the visible window, then
+  // clamp so we never scroll past the ends.
+  const half = Math.floor(WINDOW_SIZE / 2);
+  const max = total - WINDOW_SIZE;
+  if (selectedIndex <= half) return 0;
+  if (selectedIndex >= total - half - 1) return max;
+  return selectedIndex - half;
 }
 
 interface Props {
@@ -65,17 +74,7 @@ export function MenuController({
 }: Props) {
   const { stdout } = useStdout();
   const columns = stdout?.columns ?? 80;
-  const rows = stdout?.rows ?? 24;
   const panelWidth = Math.min(columns - 4, 72);
-
-  // Alt-screen takeover so play mode feels like a different surface and
-  // restores the DSL transcript on exit.
-  useEffect(() => {
-    stdout?.write("\x1b[?1049h\x1b[2J\x1b[H");
-    return () => {
-      stdout?.write("\x1b[?1049l");
-    };
-  }, [stdout]);
 
   const ctx: MenuContext = useMemo(
     () => ({
@@ -86,8 +85,11 @@ export function MenuController({
     }),
     [session.model, session.config, session.names, session.verbs],
   );
-  const frame = useMemo(() => buildFrame(state.menu, ctx), [state.menu, ctx]);
-  const optionCount = visibleOptionCount(frame);
+  // buildFrame reads the (mutable) model; memoizing on identity would freeze
+  // the menu after actions that change the model in place.
+  const frame = buildFrame(state.menu, ctx);
+  const optionCount = frame.options.length;
+  const scrollOffset = clampScrollOffset(state.selectedIndex, optionCount);
   const stateKey = menuStateKey(state.menu);
 
   // Reset selectedIndex on menu state change; clamp when option list shrinks.
@@ -149,6 +151,18 @@ export function MenuController({
       setState({ ...state, selectedIndex: next });
       return;
     }
+    if (key.pageUp) {
+      if (optionCount === 0) return;
+      const next = Math.max(0, state.selectedIndex - WINDOW_SIZE);
+      setState({ ...state, selectedIndex: next });
+      return;
+    }
+    if (key.pageDown) {
+      if (optionCount === 0) return;
+      const next = Math.min(optionCount - 1, state.selectedIndex + WINDOW_SIZE);
+      setState({ ...state, selectedIndex: next });
+      return;
+    }
     if (key.return) {
       const option: MenuOption | undefined = frame.options[state.selectedIndex];
       if (!option) return;
@@ -164,34 +178,35 @@ export function MenuController({
     }
     const digit = parseInt(input, 10);
     if (!Number.isNaN(digit) && digit >= 1 && digit <= 9) {
-      const option: MenuOption | undefined = frame.options[digit - 1];
+      // Digits map to the currently-visible slice, so position N selects the
+      // Nth visible row regardless of scroll offset.
+      const optionIndex = scrollOffset + digit - 1;
+      const option: MenuOption | undefined = frame.options[optionIndex];
       if (!option) return;
       applyTransition(selectOption(state.menu, option, ctx));
     }
   });
 
   return (
-    <Box
-      width={columns}
-      height={rows}
-      flexDirection="column"
-      justifyContent="center"
-      alignItems="center"
-    >
-      <Box flexDirection="column" width={panelWidth}>
-        <RoomPanel model={session.model} config={session.config} names={session.names} />
-        <MessagePanel
-          model={session.model}
-          config={session.config}
-          names={session.names}
-          verbs={session.verbs}
-          {...(state.lastAtom ? { atom: state.lastAtom } : {})}
-          {...(state.lastResult ? { result: state.lastResult } : {})}
-          {...(state.lastQueryResult ? { queryResult: state.lastQueryResult } : {})}
-        />
-        <MenuPanel frame={frame} selectedIndex={state.selectedIndex} />
-        <MenuFooter frame={frame} />
-      </Box>
+    <Box flexDirection="column" width={panelWidth}>
+      <RoomPanel model={session.model} config={session.config} names={session.names} />
+      <MessagePanel
+        model={session.model}
+        config={session.config}
+        names={session.names}
+        verbs={session.verbs}
+        {...(state.lastAtom ? { atom: state.lastAtom } : {})}
+        {...(state.lastResult ? { result: state.lastResult } : {})}
+        {...(state.lastQueryResult ? { queryResult: state.lastQueryResult } : {})}
+      />
+      <MenuPanel
+        frame={frame}
+        selectedIndex={state.selectedIndex}
+        scrollOffset={scrollOffset}
+        windowSize={WINDOW_SIZE}
+        borderColor={state.menu.kind === "conversation" ? "cyan" : "yellow"}
+      />
+      <MenuFooter frame={frame} />
     </Box>
   );
 }

@@ -15,7 +15,7 @@ describe("handleInput", () => {
     const model = loadStoryProgram(readFileSync(TUTORIAL_PATH, "utf-8"));
     // The master key is with the guard in stage 9; walk to OfferAFavor to
     // receive it before unlocking.
-    handleInput(model, "TalkAbout(Player, Guard, Whatever)");
+    handleInput(model, "TalkTo(Player, Guard)");
     handleInput(model, "TalkAbout(Player, Guard, Bribery)");
     handleInput(model, "TalkAbout(Player, Guard, OfferAFavor)");
     const entries = handleInput(model, "Unlock(Player, Bars, MasterKey)");
@@ -67,7 +67,7 @@ describe("handleInput", () => {
     expect(blocked[0]!.text.startsWith("fail {")).toBe(true);
 
     // Walk the stage-9 conversation to receive the master key.
-    handleInput(model, "TalkAbout(Player, Guard, Whatever)");
+    handleInput(model, "TalkTo(Player, Guard)");
     handleInput(model, "TalkAbout(Player, Guard, Bribery)");
     handleInput(model, "TalkAbout(Player, Guard, OfferAFavor)");
 

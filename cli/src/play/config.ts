@@ -19,9 +19,12 @@ export interface PlayConfig {
   readonly view: { readonly kind: "menu" | "infocom" };
   readonly conversation: {
     readonly startVerb: string;
+    readonly navigateVerb: string;
+    readonly switchVerb: string;
     readonly stopVerb: string;
     readonly topicsQuery: string;
     readonly currentTopicQuery: string;
+    readonly previousTopicQuery: string;
   };
   readonly source?: string;
 }
@@ -61,10 +64,13 @@ export function defaultPlayConfig(player = "Player"): PlayConfig {
     events: new Map(),
     view: { kind: "menu" },
     conversation: {
-      startVerb: "TalkAbout",
+      startVerb: "TalkTo",
+      navigateVerb: "TalkAbout",
+      switchVerb: "SwitchTopics",
       stopVerb: "StopTalking",
       topicsQuery: "Topics",
       currentTopicQuery: "CurrentTopic",
+      previousTopicQuery: "PreviousTopic",
     },
   };
 }
@@ -321,10 +327,13 @@ function readView(raw: unknown): PlayConfig["view"] {
 
 function readConversation(raw: unknown): PlayConfig["conversation"] {
   const defaults: PlayConfig["conversation"] = {
-    startVerb: "TalkAbout",
+    startVerb: "TalkTo",
+    navigateVerb: "TalkAbout",
+    switchVerb: "SwitchTopics",
     stopVerb: "StopTalking",
     topicsQuery: "Topics",
     currentTopicQuery: "CurrentTopic",
+    previousTopicQuery: "PreviousTopic",
   };
   if (raw === undefined || raw === null) return defaults;
   if (typeof raw !== "object" || Array.isArray(raw)) {
@@ -332,7 +341,15 @@ function readConversation(raw: unknown): PlayConfig["conversation"] {
   }
   const obj = raw as Record<string, unknown>;
   const out = { ...defaults };
-  for (const field of ["startVerb", "stopVerb", "topicsQuery", "currentTopicQuery"] as const) {
+  for (const field of [
+    "startVerb",
+    "navigateVerb",
+    "switchVerb",
+    "stopVerb",
+    "topicsQuery",
+    "currentTopicQuery",
+    "previousTopicQuery",
+  ] as const) {
     const value = obj[field];
     if (value === undefined) continue;
     if (typeof value !== "string" || value.length === 0) {

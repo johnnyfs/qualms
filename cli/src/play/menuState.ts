@@ -33,6 +33,7 @@ export type MenuOption =
   | { readonly kind: "verb"; readonly verbId: string; readonly label: string }
   | { readonly kind: "candidate"; readonly id: string; readonly label: string }
   | { readonly kind: "topic"; readonly id: string; readonly label: string }
+  | { readonly kind: "switch_topics"; readonly label: string }
   | { readonly kind: "stop_talking"; readonly label: string }
   | { readonly kind: "back"; readonly label: string };
 
@@ -84,6 +85,17 @@ export function selectOption(
     };
     return { kind: "submit", atom, nextState: { kind: "root" } };
   }
+  if (option.kind === "switch_topics") {
+    if (state.kind !== "conversation") return { kind: "noop" };
+    const atom: language.RelationAtom = {
+      relation: ctx.config.conversation.switchVerb,
+      args: [
+        { kind: "identifier", id: ctx.config.player },
+        { kind: "identifier", id: state.speaker },
+      ],
+    };
+    return { kind: "submit", atom, nextState: state };
+  }
   if (state.kind === "root" && option.kind === "verb") {
     return selectVerb(option.verbId, ctx);
   }
@@ -92,7 +104,7 @@ export function selectOption(
   }
   if (state.kind === "conversation" && option.kind === "topic") {
     const atom: language.RelationAtom = {
-      relation: ctx.config.conversation.startVerb,
+      relation: ctx.config.conversation.navigateVerb,
       args: [
         { kind: "identifier", id: ctx.config.player },
         { kind: "identifier", id: state.speaker },
@@ -153,7 +165,14 @@ function advanceSlot(
     state.verb.actionId === ctx.config.conversation.startVerb;
   const filledSpeaker = isStartVerb && state.slot === 0;
   if (filledSpeaker) {
-    return { kind: "state", state: { kind: "conversation", speaker: pickedId } };
+    // TalkTo only takes (actor, speaker); fire it and slide into the
+    // conversation menu in one step.
+    const atom: language.RelationAtom = { relation: state.verb.actionId, args };
+    return {
+      kind: "submit",
+      atom,
+      nextState: { kind: "conversation", speaker: pickedId },
+    };
   }
   // Slot count = parameters - 1 (the implicit actor). slot+1 is the next slot.
   const slotsTotal = state.verb.parameters.length - 1;
@@ -170,12 +189,45 @@ function advanceSlot(
   return { kind: "submit", atom, nextState: { kind: "root" } };
 }
 
+function slotHeader(
+  state: Extract<MenuState, { kind: "slot" }>,
+  ctx: MenuContext,
+): string {
+  const verb = state.verb;
+  const parts: string[] = [titleCase(verb.words[0] ?? verb.actionId)];
+  // state.args = [actor, ...args filled so far]. state.slot = next slot to fill (0-indexed
+  // over non-actor params). For each already-filled slot i in 0..state.slot-1, render its
+  // preposition (if any) then "the <name>".
+  for (let i = 0; i < state.slot; i++) {
+    const prep = verb.prepositions.get(i);
+    if (prep) parts.push(prep);
+    const arg = state.args[i + 1];
+    if (arg && arg.kind === "identifier") {
+      parts.push(`the ${ctx.names.displayName(arg.id)}`);
+    }
+  }
+  const currentPrep = verb.prepositions.get(state.slot);
+  if (currentPrep) parts.push(currentPrep);
+  parts.push("what?");
+  return parts.join(" ");
+}
+
 function rootFrame(ctx: MenuContext): MenuFrame {
   const options: MenuOption[] = [];
-  const stopVerb = ctx.config.conversation.stopVerb;
+  const conv = ctx.config.conversation;
+  const conversationInternal = new Set<string>([
+    // Navigation, back-up, and tear-down only make sense mid-conversation.
+    conv.navigateVerb,
+    conv.switchVerb,
+    conv.stopVerb,
+    // The conversation queries are read by the menu, not invoked by the player.
+    conv.topicsQuery,
+    conv.currentTopicQuery,
+    conv.previousTopicQuery,
+  ]);
   for (const verb of ctx.verbs.all()) {
     if (verb.hidden) continue;
-    if (verb.actionId === stopVerb) continue; // only relevant inside conversation
+    if (conversationInternal.has(verb.actionId)) continue;
     options.push({
       kind: "verb",
       verbId: verb.actionId,
@@ -190,7 +242,7 @@ function slotFrame(
   ctx: MenuContext,
 ): MenuFrame {
   const verb = state.verb;
-  const headers = [`${titleCase(verb.words[0] ?? verb.actionId)} what?`];
+  const headers = [slotHeader(state, ctx)];
   const candidateIds = enumerateCandidates(ctx);
   const options: MenuOption[] = candidateIds.map((id) => ({
     kind: "candidate",
@@ -208,13 +260,14 @@ function conversationFrame(
   state: Extract<MenuState, { kind: "conversation" }>,
   ctx: MenuContext,
 ): MenuFrame {
+  const speakerArgs: readonly language.Term[] = [
+    { kind: "identifier", id: ctx.config.player },
+    { kind: "identifier", id: state.speaker },
+  ];
   const headers = [`Talking to the ${ctx.names.displayName(state.speaker)}.`];
   const currentTopicResult = playLanguageQuery(ctx.model, {
     relation: ctx.config.conversation.currentTopicQuery,
-    args: [
-      { kind: "identifier", id: ctx.config.player },
-      { kind: "identifier", id: state.speaker },
-    ],
+    args: speakerArgs,
   });
   const currentTopicId =
     currentTopicResult.status === "passed" &&
@@ -227,10 +280,7 @@ function conversationFrame(
 
   const topicsResult = playLanguageQuery(ctx.model, {
     relation: ctx.config.conversation.topicsQuery,
-    args: [
-      { kind: "identifier", id: ctx.config.player },
-      { kind: "identifier", id: state.speaker },
-    ],
+    args: speakerArgs,
   });
   const topicIds = new Set<string>();
   if (topicsResult.status === "passed") {
@@ -247,11 +297,21 @@ function conversationFrame(
       label: ctx.names.displayName(id),
     }));
 
-  return {
-    headers,
-    options,
-    backOption: { kind: "stop_talking", label: "stop talking" },
-  };
+  // Probe history: if the player has a previous topic to back up to, the
+  // back option is "change topics" (SwitchTopics); otherwise we're at the
+  // root of the conversation tree and the only way out is "leave"
+  // (StopTalking).
+  const previousResult = playLanguageQuery(ctx.model, {
+    relation: ctx.config.conversation.previousTopicQuery,
+    args: speakerArgs,
+  });
+  const hasPrevious =
+    previousResult.status === "passed" && previousResult.bindings.length > 0;
+  const backOption: MenuOption = hasPrevious
+    ? { kind: "switch_topics", label: "change topics" }
+    : { kind: "stop_talking", label: "leave" };
+
+  return { headers, options, backOption };
 }
 
 function enumerateCandidates(ctx: MenuContext): readonly string[] {

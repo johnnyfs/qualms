@@ -22,10 +22,13 @@ describe("parsePlayConfig", () => {
     expect(config.visibility).toEqual({ predicate: "IsVisibleTo", locationFact: "At" });
     expect(config.view).toEqual({ kind: "menu" });
     expect(config.conversation).toEqual({
-      startVerb: "TalkAbout",
+      startVerb: "TalkTo",
+      navigateVerb: "TalkAbout",
+      switchVerb: "SwitchTopics",
       stopVerb: "StopTalking",
       topicsQuery: "Topics",
       currentTopicQuery: "CurrentTopic",
+      previousTopicQuery: "PreviousTopic",
     });
   });
 

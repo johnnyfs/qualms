@@ -22,9 +22,9 @@ describe("tutorial language model", () => {
     const model = loadStoryProgram(source);
 
     expect(model.traits.size).toBe(10);
-    expect(model.relations.size).toBe(12);
+    expect(model.relations.size).toBe(13);
     expect(model.predicates.size).toBe(4);
-    expect(model.actions.size).toBe(10);
+    expect(model.actions.size).toBe(12);
     expect(model.rules).toHaveLength(14);
     expect(model.validations.size).toBe(1);
     expect(model.entities.size).toBe(20);

@@ -51,7 +51,10 @@ function setup(configText = "") {
   const baseCtx = { config, names, verbs, model };
   return {
     model,
+    // Convenience: most success/failure/query checks only care about the first line.
     success: (atom: language.RelationAtom, result: language.LanguagePlayResult) =>
+      formatResult(atom, { ...baseCtx, result })[0] ?? "",
+    successLines: (atom: language.RelationAtom, result: language.LanguagePlayResult) =>
       formatResult(atom, { ...baseCtx, result }),
     fail: (atom: language.RelationAtom, reasons: readonly string[]) => {
       const result: language.LanguagePlayResult = {
@@ -62,10 +65,10 @@ function setup(configText = "") {
         events: [],
         failures: reasons.map((message) => ({ kind: "condition", message })),
       };
-      return formatResult(atom, { ...baseCtx, result });
+      return formatResult(atom, { ...baseCtx, result })[0] ?? "";
     },
     query: (atom: language.RelationAtom, queryResult: language.LanguageQueryResult) =>
-      formatResult(atom, { ...baseCtx, queryResult }),
+      formatResult(atom, { ...baseCtx, queryResult })[0] ?? "",
   };
 }
 
@@ -133,15 +136,15 @@ verbs:
     ).toBe("You snatch the bone shard.");
   });
 
-  it("event template wins over verb template", () => {
+  it("event templates render as consequence lines after the verb headline", () => {
     const f = setup(`
 events:
   Took: "$actor pockets the $arg1."
 verbs:
-  Take: { words: [take], template: "snatched" }
+  Take: { words: [take], template: "You grab the $target." }
 `);
     expect(
-      f.success(
+      f.successLines(
         {
           relation: "Take",
           args: [
@@ -159,7 +162,45 @@ verbs:
           },
         ]),
       ),
-    ).toBe("you pockets the bone shard.");
+    ).toEqual([
+      "You grab the bone shard.",
+      "you pockets the bone shard.",
+    ]);
+  });
+
+  it("renders multiple events in order, skipping events without templates", () => {
+    const f = setup(`
+events:
+  GuardHandsOver: "The guard slips you the $arg1."
+`);
+    expect(
+      f.successLines(
+        {
+          relation: "TalkAbout",
+          args: [
+            { kind: "identifier", id: "Player" },
+            { kind: "identifier", id: "Guard" },
+            { kind: "identifier", id: "Bribery" },
+          ],
+        },
+        passed([
+          {
+            event: "Unmapped",
+            args: [{ kind: "id", id: "Player" }],
+          },
+          {
+            event: "GuardHandsOver",
+            args: [
+              { kind: "id", id: "Player" },
+              { kind: "id", id: "MasterKey" },
+            ],
+          },
+        ]),
+      ),
+    ).toEqual([
+      "You talk to the guard about bribery.",
+      "The guard slips you the master key.",
+    ]);
   });
 
   it("falls back to action-id verb form for unknown action", () => {

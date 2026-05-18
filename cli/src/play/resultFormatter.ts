@@ -87,34 +87,38 @@ export interface FormatContext {
   readonly queryResult?: LanguageQueryResult;
 }
 
-export function formatResult(atom: RelationAtom, ctx: FormatContext): string {
-  if (ctx.queryResult) return formatQuery(atom, ctx.queryResult, ctx);
+export function formatResult(atom: RelationAtom, ctx: FormatContext): readonly string[] {
+  if (ctx.queryResult) return [formatQuery(atom, ctx.queryResult, ctx)];
   if (ctx.result) {
     return ctx.result.status === "passed"
       ? formatSuccess(atom, ctx.result, ctx)
-      : formatFailure(atom, ctx.result, ctx);
+      : [formatFailure(atom, ctx.result, ctx)];
   }
-  return "";
+  return [];
 }
 
 function formatSuccess(
   atom: RelationAtom,
   result: LanguagePlayResult,
   ctx: FormatContext,
-): string {
+): readonly string[] {
+  const verbConfig = ctx.config.verbs.get(atom.relation);
+  let headline: string;
+  if (verbConfig?.template) {
+    headline = applyTemplate(verbConfig.template, atom.args, ctx);
+  } else {
+    const builtin = DEFAULT_VERB_TEMPLATES.get(atom.relation);
+    headline = builtin
+      ? applyTemplate(builtin, atom.args, ctx)
+      : `You ${displayActionVerb(atom.relation)}.`;
+  }
+  const lines: string[] = [headline];
   for (const event of result.events) {
     const template = ctx.config.events.get(event.event);
-    if (template) {
-      return applyTemplate(template, groundTermsAsArgs(event.args), ctx);
-    }
+    if (!template) continue;
+    lines.push(applyTemplate(template, groundTermsAsArgs(event.args), ctx));
   }
-  const verbConfig = ctx.config.verbs.get(atom.relation);
-  if (verbConfig?.template) {
-    return applyTemplate(verbConfig.template, atom.args, ctx);
-  }
-  const builtin = DEFAULT_VERB_TEMPLATES.get(atom.relation);
-  if (builtin) return applyTemplate(builtin, atom.args, ctx);
-  return `You ${displayActionVerb(atom.relation)}.`;
+  return lines;
 }
 
 function formatFailure(

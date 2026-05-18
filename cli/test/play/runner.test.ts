@@ -112,6 +112,145 @@ describe("handleMenuSubmit — DSL-tied failure denials", () => {
   });
 });
 
+describe("handleMenuSubmit — conversation flow", () => {
+  function start() {
+    const config = loadPlayConfig(SIDECAR_PATH);
+    const model = loadStoryProgram(TUTORIAL);
+    const session = createPlaySession(model, config);
+    return { config, model, session };
+  }
+
+  it("TalkTo opens conversation at Whatever", () => {
+    const { model, session } = start();
+    const submit = handleMenuSubmit(session, {
+      relation: "TalkTo",
+      args: [id("Player"), id("Guard")],
+    });
+    expect(submit.result?.status).toBe("passed");
+    expect(
+      model.hasFact("InConversation", [
+        { kind: "id", id: "Player" },
+        { kind: "id", id: "Guard" },
+        { kind: "id", id: "Whatever" },
+      ]),
+    ).toBe(true);
+  });
+
+  it("TalkAbout descends the tree and records TopicHistory", () => {
+    const { model, session } = start();
+    handleMenuSubmit(session, {
+      relation: "TalkTo",
+      args: [id("Player"), id("Guard")],
+    });
+    const submit = handleMenuSubmit(session, {
+      relation: "TalkAbout",
+      args: [id("Player"), id("Guard"), id("Bribery")],
+    });
+    expect(submit.result?.status).toBe("passed");
+    expect(
+      model.hasFact("InConversation", [
+        { kind: "id", id: "Player" },
+        { kind: "id", id: "Guard" },
+        { kind: "id", id: "Bribery" },
+      ]),
+    ).toBe(true);
+    expect(
+      model.hasFact("TopicHistory", [
+        { kind: "id", id: "Player" },
+        { kind: "id", id: "Guard" },
+        { kind: "id", id: "Bribery" },
+        { kind: "id", id: "Whatever" },
+      ]),
+    ).toBe(true);
+  });
+
+  it("OfferAFavor transfers the master key and emits GuardHandsOver", () => {
+    const { model, session } = start();
+    handleMenuSubmit(session, {
+      relation: "TalkTo",
+      args: [id("Player"), id("Guard")],
+    });
+    handleMenuSubmit(session, {
+      relation: "TalkAbout",
+      args: [id("Player"), id("Guard"), id("Bribery")],
+    });
+    const submit = handleMenuSubmit(session, {
+      relation: "TalkAbout",
+      args: [id("Player"), id("Guard"), id("OfferAFavor")],
+    });
+    expect(submit.result?.status).toBe("passed");
+    expect(submit.result?.events.some((e) => e.event === "GuardHandsOver")).toBe(true);
+    expect(
+      model.hasFact("Carrying", [
+        { kind: "id", id: "Player" },
+        { kind: "id", id: "MasterKey" },
+      ]),
+    ).toBe(true);
+    expect(
+      model.hasFact("Carrying", [
+        { kind: "id", id: "Guard" },
+        { kind: "id", id: "MasterKey" },
+      ]),
+    ).toBe(false);
+    // The consequence line should surface in the rendered transcript.
+    expect(
+      submit.entries.some((e) => /guard slips you the master key/i.test(e.text)),
+    ).toBe(true);
+  });
+
+  it("SwitchTopics walks back one step along TopicHistory", () => {
+    const { model, session } = start();
+    handleMenuSubmit(session, {
+      relation: "TalkTo",
+      args: [id("Player"), id("Guard")],
+    });
+    handleMenuSubmit(session, {
+      relation: "TalkAbout",
+      args: [id("Player"), id("Guard"), id("Bribery")],
+    });
+    const submit = handleMenuSubmit(session, {
+      relation: "SwitchTopics",
+      args: [id("Player"), id("Guard")],
+    });
+    expect(submit.result?.status).toBe("passed");
+    expect(
+      model.hasFact("InConversation", [
+        { kind: "id", id: "Player" },
+        { kind: "id", id: "Guard" },
+        { kind: "id", id: "Whatever" },
+      ]),
+    ).toBe(true);
+    expect(
+      model.hasFact("TopicHistory", [
+        { kind: "id", id: "Player" },
+        { kind: "id", id: "Guard" },
+        { kind: "id", id: "Bribery" },
+        { kind: "id", id: "Whatever" },
+      ]),
+    ).toBe(false);
+  });
+
+  it("StopTalking clears InConversation", () => {
+    const { model, session } = start();
+    handleMenuSubmit(session, {
+      relation: "TalkTo",
+      args: [id("Player"), id("Guard")],
+    });
+    const submit = handleMenuSubmit(session, {
+      relation: "StopTalking",
+      args: [id("Player"), id("Guard")],
+    });
+    expect(submit.result?.status).toBe("passed");
+    expect(
+      model.hasFact("InConversation", [
+        { kind: "id", id: "Player" },
+        { kind: "id", id: "Guard" },
+        { kind: "id", id: "Whatever" },
+      ]),
+    ).toBe(false);
+  });
+});
+
 describe("handleMenuSubmit — unknown atom", () => {
   it("returns an error entry for unknown atoms", () => {
     const config = loadPlayConfig(SIDECAR_PATH);

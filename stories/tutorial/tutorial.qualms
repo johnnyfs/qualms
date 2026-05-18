@@ -324,21 +324,34 @@ set {
 relation InConversation(actor: Actor, speaker: Speaker, topic: Topic) unique(actor, speaker)
 relation LeadsTo(Speaker, Topic, Topic)
 
-predicate WillTalkAbout(actor: Actor, speaker: Speaker, topic: Topic) {
-  when (TalksAbout(speaker, topic)) {
+-- Per-conversation history: TopicHistory(actor, speaker, current, prev) means
+-- the player got to `current` from `prev`. SwitchTopics walks one step back
+-- by looking up the entry keyed on the current topic.
+relation TopicHistory(actor: Actor, speaker: Speaker, current: Topic, prev: Topic) unique(actor, speaker, current)
+
+entity Whatever { Topic }
+entity Weather { Topic }
+entity OfferMoney { Topic }
+entity OfferAFavor { Topic }
+entity BriberyIsWrong { Topic }
+
+-- TalkTo enters a conversation with the speaker. The conversation always
+-- opens on the "Whatever" small-talk topic; navigable sub-topics then come
+-- from LeadsTo(speaker, Whatever, …).
+action TalkTo(actor: Actor, speaker: Speaker) {
+  when (IsVisibleTo(actor, speaker) & TalksAbout(speaker, Whatever)) {
     succeed;
   }
 }
 
--- Sub-topic branch: the speaker constraint binds `topic` from the current
--- conversation fact, and the rule succeeds when LeadsTo connects it to the
--- call-site sub-topic.
-before WillTalkAbout(
-  actor: Actor,
-  speaker: Speaker { InConversation(actor, speaker, ?topic) },
-  subTopic: Topic
-) {
-  when (LeadsTo(speaker, ?topic, subTopic)) {
+after TalkTo(actor: Actor, speaker: Speaker) {
+  set InConversation(actor, speaker, Whatever);
+}
+
+-- TalkAbout navigates from the current topic to one of its LeadsTo children.
+-- It is no longer an entry point; players must TalkTo first.
+predicate WillTalkAbout(actor: Actor, speaker: Speaker, subTopic: Topic) {
+  when (InConversation(actor, speaker, ?topic) & LeadsTo(speaker, ?topic, subTopic)) {
     succeed;
   }
 }
@@ -349,11 +362,21 @@ replace action TalkAbout(actor: Actor, speaker: Speaker, topic: Topic) {
   }
 }
 
--- Both top-level entries and sub-topic walks pass through the action body
--- now, so a single after-rule records the new conversation topic. The
--- unique(actor, speaker) on InConversation handles displacement.
+-- Record the back-pointer before InConversation is displaced, then advance.
 after TalkAbout(actor: Actor, speaker: Speaker, topic: Topic) {
+  when (InConversation(actor, speaker, ?current)) {
+    set TopicHistory(actor, speaker, topic, ?current);
+  }
   set InConversation(actor, speaker, topic);
+}
+
+-- SwitchTopics backs up one step along the history chain. Fails at the root
+-- of the conversation tree, which is where the UI flips to "Leave".
+action SwitchTopics(actor: Actor, speaker: Speaker) {
+  when (InConversation(actor, speaker, ?current) & TopicHistory(actor, speaker, ?current, ?prev)) {
+    set !TopicHistory(actor, speaker, ?current, ?prev);
+    set InConversation(actor, speaker, ?prev);
+  }
 }
 
 action StopTalking(actor: Actor, speaker: Speaker) {
@@ -362,12 +385,10 @@ action StopTalking(actor: Actor, speaker: Speaker) {
   }
 }
 
--- Enumerable counterpart to WillTalkAbout. Engine clients call this to
--- populate the conversation menu. Top-level entries plus sub-topics off
--- the current conversation, mirroring WillTalkAbout's body.
+-- Topics enumerates the navigable children of the current topic. The conversation
+-- menu reads this; results outside the menu loop are unused.
 query Topics(actor: Actor, speaker: Speaker) {
-  TalksAbout(speaker, ?topic)
-  | (InConversation(actor, speaker, ?current) & LeadsTo(speaker, ?current, ?topic))
+  InConversation(actor, speaker, ?current) & LeadsTo(speaker, ?current, ?topic)
 }
 
 -- Current conversation header — used to render "Talking about <topic>".
@@ -375,11 +396,11 @@ query CurrentTopic(actor: Actor, speaker: Speaker) {
   InConversation(actor, speaker, ?topic)
 }
 
-entity Whatever { Topic }
-entity Weather { Topic }
-entity OfferMoney { Topic }
-entity OfferAFavor { Topic }
-entity BriberyIsWrong { Topic }
+-- The menu probes this to decide whether the back option is "change topics"
+-- (history exists) or "leave" (we're at the root).
+query PreviousTopic(actor: Actor, speaker: Speaker) {
+  InConversation(actor, speaker, ?current) & TopicHistory(actor, speaker, ?current, ?prev)
+}
 
 set {
   !TalksAbout(Guard, Bribery);
@@ -412,6 +433,7 @@ after TalkAbout(actor: Actor, Guard, OfferAFavor) {
     !Carrying(Guard, MasterKey);
     Carrying(actor, MasterKey);
   }
+  emit GuardHandsOver(actor, MasterKey);
 }
 
 set {

@@ -11,7 +11,7 @@ export const infocomView: View = {
     const out: TranscriptEntry[] = [];
 
     if (ctx.lastAtom && (ctx.lastResult || ctx.lastQueryResult)) {
-      const line = formatResult(ctx.lastAtom, {
+      const lines = formatResult(ctx.lastAtom, {
         config: ctx.config,
         names: ctx.names,
         verbs: ctx.verbs,
@@ -22,10 +22,11 @@ export const infocomView: View = {
       const failed =
         (ctx.lastResult && ctx.lastResult.status !== "passed") ||
         (ctx.lastQueryResult && ctx.lastQueryResult.status !== "passed");
-      out.push({
-        kind: failed ? "error" : "narrative",
-        text: line,
-      });
+      const kind = failed ? "error" : "narrative";
+      for (let i = 0; i < lines.length; i++) {
+        const prefix = i === 0 ? "" : "· ";
+        out.push({ kind, text: `${prefix}${lines[i]!}` });
+      }
     } else if (ctx.lastError) {
       out.push({ kind: "error", text: ctx.lastError });
     }
