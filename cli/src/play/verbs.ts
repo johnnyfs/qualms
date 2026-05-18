@@ -14,6 +14,7 @@ export interface VerbEntry {
   readonly words: readonly string[];
   readonly parameters: readonly ParameterPattern[];
   readonly prepositions: ReadonlyMap<number, string>;
+  readonly candidates: ReadonlyMap<number, string>;
   readonly template?: string;
   readonly hidden: boolean;
 }
@@ -54,6 +55,7 @@ export function buildVerbTable(
       words,
       parameters,
       prepositions: override?.prepositions ?? new Map(),
+      candidates: override?.candidates ?? new Map(),
       ...(override?.template !== undefined ? { template: override.template } : {}),
       hidden: override?.hidden ?? false,
     });

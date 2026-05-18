@@ -32,6 +32,7 @@ export interface PlayConfig {
 export interface VerbConfig {
   readonly words?: readonly string[];
   readonly prepositions?: ReadonlyMap<number, string>;
+  readonly candidates?: ReadonlyMap<number, string>;
   readonly template?: string;
   readonly denialTemplate?: string;
   readonly hidden?: boolean;
@@ -244,6 +245,31 @@ function readVerbMap(raw: unknown): ReadonlyMap<string, VerbConfig> {
         prep.set(idx, pv);
       }
       (verb as { prepositions?: ReadonlyMap<number, string> }).prepositions = prep;
+    }
+    if (entry.candidates !== undefined) {
+      if (
+        entry.candidates === null ||
+        typeof entry.candidates !== "object" ||
+        Array.isArray(entry.candidates)
+      ) {
+        throw new PlayConfigError(`play config: verbs.${k}.candidates must be a mapping`);
+      }
+      const cand = new Map<number, string>();
+      for (const [ci, cv] of Object.entries(entry.candidates as Record<string, unknown>)) {
+        const idx = Number(ci);
+        if (!Number.isInteger(idx) || idx < 0) {
+          throw new PlayConfigError(
+            `play config: verbs.${k}.candidates key '${ci}' must be a non-negative integer`,
+          );
+        }
+        if (typeof cv !== "string" || cv.length === 0) {
+          throw new PlayConfigError(
+            `play config: verbs.${k}.candidates.${ci} must be a non-empty string`,
+          );
+        }
+        cand.set(idx, cv);
+      }
+      (verb as { candidates?: ReadonlyMap<number, string> }).candidates = cand;
     }
     if (entry.template !== undefined) {
       if (typeof entry.template !== "string") {

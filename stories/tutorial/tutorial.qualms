@@ -257,6 +257,14 @@ replace action Examine(actor: Actor, target) {
 -- actor by virtue of gating a path from here); the fifth clause covers
 -- cross-room targets through transparent or open gates (the Guard in
 -- the Corridor as seen from the Cell).
+-- Adjacent locations the actor could *attempt* to navigate to from here.
+-- Distinct from Visible: a player knows the corridor lies past the bars
+-- whether or not the bars are transparent, and `Go(Corridor)` should be a
+-- selectable menu option that either succeeds or fails with a useful denial.
+query Adjacent(actor: Actor) {
+  At(actor, ?here) & Path(?here, ?target)
+}
+
 query Visible(actor: Actor) {
   At(actor, ?target)
   | (At(actor, ?here) & At(?target, ?here))

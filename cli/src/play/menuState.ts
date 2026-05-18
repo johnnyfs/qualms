@@ -243,7 +243,7 @@ function slotFrame(
 ): MenuFrame {
   const verb = state.verb;
   const headers = [slotHeader(state, ctx)];
-  const candidateIds = enumerateCandidates(ctx);
+  const candidateIds = enumerateCandidates(ctx, verb, state.slot);
   const options: MenuOption[] = candidateIds.map((id) => ({
     kind: "candidate",
     id,
@@ -314,10 +314,18 @@ function conversationFrame(
   return { headers, options, backOption };
 }
 
-function enumerateCandidates(ctx: MenuContext): readonly string[] {
-  // Opportunistic: call Visible(player) and let the DSL reject domain-invalid picks.
+function enumerateCandidates(
+  ctx: MenuContext,
+  verb: VerbEntry,
+  slot: number,
+): readonly string[] {
+  // Per-slot opt-in: a verb can override the enumeration query for a specific
+  // slot (e.g. Go uses Adjacent rather than Visible because adjacent locations
+  // aren't strictly visible). Default is Visible — the menu populator that
+  // tracks IsVisibleTo/IsColocated. The DSL rejects domain-invalid picks.
+  const relation = verb.candidates.get(slot) ?? "Visible";
   const result = playLanguageQuery(ctx.model, {
-    relation: "Visible",
+    relation,
     args: [{ kind: "identifier", id: ctx.config.player }],
   });
   const here = currentLocation(ctx.model, ctx.config);

@@ -24,13 +24,15 @@ const CONFIG_YAML = `
 player: Player
 verbs:
   Take: { words: [take] }
-  Go: { words: [go] }
+  Go: { words: [go], candidates: { 0: Adjacent } }
   Unlock: { words: [unlock], prepositions: { 1: with } }
   TalkTo: { words: [talk to] }
   TalkAbout: { words: [talk about] }
   SwitchTopics: { words: [change topics] }
   StopTalking: { words: [stop talking to] }
   Inventory: { words: [inventory] }
+  Visible: { hidden: true }
+  Adjacent: { hidden: true }
 `;
 
 function setup() {
@@ -81,6 +83,47 @@ describe("buildFrame — slot", () => {
     expect(ids).not.toContain("Player");
     expect(ids).not.toContain("Cell");
     expect(frame.backOption?.kind).toBe("back");
+  });
+
+  it("uses the verb's per-slot candidates query when configured (Go → Adjacent)", () => {
+    const { ctx } = setup();
+    const goVerb = ctx.verbs.getById("Go")!;
+    const state: MenuState = {
+      kind: "slot",
+      verb: goVerb,
+      slot: 0,
+      args: [{ kind: "identifier", id: "Player" }],
+    };
+    const frame = buildFrame(state, ctx);
+    const ids = frame.options
+      .filter((o) => o.kind === "candidate")
+      .map((o) => (o.kind === "candidate" ? o.id : ""));
+    // Cell → Corridor: Path-adjacent. Selectable regardless of door state
+    // so a blocked attempt yields a useful denial.
+    expect(ids).toEqual(["Corridor"]);
+    // Visible-only entities (BoneShard, Bars, Guard) must NOT appear; Go
+    // targets locations, and the per-slot Adjacent query enforces that.
+    expect(ids).not.toContain("BoneShard");
+    expect(ids).not.toContain("Bars");
+    expect(ids).not.toContain("Guard");
+  });
+
+  it("falls back to Visible when no per-slot candidates query is configured (Take)", () => {
+    const { ctx } = setup();
+    const takeVerb = ctx.verbs.getById("Take")!;
+    const state: MenuState = {
+      kind: "slot",
+      verb: takeVerb,
+      slot: 0,
+      args: [{ kind: "identifier", id: "Player" }],
+    };
+    const frame = buildFrame(state, ctx);
+    const ids = frame.options
+      .filter((o) => o.kind === "candidate")
+      .map((o) => (o.kind === "candidate" ? o.id : ""));
+    // Visible enumeration: BoneShard is co-located, Corridor is not visible.
+    expect(ids).toContain("BoneShard");
+    expect(ids).not.toContain("Corridor");
   });
 
   it("slot 0 header has no preposition or filled arg", () => {

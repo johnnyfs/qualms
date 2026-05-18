@@ -69,6 +69,10 @@ verbs:
       1: from
     template: "$actor takes $target."
     hidden: false
+  Go:
+    words: [go]
+    candidates:
+      0: Adjacent
 events:
   Took: "$actor took $target."
 view:
@@ -83,6 +87,9 @@ view:
     const take = config.verbs.get("Take");
     expect(take?.words).toEqual(["take", "grab"]);
     expect(take?.prepositions?.get(1)).toBe("from");
+    expect(take?.candidates).toBeUndefined();
+    const go = config.verbs.get("Go");
+    expect(go?.candidates?.get(0)).toBe("Adjacent");
     expect(take?.template).toBe("$actor takes $target.");
     expect(take?.hidden).toBe(false);
     expect(config.events.get("Took")).toBe("$actor took $target.");
@@ -95,6 +102,13 @@ view:
     expect(() => parsePlayConfig("verbs: 5")).toThrow(PlayConfigError);
     expect(() => parsePlayConfig("verbs:\n  Take:\n    words: 5")).toThrow(PlayConfigError);
     expect(() => parsePlayConfig("verbs:\n  Take:\n    prepositions:\n      foo: bar")).toThrow(
+      PlayConfigError,
+    );
+    expect(() => parsePlayConfig("verbs:\n  Go:\n    candidates: 5")).toThrow(PlayConfigError);
+    expect(() => parsePlayConfig("verbs:\n  Go:\n    candidates:\n      foo: Bar")).toThrow(
+      PlayConfigError,
+    );
+    expect(() => parsePlayConfig("verbs:\n  Go:\n    candidates:\n      0: \"\"")).toThrow(
       PlayConfigError,
     );
     expect(() => parsePlayConfig("view:\n  kind: nethack")).toThrow(PlayConfigError);

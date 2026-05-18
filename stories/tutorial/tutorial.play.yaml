@@ -29,7 +29,7 @@ presentations:
   Money: "A small purse of coins sits here."
 
 verbs:
-  Go:          { words: [go] }
+  Go:          { words: [go], candidates: { 0: Adjacent } }
   Take:        { words: [take] }
   Drop:        { words: [drop] }
   Examine:     { words: [examine] }
@@ -43,6 +43,7 @@ verbs:
   StopTalking:   { words: [stop talking to] }
   Inventory:     { words: [inventory] }
   Visible:       { hidden: true }
+  Adjacent:      { hidden: true }
 
 events:
   GuardHandsOver: "The guard slips you the $arg1."
