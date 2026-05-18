@@ -5,25 +5,43 @@
 -- (1) Minimal location
 -- Introduces: traits, relations, actions, entities, and the set statement.
 
+-- Traits can be attached to an entity. They are used by pattern-matching rules.
+-- For example, a rule about an entity trying to perform an action might only
+-- apply to Actors. A test for reachability might only apply to Locations.
 trait Actor
 trait Locatable
 trait Location
 
+-- Relations link entities that have some number of traits. They are implicitly
+-- unique in their arguments. For example, only one Path from `The Oak Tree` to
+-- `The Old Well` will ever exist. They can be made further unique in one
+-- argument. For example, a Locatable is only ever at one Location at a time.
+-- This is expressed, postgres style, with a unique constraint on subject.
+-- NOTE: Argument names are scoped only to constraints and otherwise only
+-- function as usage hints.
 relation At(subject: Locatable, location: Location) unique(subject)
-relation Path(Location, Location)
+relation Path(from: Location, to: Location)
 
+-- Actions define legal commands that can be run against the world model. Pattern
+-- matching rules determine whether the action applies, while `when` tests pre-
+-- conditions. In practice, this determines whether the engine reports an action
+-- as illegal or failed for a specific reason.
 action Go(actor: (Actor & Locatable) { At(actor, ?here) }, target: Location) {
   when (Path(?here, target)) {
     set At(actor, target)
   }
 }
 
+-- Entities aggregate traits. Actions can be applied to entities whose traits
+-- match the argument patterns.
 entity Cell { Location }
 entity Corridor { Location }
 entity Outside { Location }
 
 entity Player { Actor, Locatable }
 
+-- `set` causes a relation to be true. It can be applied to a single relation
+-- or to a block enclosed in `{}`. Multiple relations are delimited with `;`.
 set {
   Path(Cell, Corridor);
   Path(Corridor, Cell);
@@ -33,17 +51,21 @@ set {
 }
 
 -- (2) Extend with descriptions
--- Introduces: predicates. Affinity between object and description is an
--- interface concern; the story engine only reports success or failure.
+-- Introduces: predicates.
 
 trait Describable
 
+-- A predicate is a test against the current world state. It always fails against
+-- entities that do not match its patterns. It must be pure.
 predicate IsColocated(actor: (Actor & Locatable) { At(actor, ?here) }, target: Locatable) {
   when (At(target, ?here)) {
     succeed;
   }
 }
 
+-- Note that the command succeeds without output. This is because the nature
+-- of the description (images, text, etc) is a simulation concern. This
+-- merely tracks what it is possible to examine.
 action Examine(actor: Actor, target) {
   when (At(actor, target) | IsColocated(actor, target)) {
     succeed;
@@ -60,7 +82,7 @@ set {
 
 trait Portable
 
-relation Carrying(Actor, Portable)
+relation Carrying(Actor, item: Portable) unique(item)
 
 query Inventory(actor: Actor) {
   Carrying(actor, ?item)
@@ -72,6 +94,11 @@ action Take(actor: Actor, target: Portable) {
   }
 }
 
+-- After rules run after any successful action of the
+-- same name for any entity whose pattern matches the
+-- after rule's arguments. This enables us to integrate
+-- carrying and locating without requiring that 
+-- the default rules uses anything except the core trait.
 after Take(_, target: Locatable { At(target, ?here) }) {
   set {
     !At(target, ?here);
@@ -103,8 +130,17 @@ set {
 trait Openable
 
 relation Opened(Openable)
+
+-- Relations may also be defined in reference to other relations.
 relation Gated(path: Path, door: Openable) unique(path)
 
+-- before rules run before the action is processed. They run for any
+-- matching entity regardless of whether the default rule would run
+-- or succeed. A before rule may fail, succeed, or neither. Both failure
+-- and success prevent any futher rule execution. No action defers to
+-- the next eligible rule. This is useful for creating conditional
+-- exceptions or for making state changes triggered by the attempt,
+-- regardless of whether the action succeeds.
 before Go(
   actor: (Actor & Locatable) { At(actor, ?here) },
   target: Location { Gated(Path(?here, target), ?door) }
@@ -114,6 +150,8 @@ before Go(
   }
 }
 
+-- Note that before rules may also preempt or defer to predicates
+-- provided that they do not mutate state.
 before IsColocated(
   actor: (Actor & Locatable) { At(actor, ?here) },
   target: Locatable
