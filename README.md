@@ -21,7 +21,7 @@ of the supported runtime or test surface.
 
 The current `.qualms` syntax supports:
 
-- `trait`, `relation`, `predicate`, `action`, `before`, `after`, `entity`, `extend`, and `set`
+- `trait`, `relation`, `predicate`, `action`, `case`, `before`, `after`, `entity`, `extend`, and `set`
 - pattern-constrained parameters such as `actor: (Actor & Locatable) { At(actor, here) }`
 - relation-valued terms such as `Gated(Path(Cell, Corridor), Bars)`
 - boolean conditions with `!`, `&`, `|`, and `==`

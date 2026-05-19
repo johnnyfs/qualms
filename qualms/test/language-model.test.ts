@@ -23,8 +23,12 @@ describe("tutorial language model", () => {
 
     expect(model.traits.size).toBe(10);
     expect(model.relations.size).toBe(13);
-    expect(model.predicates.size).toBe(5);
+    expect(model.predicates.size).toBe(4);
     expect(model.actions.size).toBe(12);
+    expect(model.actionCases.map((actionCase) => actionCase.id)).toEqual([
+      "UnlockWithCarriedKey",
+      "LockWithCarriedKey",
+    ]);
     expect(model.rules).toHaveLength(14);
     expect(model.validations.size).toBe(1);
     expect(model.entities.size).toBe(20);

@@ -16,8 +16,9 @@ describe("tutorial language parser", () => {
 
     expect(program.statements.filter((s) => s.kind === "trait")).toHaveLength(10);
     expect(program.statements.filter((s) => s.kind === "relation")).toHaveLength(13);
-    expect(program.statements.filter((s) => s.kind === "predicate")).toHaveLength(5);
+    expect(program.statements.filter((s) => s.kind === "predicate")).toHaveLength(4);
     expect(program.statements.filter((s) => s.kind === "action")).toHaveLength(14);
+    expect(program.statements.filter((s) => s.kind === "case")).toHaveLength(2);
     expect(program.statements.filter((s) => s.kind === "rule")).toHaveLength(14);
     expect(program.statements.filter((s) => s.kind === "entity")).toHaveLength(20);
     expect(program.statements.filter((s) => s.kind === "extend")).toHaveLength(3);
