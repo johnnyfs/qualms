@@ -1,11 +1,13 @@
--- Tutorial fixture for the prelude-free Qualms language.
--- This file is the target syntax for the redesign. It is not expected to load
--- through the previous DSL v2 parser.
+-- Tutorial for the qualms story specification language.
+-- It specifies a minimally playable rpg-like story, demonstrating core
+-- principles and expected usage of the language, with special attention
+-- to the seam between the domain of the story specification and the
+-- domain of the simulator (ie, game engine) that hosts it.
 
 -- (1) Minimal location
 -- Introduces: traits, relations, actions, entities, and the set statement.
 
--- Traits can be attached to an entity. They are used by pattern-matching rules.
+-- Traits can be attached to an entity and used by pattern-matching rules.
 -- For example, a rule about an entity trying to perform an action might only
 -- apply to Actors. A test for reachability might only apply to Locations.
 trait Actor
@@ -25,7 +27,8 @@ relation Path(from: Location, to: Location)
 -- Actions define legal commands that can be run against the world model. Pattern
 -- matching rules determine whether the action applies, while `when` tests pre-
 -- conditions. In practice, this determines whether the engine reports an action
--- as illegal or failed for a specific reason.
+-- as illegal or failed for a specific reason. Variables can be bound to patterns
+-- by prefixing them with `?` and referenced elsewhere in the same scope.
 action Go(actor: (Actor & Locatable) { At(actor, ?here) }, target: Location) {
   when (Path(?here, target)) {
     set At(actor, target)
@@ -78,12 +81,14 @@ set {
 }
 
 -- (3) Extend with portable items
--- Introduces: after rules.
+-- Introduces: after rules, queries.
 
 trait Portable
 
 relation Carrying(Actor, item: Portable) unique(item)
 
+-- A query is an test of the current state of the story. It yeilds a list
+-- of all items matching the provided pattern(s).
 query Inventory(actor: Actor) {
   Carrying(actor, ?item)
 }
@@ -94,7 +99,7 @@ action Take(actor: Actor, target: Portable) {
   }
 }
 
--- After rules run after any successful action of the
+-- "After rules" run after any successful action of the
 -- same name for any entity whose pattern matches the
 -- after rule's arguments. This enables us to integrate
 -- carrying and locating without requiring that 
@@ -125,7 +130,7 @@ set {
 }
 
 -- (4) Extend with doors
--- Introduces: before rules and relations between relation instances.
+-- Introduces: before rules and relations between relations.
 
 trait Openable
 
@@ -141,12 +146,12 @@ relation Opened(Openable)
 -- back, with no instance identity in between.
 relation Gated(path: Path, door: Openable) unique(path)
 
--- before rules run before the action is processed. They run for any
+-- "before rules" run before the action is processed. They run for any
 -- matching entity regardless of whether the default rule would run
 -- or succeed. A before rule may fail, succeed, or neither. Both failure
 -- and success prevent any futher rule execution. No action defers to
 -- the next eligible rule. This is useful for creating conditional
--- exceptions or for making state changes triggered by the attempt,
+-- exceptions or for making state changes triggered by an attempt,
 -- regardless of whether the action succeeds.
 before Go(
   actor: (Actor & Locatable) { At(actor, ?here) },
@@ -157,7 +162,7 @@ before Go(
   }
 }
 
--- Note that before rules may also preempt or defer to predicates
+-- Note that "before rules" may also preempt or defer to predicates
 -- provided that they do not mutate state.
 before IsColocated(
   actor: (Actor & Locatable) { At(actor, ?here) },
