@@ -9,10 +9,6 @@ import { handleInput } from "./handleInput.js";
 import { loadStories } from "./story.js";
 import type { KeyedTranscriptEntry, TranscriptEntry } from "./types.js";
 import {
-  defaultPlayConfig,
-  type PlayConfig,
-} from "./play/config.js";
-import {
   createPlaySession,
   type PlaySession,
 } from "./play/runner.js";
@@ -37,9 +33,6 @@ type Mode = "dsl" | "play" | "coauthor";
 interface AppProps {
   readonly initialModel: language.StoryModel;
   readonly storyPaths: readonly string[];
-  readonly playConfig?: PlayConfig;
-  readonly playConfigSource?: string;
-  readonly playWarnings?: readonly string[];
   readonly coauthorConfig?: CoauthorConfigResult;
 }
 
@@ -49,16 +42,14 @@ const DSL_HELP_LINES: readonly string[] = [
   "  /help        show this help",
   "  /show        print the current model counts",
   "  /reload      re-load the original story file(s)",
-  "  /mode <m>    switch mode (dsl | play); shift-tab also cycles",
+  "  /mode <m>    switch mode (play | coauthor | dsl); shift-tab also cycles",
   "  /quit        leave the app (Ctrl+C also works)",
 ];
 
 const PLAY_HELP_LINES: readonly string[] = [
-  "Play mode — type natural commands like 'take key' or 'go to corridor'.",
-  "  Tab          accept the highlighted suggestion",
-  "  Up/Down      navigate suggestions",
-  "  /look        re-render the current room",
-  "  /mode dsl    switch back to DSL mode (shift-tab also cycles)",
+  "Play mode — use the story's mockup MainMenu(Player).",
+  "  Up/Down      navigate options",
+  "  /mode coauthor    switch to coauthor mode (shift-tab also cycles)",
 ];
 
 const COAUTHOR_HELP_LINES: readonly string[] = [
@@ -73,21 +64,17 @@ const COAUTHOR_HELP_LINES: readonly string[] = [
 export function App({
   initialModel,
   storyPaths,
-  playConfig,
-  playConfigSource,
-  playWarnings,
   coauthorConfig,
 }: AppProps) {
   const { exit } = useApp();
   const [model, setModel] = useState(initialModel);
-  const [mode, setMode] = useState<Mode>("dsl");
+  const [mode, setMode] = useState<Mode>("play");
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [playUiState, setPlayUiState] = useState<PlayUiState>(initialPlayUiState);
 
-  const config = useMemo(() => playConfig ?? defaultPlayConfig(), [playConfig]);
   const session = useMemo<PlaySession>(
-    () => createPlaySession(model, config),
-    [model, config],
+    () => createPlaySession(model),
+    [model],
   );
 
   const coauthorSessionRef = useRef<CoauthorSession | null>(null);
@@ -109,16 +96,7 @@ export function App({
     [],
   );
 
-  const [transcript, setTranscript] = useState<readonly KeyedTranscriptEntry[]>(() => {
-    const entries: TranscriptEntry[] = [];
-    if (playConfigSource) {
-      entries.push({ kind: "info", text: `play config: ${playConfigSource}` });
-    }
-    for (const warning of playWarnings ?? []) {
-      entries.push({ kind: "error", text: warning });
-    }
-    return entries.map((entry) => ({ ...entry, seq: seqRef.current++ }));
-  });
+  const [transcript, setTranscript] = useState<readonly KeyedTranscriptEntry[]>([]);
 
   const append = useCallback(
     (next: readonly TranscriptEntry[]) => {
@@ -171,7 +149,7 @@ export function App({
           const target = parts[1]?.toLowerCase();
           if (target !== "dsl" && target !== "play" && target !== "coauthor") {
             return [
-              { kind: "error", text: "usage: /mode dsl | /mode play | /mode coauthor" },
+              { kind: "error", text: "usage: /mode play | /mode coauthor | /mode dsl" },
             ];
           }
           if (target === mode) {
@@ -205,7 +183,7 @@ export function App({
           return [{ kind: "error", text: `error: unknown command '${head}'` }];
       }
     },
-    [exit, helpLines, mode, model, session, storyPaths],
+    [exit, helpLines, mode, model, storyPaths],
   );
 
   const cycleTo = useCallback(
@@ -232,7 +210,7 @@ export function App({
 
   const onCycleMode = useCallback(() => {
     const next: Mode =
-      mode === "dsl" ? "play" : mode === "play" ? "coauthor" : "dsl";
+      mode === "play" ? "coauthor" : mode === "coauthor" ? "dsl" : "play";
     append(cycleTo(next));
   }, [append, cycleTo, mode]);
 

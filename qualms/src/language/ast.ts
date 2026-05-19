@@ -11,6 +11,7 @@ export type TopLevelStatement =
   | ReplaceActionCaseStatement
   | UndefCaseStatement
   | QueryStatement
+  | MockupStatement
   | RuleStatement
   | EntityStatement
   | ExtendStatement
@@ -89,6 +90,49 @@ export interface QueryStatement {
   readonly id: string;
   readonly parameters: readonly ParameterPattern[];
   readonly body: Expression;
+}
+
+export interface MockupStatement {
+  readonly kind: "mockup";
+  readonly id: string;
+  readonly parameters: readonly ParameterPattern[];
+  readonly title: readonly Term[];
+  readonly detail: readonly MockupDetail[];
+  readonly options: readonly MockupOption[];
+}
+
+export type MockupDetail = MockupBinding | MockupDetailLine;
+
+export interface MockupBinding {
+  readonly kind: "binding";
+  readonly name: string;
+  readonly expression: Expression;
+}
+
+export interface MockupDetailLine {
+  readonly kind: "line";
+  readonly terms: readonly Term[];
+}
+
+export type MockupOption = StaticMockupOption | DynamicMockupOption | ConditionalMockupOptions;
+
+export interface StaticMockupOption {
+  readonly kind: "static";
+  readonly label: string;
+  readonly targets: readonly RelationAtom[];
+}
+
+export interface DynamicMockupOption {
+  readonly kind: "dynamic";
+  readonly name: string;
+  readonly expression: Expression;
+  readonly targets: readonly RelationAtom[];
+}
+
+export interface ConditionalMockupOptions {
+  readonly kind: "when";
+  readonly condition: Expression;
+  readonly options: readonly MockupOption[];
 }
 
 export interface RuleStatement {

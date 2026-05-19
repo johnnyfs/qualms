@@ -1,57 +1,23 @@
 import { Box, Text } from "ink";
 import type { language } from "@quealm/qualms";
-import type { PlayConfig } from "./config.js";
-import type { NameIndex } from "./naming.js";
-import type { VerbTable } from "./verbs.js";
-import { formatResult } from "./resultFormatter.js";
+import { formatMockupResult } from "./mockupState.js";
 
 interface Props {
-  readonly model: language.StoryModel;
-  readonly config: PlayConfig;
-  readonly names: NameIndex;
-  readonly verbs: VerbTable;
-  readonly atom?: language.RelationAtom;
   readonly result?: language.LanguagePlayResult;
-  readonly queryResult?: language.LanguageQueryResult;
+  readonly error?: string;
 }
 
-export function MessagePanel({
-  model,
-  config,
-  names,
-  verbs,
-  atom,
-  result,
-  queryResult,
-}: Props) {
-  if (!atom || (!result && !queryResult)) return null;
-  const failed =
-    (result && result.status !== "passed") ||
-    (queryResult && queryResult.status !== "passed");
-  const lines = formatResult(atom, {
-    model,
-    config,
-    names,
-    verbs,
-    ...(result ? { result } : {}),
-    ...(queryResult ? { queryResult } : {}),
-  });
+export function MessagePanel({ result, error }: Props) {
+  if (!result && !error) return null;
+  const failed = Boolean(error) || result?.status === "failed";
   const borderColor = failed ? "red" : "green";
-  const mark = failed ? "✗" : "✓";
-  const [headline, ...consequences] = lines;
+  const mark = failed ? "x" : "ok";
+  const lines = formatMockupResult(result, error);
   return (
-    <Box
-      borderStyle="round"
-      borderColor={borderColor}
-      paddingX={1}
-      flexDirection="column"
-    >
-      <Text color={borderColor} bold>
-        {mark}
-      </Text>
-      {headline ? <Text>{headline}</Text> : null}
-      {consequences.map((line, i) => (
-        <Text key={i}>· {line}</Text>
+    <Box borderStyle="round" borderColor={borderColor} paddingX={1} flexDirection="column">
+      <Text color={borderColor} bold>{mark}</Text>
+      {lines.map((line, i) => (
+        <Text key={i}>{line}</Text>
       ))}
     </Box>
   );

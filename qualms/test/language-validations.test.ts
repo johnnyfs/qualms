@@ -125,7 +125,7 @@ describe("first-class validations", () => {
       }
       validation Contract {
         assert query At(Player, ?where) => bindings { ?where == Cell; };
-        assert play Go(Player, Outside) => passed effects { At(Player, Outside); };
+        assert play Go(Player, Outside) => passed effects { !At(Player, Cell); At(Player, Outside); };
         assert play Go(Player, Cell) => failed reasons { !Path(Cell, Cell); };
       }
     `);

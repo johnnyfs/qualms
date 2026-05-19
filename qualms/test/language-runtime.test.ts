@@ -109,8 +109,9 @@ describe("tutorial language runtime", () => {
       feedback: "fail { Locked(Bars); }",
     });
 
-    // Unlock has a colocated-key default and a carried-key case. The
-    // makeshift key is never placed in the world, so neither branch can use it.
+    // Unlock depends on IsReachable, which accepts either colocated or carried
+    // keys. The makeshift key is never placed in the world, so neither branch
+    // of the predicate can use it.
     const noKey = playLanguageCall(model, "Unlock(Player, Bars, MakeshiftKey)");
     expect(noKey).toMatchObject({
       status: "failed",
@@ -205,6 +206,7 @@ describe("tutorial language runtime", () => {
     // Bars aren't Portable — parameter binding rejects them.
     const notPortable = playLanguageCall(model, "Take(Player, Bars)");
     expect(notPortable.status).toBe("failed");
+    expect(notPortable.reasons).toContain("!Portable(Bars)");
 
     // Take a portable from the Player's current location.
     expect(playLanguageCall(model, "Take(Player, BoneShard)").status).toBe("passed");
@@ -219,6 +221,11 @@ describe("tutorial language runtime", () => {
 
   it("section 4 — doors block Go while closed and let it through once opened", () => {
     const model = loadStoryProgram(readFileSync(TUTORIAL_PATH, "utf-8"));
+
+    expect(playLanguageCall(model, "Open(Player, Cell)")).toMatchObject({
+      status: "failed",
+      feedback: "fail { !Openable(Cell); }",
+    });
 
     // Bars start closed (and locked), so Go through them fails.
     const blocked = playLanguageCall(model, "Go(Player, Corridor)");
@@ -243,9 +250,9 @@ describe("tutorial language runtime", () => {
   it("section 5 — lock cycle: Unlock-when-unlocked and Lock-when-locked both fail", () => {
     const model = loadStoryProgram(readFileSync(TUTORIAL_PATH, "utf-8"));
 
-    // Unlock can use a key on the floor or a carried portable key. Stage 9
-    // puts the master key with the guard, so until the player walks the
-    // conversation to receive it neither case can use the key.
+    // Unlock can use a key on the floor or a carried key through IsReachable.
+    // Stage 9 puts the master key with the guard, so until the player walks
+    // the conversation to receive it neither reachability branch can use it.
     expect(playLanguageCall(model, "Unlock(Player, Bars, MasterKey)")).toMatchObject({
       status: "failed",
       feedback:
@@ -270,7 +277,7 @@ describe("tutorial language runtime", () => {
     });
 
     // Dropping the master key in the same room does NOT revoke access: the
-    // default Lock branch uses a colocated key. Walking away to the Corridor
+    // IsReachable predicate accepts a colocated key. Walking away to the Corridor
     // finally puts the key out of reach.
     expect(playLanguageCall(model, "Unlock(Player, Bars, MasterKey)").status).toBe("passed");
     expect(playLanguageCall(model, "Drop(Player, MasterKey)").status).toBe("passed");

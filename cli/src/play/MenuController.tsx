@@ -1,55 +1,33 @@
 import { Box, useInput, useStdout } from "ink";
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import type { language } from "@quealm/qualms";
-import type { PlayConfig } from "./config.js";
-import type { NameIndex } from "./naming.js";
-import type { VerbTable } from "./verbs.js";
 import {
-  buildFrame,
-  initialMenuState,
-  selectOption,
-  type MenuContext,
-  type MenuFrame,
-  type MenuOption,
-  type MenuState,
-  type MenuTransition,
-} from "./menuState.js";
-import { handleMenuSubmit, type PlaySession } from "./runner.js";
-import { RoomPanel } from "./RoomPanel.js";
+  buildMockupFrame,
+  initialMockupMenuState,
+  selectMockupOption,
+  type MockupMenuState,
+} from "./mockupState.js";
+import type { PlaySession } from "./runner.js";
 import { MessagePanel } from "./MessagePanel.js";
 import { MenuPanel } from "./MenuPanel.js";
 import { MenuFooter } from "./MenuFooter.js";
 
 export interface PlayUiState {
-  readonly menu: MenuState;
+  readonly menu: MockupMenuState;
   readonly selectedIndex: number;
-  readonly lastAtom?: language.RelationAtom;
   readonly lastResult?: language.LanguagePlayResult;
-  readonly lastQueryResult?: language.LanguageQueryResult;
+  readonly lastError?: string;
 }
 
 export const initialPlayUiState: PlayUiState = {
-  menu: initialMenuState,
+  menu: initialMockupMenuState,
   selectedIndex: 0,
 };
-
-function menuStateKey(state: MenuState): string {
-  switch (state.kind) {
-    case "root":
-      return "root";
-    case "slot":
-      return `slot:${state.verb.actionId}:${state.slot}`;
-    case "conversation":
-      return `conversation:${state.speaker}`;
-  }
-}
 
 const WINDOW_SIZE = 9;
 
 function clampScrollOffset(selectedIndex: number, total: number): number {
   if (total <= WINDOW_SIZE) return 0;
-  // Anchor the selection roughly at the center of the visible window, then
-  // clamp so we never scroll past the ends.
   const half = Math.floor(WINDOW_SIZE / 2);
   const max = total - WINDOW_SIZE;
   if (selectedIndex <= half) return 0;
@@ -76,59 +54,16 @@ export function MenuController({
   const columns = stdout?.columns ?? 80;
   const panelWidth = Math.min(columns - 4, 72);
 
-  const ctx: MenuContext = useMemo(
-    () => ({
-      model: session.model,
-      config: session.config,
-      names: session.names,
-      verbs: session.verbs,
-    }),
-    [session.model, session.config, session.names, session.verbs],
-  );
-  // buildFrame reads the (mutable) model; memoizing on identity would freeze
-  // the menu after actions that change the model in place.
-  const frame = buildFrame(state.menu, ctx);
+  const frame = buildMockupFrame(session.model, state.menu);
   const optionCount = frame.options.length;
   const scrollOffset = clampScrollOffset(state.selectedIndex, optionCount);
-  const stateKey = menuStateKey(state.menu);
 
-  // Reset selectedIndex on menu state change; clamp when option list shrinks.
   useEffect(() => {
     if (state.selectedIndex >= optionCount || state.selectedIndex < 0) {
       setState({ ...state, selectedIndex: 0 });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stateKey, optionCount]);
-
-  const applyTransition = (transition: MenuTransition) => {
-    switch (transition.kind) {
-      case "noop":
-        return;
-      case "state":
-        setState({ ...state, menu: transition.state, selectedIndex: 0 });
-        return;
-      case "submit": {
-        const submit = handleMenuSubmit(session, transition.atom);
-        setState({
-          menu: transition.nextState,
-          selectedIndex: 0,
-          lastAtom: submit.atom,
-          ...(submit.result ? { lastResult: submit.result } : {}),
-        });
-        return;
-      }
-      case "query": {
-        const submit = handleMenuSubmit(session, transition.atom);
-        setState({
-          menu: transition.nextState,
-          selectedIndex: 0,
-          lastAtom: submit.atom,
-          ...(submit.queryResult ? { lastQueryResult: submit.queryResult } : {}),
-        });
-        return;
-      }
-    }
-  };
+  }, [state.menu.call.relation, optionCount]);
 
   useInput((input, key) => {
     if (key.ctrl && input === "d") {
@@ -163,50 +98,52 @@ export function MenuController({
       setState({ ...state, selectedIndex: next });
       return;
     }
-    if (key.return) {
-      const option: MenuOption | undefined = frame.options[state.selectedIndex];
-      if (!option) return;
-      applyTransition(selectOption(state.menu, option, ctx));
-      return;
-    }
-    if (!input) return;
-    if (input === "0") {
-      const back = frame.backOption;
-      if (!back) return;
-      applyTransition(selectOption(state.menu, back, ctx));
-      return;
-    }
-    const digit = parseInt(input, 10);
-    if (!Number.isNaN(digit) && digit >= 1 && digit <= 9) {
-      // Digits map to the currently-visible slice, so position N selects the
-      // Nth visible row regardless of scroll offset.
-      const optionIndex = scrollOffset + digit - 1;
-      const option: MenuOption | undefined = frame.options[optionIndex];
-      if (!option) return;
-      applyTransition(selectOption(state.menu, option, ctx));
+
+    const selectIndex = key.return
+      ? state.selectedIndex
+      : input
+        ? digitSelection(input, scrollOffset)
+        : undefined;
+    if (selectIndex === undefined) return;
+    const option = frame.options[selectIndex];
+    if (!option) return;
+    const transition = selectMockupOption(session.model, option);
+    switch (transition.kind) {
+      case "state":
+        setState({ menu: transition.state, selectedIndex: 0 });
+        return;
+      case "action":
+        setState({
+          menu: transition.nextState,
+          selectedIndex: 0,
+          lastResult: transition.result,
+        });
+        return;
+      case "error":
+        setState({
+          ...state,
+          lastError: transition.message,
+        });
+        return;
     }
   });
 
   return (
     <Box flexDirection="column" width={panelWidth}>
-      <RoomPanel model={session.model} config={session.config} names={session.names} />
-      <MessagePanel
-        model={session.model}
-        config={session.config}
-        names={session.names}
-        verbs={session.verbs}
-        {...(state.lastAtom ? { atom: state.lastAtom } : {})}
-        {...(state.lastResult ? { result: state.lastResult } : {})}
-        {...(state.lastQueryResult ? { queryResult: state.lastQueryResult } : {})}
-      />
+      <MessagePanel result={state.lastResult} error={state.lastError} />
       <MenuPanel
         frame={frame}
         selectedIndex={state.selectedIndex}
         scrollOffset={scrollOffset}
         windowSize={WINDOW_SIZE}
-        borderColor={state.menu.kind === "conversation" ? "cyan" : "yellow"}
       />
       <MenuFooter frame={frame} />
     </Box>
   );
+}
+
+function digitSelection(input: string, scrollOffset: number): number | undefined {
+  const digit = parseInt(input, 10);
+  if (Number.isNaN(digit) || digit < 1 || digit > 9) return undefined;
+  return scrollOffset + digit - 1;
 }

@@ -16,10 +16,11 @@ describe("tutorial language parser", () => {
 
     expect(program.statements.filter((s) => s.kind === "trait")).toHaveLength(10);
     expect(program.statements.filter((s) => s.kind === "relation")).toHaveLength(13);
-    expect(program.statements.filter((s) => s.kind === "predicate")).toHaveLength(4);
-    expect(program.statements.filter((s) => s.kind === "action")).toHaveLength(14);
-    expect(program.statements.filter((s) => s.kind === "case")).toHaveLength(2);
-    expect(program.statements.filter((s) => s.kind === "rule")).toHaveLength(14);
+    expect(program.statements.filter((s) => s.kind === "predicate")).toHaveLength(5);
+    expect(program.statements.filter((s) => s.kind === "action")).toHaveLength(15);
+    expect(program.statements.filter((s) => s.kind === "case")).toHaveLength(0);
+    expect(program.statements.filter((s) => s.kind === "mockup")).toHaveLength(14);
+    expect(program.statements.filter((s) => s.kind === "rule")).toHaveLength(9);
     expect(program.statements.filter((s) => s.kind === "entity")).toHaveLength(20);
     expect(program.statements.filter((s) => s.kind === "extend")).toHaveLength(3);
     expect(program.statements.filter((s) => s.kind === "set")).toHaveLength(9);
@@ -122,6 +123,45 @@ describe("tutorial language parser", () => {
       parameters: [
         { name: "actor", type: { kind: "named", id: "Actor" } },
         { name: "target", type: { kind: "named", id: "Thing" } },
+      ],
+    });
+  });
+
+  it("parses mockup menus with query-backed dynamic options", () => {
+    const program = parseProgram(`
+      trait Actor
+      trait Location
+      relation At(Actor, Location)
+      action Go(actor: Actor, target: Location) { succeed; }
+      mockup MainMenu(cursor: Actor { At(cursor, ?here) }) {
+        title { here }
+        detail {
+          "visible here: " Visible(cursor)
+        }
+        options {
+          "go" -> GoMenu(cursor)
+          there: Adjacent(cursor) -> Go(cursor, there) -> MainMenu(cursor)
+        }
+      }
+    `);
+    const mockup = program.statements.find((s) => s.kind === "mockup");
+    if (!mockup || mockup.kind !== "mockup") throw new Error("missing mockup");
+    expect(mockup.id).toBe("MainMenu");
+    expect(mockup.title).toEqual([{ kind: "identifier", id: "here" }]);
+    expect(mockup.detail[0]).toMatchObject({
+      kind: "line",
+      terms: [
+        { kind: "string", value: "visible here: " },
+        { kind: "relationInstance", atom: { relation: "Visible" } },
+      ],
+    });
+    expect(mockup.options).toHaveLength(2);
+    expect(mockup.options[1]).toMatchObject({
+      kind: "dynamic",
+      name: "there",
+      targets: [
+        { relation: "Go" },
+        { relation: "MainMenu" },
       ],
     });
   });

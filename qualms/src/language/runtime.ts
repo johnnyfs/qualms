@@ -368,7 +368,7 @@ function executeActionCallable(
     return {
       status: "failed",
       env: {},
-      reasons: [`!${callable.id}(${args.map(emitGroundTerm).join(", ")})`],
+      reasons: explainParameterBinding(model, callable.parameters, args, callable.id),
       callable: callable.id,
     };
   }
@@ -494,7 +494,7 @@ function executePredicateCallable(
     return {
       status: "failed",
       env: {},
-      reasons: [`!${callable.id}(${args.map(emitGroundTerm).join(", ")})`],
+      reasons: explainParameterBinding(model, callable.parameters, args, callable.id),
       callable: callable.id,
     };
   }
@@ -599,6 +599,66 @@ function bindParameters(
   return envs;
 }
 
+function explainParameterBinding(
+  model: StoryModel,
+  patterns: readonly ParameterPattern[],
+  args: readonly GroundTerm[],
+  callableId: string,
+): string[] {
+  if (patterns.length !== args.length) {
+    return [`!${callableId}(${args.map(emitGroundTerm).join(", ")})`];
+  }
+  let envs: Env[] = [{}];
+  const reasons: string[] = [];
+  for (let i = 0; i < patterns.length; i++) {
+    const pattern = patterns[i]!;
+    const arg = args[i]!;
+    const next: Env[] = [];
+    for (const env of envs) {
+      if (pattern.type && !matchesType(model, arg, pattern.type)) {
+        reasons.push(...explainTypeMismatch(model, arg, pattern.type));
+        continue;
+      }
+      const named = pattern.name ? bindName(pattern.name, arg, env) : env;
+      if (!named) {
+        reasons.push(`!${pattern.name} == ${emitGroundTerm(arg)}`);
+        continue;
+      }
+      let constrained = [named];
+      for (const constraint of pattern.constraints) {
+        const constrainedNext = constrained.flatMap((candidate) =>
+          evalExpression(model, constraint, candidate, [], [], {}),
+        );
+        if (constrainedNext.length === 0) {
+          for (const candidate of constrained) {
+            reasons.push(...explainExpression(model, constraint, candidate));
+          }
+        }
+        constrained = constrainedNext;
+      }
+      next.push(...constrained);
+    }
+    envs = next;
+    if (envs.length === 0) break;
+  }
+  return reasons.length > 0
+    ? reasons
+    : [`!${callableId}(${args.map(emitGroundTerm).join(", ")})`];
+}
+
+function explainTypeMismatch(
+  model: StoryModel,
+  value: GroundTerm,
+  type: TypeExpr,
+): string[] {
+  if (type.kind === "intersection") {
+    return type.types.flatMap((inner) =>
+      matchesType(model, value, inner) ? [] : explainTypeMismatch(model, value, inner),
+    );
+  }
+  return [`!${type.id}(${emitGroundTerm(value)})`];
+}
+
 function executeBlock(
   model: StoryModel,
   block: Block,
@@ -677,8 +737,13 @@ function applySet(model: StoryModel, statement: SetStatement, env: Env, effects:
   for (const setEffect of statement.effects) {
     const atom = groundAtom(setEffect.atom, env);
     const fact = factFromAtom(atom);
-    if (setEffect.polarity === "assert") model.assertFact(fact);
-    else model.retractFact(fact);
+    if (setEffect.polarity === "assert") {
+      for (const retracted of model.assertFact(fact)) {
+        effects.push({ polarity: "retract", fact: retracted });
+      }
+    } else {
+      model.retractFact(fact);
+    }
     effects.push({ polarity: setEffect.polarity, fact });
   }
 }
@@ -915,7 +980,7 @@ function explainExpression(model: StoryModel, expression: Expression, env: Env):
       return [`!${emitRelationAtom(expression.atom, env)}`];
     }
     case "not":
-      return [emitExpression(expression, env)];
+      return explainPositiveCondition(expression.operand, env);
     case "binary":
       if (expression.op === "|") {
         return [
@@ -1003,4 +1068,12 @@ function emitGroundTerm(term: GroundTerm): string {
 export const languageRuntimeInternals = {
   evalExpression: (model: StoryModel, expression: Expression, env: Env): Env[] =>
     evalExpression(model, expression, env, [], [], {}),
+  bindParameters: (
+    model: StoryModel,
+    patterns: readonly ParameterPattern[],
+    args: readonly GroundTerm[],
+  ): Env[] => bindParameters(model, patterns, args, [], [], {}),
+  groundAtom,
+  resolveTerm,
+  emitGroundTerm,
 };

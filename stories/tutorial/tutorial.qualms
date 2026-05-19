@@ -174,26 +174,14 @@ before IsColocated(
 }
 
 action Open(actor: Actor, door: Openable) {
-  when (IsColocated(actor, door)) {
+  when (IsColocated(actor, door) & !Opened(door)) {
     set Opened(door)
   }
 }
 
-before Open(_, door: Openable) {
-  when (Opened(door)) {
-    fail;
-  }
-}
-
 action Close(actor: Actor, door: Openable) {
-  when (IsColocated(actor, door)) {
+  when (IsColocated(actor, door) & Opened(door)) {
     set !Opened(door)
-  }
-}
-
-before Close(_, door: Openable) {
-  when (!Opened(door)) {
-    fail;
   }
 }
 
@@ -205,10 +193,7 @@ set {
 }
 
 -- (5) Extend doors to be lockable.
--- Introduces: action cases. The default Lock/Unlock behavior uses a key that
--- is colocated with the actor, while a separate carried-key case is added only
--- because keys are also Portable. This keeps the lock/key feature from baking
--- the inventory feature into its default rule.
+-- Introduces: reusable reachability predicates and action preconditions.
 
 trait Key
 trait Lockable
@@ -216,45 +201,27 @@ trait Lockable
 relation Locked(Lockable)
 relation LockedWith(Lockable, Key)
 
-before Open(_, door: Lockable) {
-  when (Locked(door)) {
-    fail;
+predicate IsReachable(actor: Actor, target) {
+  when (IsColocated(actor, target) | Carrying(actor, target)) {
+    succeed;
+  }
+}
+
+replace action Open(actor: Actor, door: Openable) {
+  when (IsReachable(actor, door) & !Opened(door) & !Locked(door)) {
+    set Opened(door)
   }
 }
 
 action Unlock(actor: Actor, door: Lockable, key: Key) {
-  when (IsColocated(actor, key) & IsColocated(actor, door) & LockedWith(door, key)) {
+  when (IsReachable(actor, key) & IsReachable(actor, door) & Locked(door) & LockedWith(door, key)) {
     set !Locked(door)
-  }
-}
-
-case Unlock(actor: Actor, door: Lockable, key: (Key & Portable)) as UnlockWithCarriedKey {
-  when (Carrying(actor, key) & IsColocated(actor, door) & LockedWith(door, key)) {
-    set !Locked(door)
-  }
-}
-
-before Unlock(_, door: Lockable, _) {
-  when (!Locked(door)) {
-    fail;
   }
 }
 
 action Lock(actor: Actor, door: Lockable, key: Key) {
-  when (IsColocated(actor, key) & IsColocated(actor, door) & LockedWith(door, key)) {
+  when (IsReachable(actor, key) & IsReachable(actor, door) & !Locked(door) & LockedWith(door, key)) {
     set Locked(door)
-  }
-}
-
-case Lock(actor: Actor, door: Lockable, key: (Key & Portable)) as LockWithCarriedKey {
-  when (Carrying(actor, key) & IsColocated(actor, door) & LockedWith(door, key)) {
-    set Locked(door)
-  }
-}
-
-before Lock(_, door: Lockable, _) {
-  when (Locked(door)) {
-    fail;
   }
 }
 
@@ -524,4 +491,145 @@ validation TutorialSmoke {
   assert not fact At(Player, Outside);
   assert query Locked(Bars);
   assert play Go(Player, Outside) => failed;
+}
+
+-- (11) Playable mockup.
+-- Introduces: mockup menus. Play mode starts at MainMenu(Player). A mockup is
+-- intentionally raw: titles, details, option labels, successes, and failures
+-- come straight from ids and relation/action results so coauthoring agents can
+-- maintain it without also maintaining prose.
+
+mockup MainMenu(cursor: Actor { At(cursor, ?here) }) {
+  title { here }
+  detail {
+    "visible here: " Visible(cursor)
+    "exits: " Adjacent(cursor)
+  }
+  options {
+    "go" -> GoMenu(cursor)
+    "take" -> TakeMenu(cursor)
+    "drop" -> DropMenu(cursor)
+    "inventory" -> InventoryMenu(cursor)
+    "examine" -> ExamineMenu(cursor)
+    "open" -> OpenMenu(cursor)
+    "close" -> CloseMenu(cursor)
+    "unlock" -> UnlockMenu(cursor)
+    "lock" -> LockMenu(cursor)
+    "talk" -> TalkToMenu(cursor)
+  }
+}
+
+mockup InventoryMenu(cursor: Actor) {
+  title { "Inventory" }
+  detail {
+    "carrying: " Inventory(cursor)
+  }
+  options {
+    item: Inventory(cursor) -> Examine(cursor, item)
+    "back" -> MainMenu(cursor)
+  }
+}
+
+mockup GoMenu(cursor: Actor { At(cursor, ?here) }) {
+  title { "Go..." }
+  options {
+    there: Path(here, there) -> Go(cursor, there)
+    "never mind" -> MainMenu(cursor)
+  }
+}
+
+mockup TakeMenu(cursor: Actor) {
+  title { "Take..." }
+  options {
+    item: Visible(cursor) -> Take(cursor, item)
+    "never mind" -> MainMenu(cursor)
+  }
+}
+
+mockup DropMenu(cursor: Actor) {
+  title { "Drop..." }
+  options {
+    item: Carrying(cursor, item) -> Drop(cursor, item)
+    "never mind" -> MainMenu(cursor)
+  }
+}
+
+mockup ExamineMenu(cursor: Actor) {
+  title { "Examine..." }
+  options {
+    item: Visible(cursor) -> Examine(cursor, item)
+    "never mind" -> MainMenu(cursor)
+  }
+}
+
+mockup OpenMenu(cursor: Actor) {
+  title { "Open..." }
+  options {
+    item: Visible(cursor) -> Open(cursor, item)
+    "never mind" -> MainMenu(cursor)
+  }
+}
+
+mockup CloseMenu(cursor: Actor) {
+  title { "Close..." }
+  options {
+    item: Visible(cursor) -> Close(cursor, item)
+    "never mind" -> MainMenu(cursor)
+  }
+}
+
+mockup UnlockMenu(cursor: Actor) {
+  title { "Unlock..." }
+  options {
+    item: Visible(cursor) -> UnlockWithMenu(cursor, item)
+    "never mind" -> MainMenu(cursor)
+  }
+}
+
+mockup UnlockWithMenu(cursor: Actor, item) {
+  title { "Unlock" item "with..." }
+  options {
+    key: Carrying(cursor, key) -> Unlock(cursor, item, key)
+    "never mind" -> MainMenu(cursor)
+  }
+}
+
+mockup LockMenu(cursor: Actor) {
+  title { "Lock..." }
+  options {
+    item: Visible(cursor) -> LockWithMenu(cursor, item)
+    "never mind" -> MainMenu(cursor)
+  }
+}
+
+mockup LockWithMenu(cursor: Actor, item) {
+  title { "Lock" item "with..." }
+  options {
+    key: Carrying(cursor, key) -> Lock(cursor, item, key)
+    "never mind" -> MainMenu(cursor)
+  }
+}
+
+mockup TalkToMenu(cursor: Actor) {
+  title { "Talk to..." }
+  options {
+    speaker: Visible(cursor) -> TalkTo(cursor, speaker) -> TalkMenu(cursor, speaker)
+    "never mind" -> MainMenu(cursor)
+  }
+}
+
+mockup TalkMenu(cursor: Actor, speaker: Speaker) {
+  title { "Talking to" speaker }
+  detail {
+    "current topic: " CurrentTopic(cursor, speaker)
+  }
+  options {
+    topic: Topics(cursor, speaker) -> TalkAbout(cursor, speaker, topic) -> TalkMenu(cursor, speaker)
+    when (!InConversation(cursor, speaker, Whatever)) {
+      "change topics" -> SwitchTopics(cursor, speaker) -> TalkMenu(cursor, speaker)
+    }
+    when (InConversation(cursor, speaker, Whatever)) {
+      "leave" -> StopTalking(cursor, speaker) -> MainMenu(cursor)
+    }
+  }
 }

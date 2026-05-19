@@ -35,9 +35,9 @@ describe("tool handlers for the tutorial-era DSL", () => {
     expect(out.loaded.storyPaths).toEqual([TUTORIAL_PATH]);
     expect(out.loaded.counts).toMatchObject({
       traits: 10,
-      relations: 12,
-      predicates: 4,
-      actions: 10,
+      relations: 13,
+      predicates: 5,
+      actions: 12,
       entities: 20,
     });
   });
@@ -66,10 +66,10 @@ describe("tool handlers for the tutorial-era DSL", () => {
 
     expect(handlePlay(manager, { sessionId, call: "Open(Player, Bars)" })).toMatchObject({
       status: "failed",
-      feedback: "fail { Locked(Bars); }",
+      feedback: "fail { !Locked(Bars); }",
     });
     // Walk the stage-9 conversation to receive the master key.
-    handlePlay(manager, { sessionId, call: "TalkAbout(Player, Guard, Whatever)" });
+    handlePlay(manager, { sessionId, call: "TalkTo(Player, Guard)" });
     handlePlay(manager, { sessionId, call: "TalkAbout(Player, Guard, Bribery)" });
     handlePlay(manager, { sessionId, call: "TalkAbout(Player, Guard, OfferAFavor)" });
     expect(handlePlay(manager, { sessionId, call: "Unlock(Player, Bars, MasterKey)" })).toMatchObject({

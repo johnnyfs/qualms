@@ -9,6 +9,9 @@ import type {
   EqualityExpression,
   Expression,
   ExtendStatement,
+  MockupDetail,
+  MockupOption,
+  MockupStatement,
   NotExpression,
   ParameterPattern,
   Program,
@@ -57,6 +60,7 @@ export function programFromModel(model: StoryModel): Program {
     ...model.actions.values(),
     ...model.actionCases,
     ...model.queries.values(),
+    ...model.mockups.values(),
     ...model.rules,
   ];
   for (const [id, traits] of model.entities) {
@@ -113,6 +117,8 @@ export function emitTopLevelStatement(statement: TopLevelStatement): string {
       return emitUndefActionCase(statement);
     case "query":
       return emitQuery(statement);
+    case "mockup":
+      return emitMockup(statement);
     case "rule":
       return emitRule(statement);
     case "entity":
@@ -175,6 +181,38 @@ function emitUndefActionCase(statement: UndefCaseStatement): string {
 
 function emitQuery(statement: QueryStatement): string {
   return `query ${statement.id}(${statement.parameters.map(emitParameter).join(", ")}) {\n${indent(emitExpression(statement.body))}\n}`;
+}
+
+function emitMockup(statement: MockupStatement): string {
+  const parts = [
+    `title { ${statement.title.map(emitTerm).join("; ")} }`,
+  ];
+  if (statement.detail.length > 0) {
+    parts.push(`detail {\n${statement.detail.map((detail) => indent(emitMockupDetail(detail))).join("\n")}\n}`);
+  }
+  parts.push(`options {\n${statement.options.map((option) => indent(emitMockupOption(option))).join("\n")}\n}`);
+  return `mockup ${statement.id}(${statement.parameters.map(emitParameter).join(", ")}) {\n${parts.map(indent).join("\n")}\n}`;
+}
+
+function emitMockupDetail(detail: MockupDetail): string {
+  if (detail.kind === "binding") {
+    return `${detail.name}: ${emitExpression(detail.expression)};`;
+  }
+  return `${detail.terms.map(emitTerm).join(" ")};`;
+}
+
+function emitMockupOption(option: MockupOption): string {
+  if (option.kind === "static") {
+    return `${JSON.stringify(option.label)} -> ${emitMockupTargets(option.targets)};`;
+  }
+  if (option.kind === "when") {
+    return `when (${emitExpression(option.condition)}) {\n${option.options.map((inner) => indent(emitMockupOption(inner))).join("\n")}\n}`;
+  }
+  return `${option.name}: ${emitExpression(option.expression)} -> ${emitMockupTargets(option.targets)};`;
+}
+
+function emitMockupTargets(targets: readonly RelationAtom[]): string {
+  return targets.map(emitRelationAtom).join(" -> ");
 }
 
 function emitRule(statement: RuleStatement): string {

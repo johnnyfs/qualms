@@ -10,6 +10,10 @@ import type {
   ExtendStatement,
   FailStatement,
   EmitStatement,
+  MockupBinding,
+  MockupDetail,
+  MockupOption,
+  MockupStatement,
   ParameterPattern,
   QueryStatement,
   ReplaceActionCaseStatement,
@@ -178,6 +182,13 @@ function tokenize(source: string): Token[] {
       continue;
     }
 
+    if (ch === "-" && source[i + 1] === ">") {
+      advance(ch);
+      advance(source[i]!);
+      push("arrow", "->", offset, startLine, startColumn);
+      continue;
+    }
+
     const single: Record<string, TokenType> = {
       "(": "lparen",
       ")": "rparen",
@@ -249,6 +260,7 @@ class Parser {
     if (this.matchKeyword("action")) return this.callableStatement("action");
     if (this.matchKeyword("predicate")) return this.callableStatement("predicate");
     if (this.matchKeyword("query")) return this.queryStatement();
+    if (this.matchKeyword("mockup")) return this.mockupStatement();
     if (this.matchKeyword("before")) return this.ruleStatement("before");
     if (this.matchKeyword("after")) return this.ruleStatement("after");
     if (this.matchKeyword("entity")) return this.entityStatement();
@@ -388,6 +400,159 @@ class Parser {
     this.skipSemis();
     this.expect("rbrace");
     return { kind: "query", id, parameters, body };
+  }
+
+  private mockupStatement(): MockupStatement {
+    this.expectKeyword("mockup");
+    const id = this.identifier();
+    const parameters = this.callParameters();
+    this.expect("lbrace");
+
+    let title: readonly Term[] | undefined;
+    let detail: readonly MockupDetail[] = [];
+    let options: readonly MockupOption[] | undefined;
+
+    while (!this.at("rbrace")) {
+      this.skipSemis();
+      if (this.at("rbrace")) break;
+      if (this.matchKeyword("title")) {
+        if (title) this.fail(`duplicate title block in mockup '${id}'`);
+        title = this.mockupTitleBlock();
+        continue;
+      }
+      if (this.matchKeyword("detail")) {
+        if (detail.length > 0) this.fail(`duplicate detail block in mockup '${id}'`);
+        detail = this.mockupDetailBlock();
+        continue;
+      }
+      if (this.matchKeyword("options")) {
+        if (options) this.fail(`duplicate options block in mockup '${id}'`);
+        options = this.mockupOptionsBlock();
+        continue;
+      }
+      this.fail(`expected title, detail, or options block in mockup '${id}'`);
+    }
+    this.expect("rbrace");
+
+    if (!title) throw new LanguageParseError(`mockup '${id}' requires a title block`);
+    if (!options) throw new LanguageParseError(`mockup '${id}' requires an options block`);
+    return { kind: "mockup", id, parameters, title, detail, options };
+  }
+
+  private mockupTitleBlock(): readonly Term[] {
+    this.expectKeyword("title");
+    this.expect("lbrace");
+    const terms: Term[] = [];
+    while (!this.at("rbrace")) {
+      this.skipSemis();
+      if (this.at("rbrace")) break;
+      terms.push(this.term());
+      this.consumeMockupSeparator();
+    }
+    this.expect("rbrace");
+    return terms;
+  }
+
+  private mockupDetailBlock(): readonly MockupDetail[] {
+    this.expectKeyword("detail");
+    this.expect("lbrace");
+    const detail: MockupDetail[] = [];
+    while (!this.at("rbrace")) {
+      this.skipSemis();
+      if (this.at("rbrace")) break;
+      if (this.at("identifier") && this.peekAhead(1).type === "colon") {
+        const name = this.identifier();
+        this.expect("colon");
+        const expression = bindMockupNameInExpression(this.expression(), name);
+        detail.push({ kind: "binding", name, expression });
+      } else {
+        detail.push({ kind: "line", terms: this.mockupTermLine() });
+      }
+      this.consumeMockupSeparator();
+    }
+    this.expect("rbrace");
+    return detail;
+  }
+
+  private mockupTermLine(): readonly Term[] {
+    const terms: Term[] = [];
+    while (!this.at("rbrace") && !this.at("semi") && !this.at("comma")) {
+      const term = this.term();
+      terms.push(term);
+      if (term.kind === "relationInstance") break;
+    }
+    return terms;
+  }
+
+  private mockupOptionsBlock(): readonly MockupOption[] {
+    this.expectKeyword("options");
+    this.expect("lbrace");
+    const options: MockupOption[] = [];
+    while (!this.at("rbrace")) {
+      this.skipSemis();
+      if (this.at("rbrace")) break;
+      if (this.matchKeyword("when")) {
+        this.expectKeyword("when");
+        this.expect("lparen");
+        const condition = this.expression();
+        this.expect("rparen");
+        options.push({ kind: "when", condition, options: this.mockupOptionsBody() });
+      } else if (this.consumeIf("string")) {
+        const label = this.previous().image;
+        this.expect("arrow");
+        options.push({ kind: "static", label, targets: this.mockupTargetChain() });
+      } else {
+        const name = this.identifier();
+        this.expect("colon");
+        const expression = bindMockupNameInExpression(this.expression(), name);
+        this.expect("arrow");
+        const targets = this.mockupTargetChain().map((target) =>
+          bindMockupNameInAtom(target, name),
+        );
+        options.push({ kind: "dynamic", name, expression, targets });
+      }
+      this.consumeMockupSeparator();
+    }
+    this.expect("rbrace");
+    return options;
+  }
+
+  private mockupOptionsBody(): readonly MockupOption[] {
+    this.expect("lbrace");
+    const options: MockupOption[] = [];
+    while (!this.at("rbrace")) {
+      this.skipSemis();
+      if (this.at("rbrace")) break;
+      if (this.matchKeyword("when")) {
+        this.expectKeyword("when");
+        this.expect("lparen");
+        const condition = this.expression();
+        this.expect("rparen");
+        options.push({ kind: "when", condition, options: this.mockupOptionsBody() });
+      } else if (this.consumeIf("string")) {
+        const label = this.previous().image;
+        this.expect("arrow");
+        options.push({ kind: "static", label, targets: this.mockupTargetChain() });
+      } else {
+        const name = this.identifier();
+        this.expect("colon");
+        const expression = bindMockupNameInExpression(this.expression(), name);
+        this.expect("arrow");
+        const targets = this.mockupTargetChain().map((target) =>
+          bindMockupNameInAtom(target, name),
+        );
+        options.push({ kind: "dynamic", name, expression, targets });
+      }
+      this.consumeMockupSeparator();
+    }
+    this.expect("rbrace");
+    return options;
+  }
+
+  private mockupTargetChain(): readonly RelationAtom[] {
+    const targets = [this.relationAtom()];
+    while (this.consumeIf("arrow")) targets.push(this.relationAtom());
+    return targets;
   }
 
   private ruleStatement(phase: "before" | "after"): RuleStatement {
@@ -766,6 +931,15 @@ class Parser {
     }
   }
 
+  private consumeMockupSeparator(): void {
+    if (this.consumeIf("semi")) {
+      this.skipSemis();
+      this.consumeIf("comma");
+      return;
+    }
+    this.consumeIf("comma");
+  }
+
   private matchKeyword(keyword: string): boolean {
     return this.atKeyword(keyword);
   }
@@ -830,5 +1004,51 @@ class Parser {
       line: token.line,
       column: token.column,
     });
+  }
+}
+
+function bindMockupNameInExpression(expression: Expression, name: string): Expression {
+  switch (expression.kind) {
+    case "relation":
+      return { kind: "relation", atom: bindMockupNameInAtom(expression.atom, name) };
+    case "not":
+      return { kind: "not", operand: bindMockupNameInExpression(expression.operand, name) };
+    case "binary":
+      return {
+        kind: "binary",
+        op: expression.op,
+        left: bindMockupNameInExpression(expression.left, name),
+        right: bindMockupNameInExpression(expression.right, name),
+      };
+    case "equal":
+      return {
+        kind: "equal",
+        left: bindMockupNameInTerm(expression.left, name),
+        right: bindMockupNameInTerm(expression.right, name),
+      };
+  }
+}
+
+function bindMockupNameInAtom(atom: RelationAtom, name: string): RelationAtom {
+  return {
+    relation: atom.relation,
+    args: atom.args.map((arg) => bindMockupNameInTerm(arg, name)),
+  };
+}
+
+function bindMockupNameInTerm(term: Term, name: string): Term {
+  switch (term.kind) {
+    case "identifier":
+      return term.id === name ? { kind: "variable", id: name } : term;
+    case "relationInstance":
+      return {
+        kind: "relationInstance",
+        atom: bindMockupNameInAtom(term.atom, name),
+      };
+    case "string":
+    case "number":
+    case "variable":
+    case "wildcard":
+      return term;
   }
 }

@@ -6,6 +6,7 @@ import type {
   EntityStatement,
   ExternPredicateStatement,
   ExtendStatement,
+  MockupStatement,
   Program,
   QueryStatement,
   RelationAtom,
@@ -69,6 +70,7 @@ export class StoryModel {
   readonly actions = new Map<string, CallableStatement>();
   readonly actionCases: StoredActionCaseStatement[] = [];
   readonly queries = new Map<string, QueryStatement>();
+  readonly mockups = new Map<string, MockupStatement>();
   readonly rules: RuleStatement[] = [];
   readonly validations = new Map<string, ValidationStatement>();
   readonly entities = new Map<string, Set<string>>();
@@ -88,6 +90,7 @@ export class StoryModel {
     for (const [id, action] of this.actions) clone.actions.set(id, action);
     clone.actionCases.push(...this.actionCases);
     for (const [id, query] of this.queries) clone.queries.set(id, query);
+    for (const [id, mockup] of this.mockups) clone.mockups.set(id, mockup);
     clone.rules.push(...this.rules);
     for (const [id, validation] of this.validations) clone.validations.set(id, validation);
     for (const [id, traits] of this.entities) clone.entities.set(id, new Set(traits));
@@ -128,6 +131,9 @@ export class StoryModel {
             break;
           case "query":
             this.addQuery(statement);
+            break;
+          case "mockup":
+            this.addMockup(statement);
             break;
           case "rule":
             this.validateRule(statement);
@@ -199,6 +205,8 @@ export class StoryModel {
     this.actionCases.push(...other.actionCases);
     this.queries.clear();
     for (const [id, v] of other.queries) this.queries.set(id, v);
+    this.mockups.clear();
+    for (const [id, v] of other.mockups) this.mockups.set(id, v);
     this.rules.length = 0;
     this.rules.push(...other.rules);
     this.validations.clear();
@@ -218,10 +226,11 @@ export class StoryModel {
     return relation ? out.filter((fact) => fact.relation === relation) : out;
   }
 
-  assertFact(fact: Fact): void {
+  assertFact(fact: Fact): readonly Fact[] {
     this.validateFact(fact);
-    this.applyCardinality(fact);
+    const retracted = this.applyCardinality(fact);
     this.facts.set(factKey(fact), fact);
+    return retracted;
   }
 
   retractFact(fact: Fact): void {
@@ -259,8 +268,13 @@ export class StoryModel {
   private applySet(setEffects: readonly SetEffect[], sink: Effect[]): void {
     for (const setEffect of setEffects) {
       const fact = factFromAtom(setEffect.atom);
-      if (setEffect.polarity === "assert") this.assertFact(fact);
-      else this.retractFact(fact);
+      if (setEffect.polarity === "assert") {
+        for (const retracted of this.assertFact(fact)) {
+          sink.push({ polarity: "retract", fact: retracted });
+        }
+      } else {
+        this.retractFact(fact);
+      }
       sink.push({ polarity: setEffect.polarity, fact });
     }
   }
@@ -304,11 +318,25 @@ export class StoryModel {
     if (
       this.predicates.has(statement.id) ||
       this.actions.has(statement.id) ||
-      this.externalPredicates.has(statement.id)
+      this.externalPredicates.has(statement.id) ||
+      this.mockups.has(statement.id)
     ) {
       throw new LanguageModelError(`duplicate callable '${statement.id}'`);
     }
     this.addUnique(this.queries, statement.id, statement, "query");
+  }
+
+  private addMockup(statement: MockupStatement): void {
+    this.validateCallableTypes(statement);
+    if (
+      this.predicates.has(statement.id) ||
+      this.actions.has(statement.id) ||
+      this.externalPredicates.has(statement.id) ||
+      this.queries.has(statement.id)
+    ) {
+      throw new LanguageModelError(`duplicate callable '${statement.id}'`);
+    }
+    this.addUnique(this.mockups, statement.id, statement, "mockup");
   }
 
   private addActionCase(statement: ActionCaseStatement): void {
@@ -510,26 +538,32 @@ export class StoryModel {
     if (!this.relations.has(id)) throw new LanguageModelError(`unknown relation '${id}'`);
   }
 
-  private applyCardinality(fact: Fact): void {
+  private applyCardinality(fact: Fact): readonly Fact[] {
     const relation = this.relations.get(fact.relation);
-    if (!relation) return;
+    if (!relation) return [];
     const legacyOneIndexes = relation.parameters
       .map((parameter, index) => (parameter.cardinality === "one" ? index : -1))
       .filter((index) => index >= 0);
     const uniqueIndexes = relation.unique
       ? relation.unique.map((name) => relation.parameters.findIndex((parameter) => parameter.name === name))
       : [];
-    if (legacyOneIndexes.length === 0 && uniqueIndexes.length === 0) return;
+    if (legacyOneIndexes.length === 0 && uniqueIndexes.length === 0) return [];
 
+    const retracted: Fact[] = [];
+    const assertedKey = factKey(fact);
     for (const existing of this.listFacts(fact.relation)) {
+      if (factKey(existing) === assertedKey) continue;
       if (legacyOneIndexes.length > 0 && sameProjection(existing, fact, invertIndexes(relation.parameters.length, legacyOneIndexes))) {
         this.facts.delete(factKey(existing));
+        retracted.push(existing);
         continue;
       }
       if (uniqueIndexes.length > 0 && sameProjection(existing, fact, uniqueIndexes)) {
         this.facts.delete(factKey(existing));
+        retracted.push(existing);
       }
     }
+    return retracted;
   }
 }
 

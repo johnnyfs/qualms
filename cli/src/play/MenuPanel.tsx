@@ -1,8 +1,8 @@
 import { Box, Text } from "ink";
-import type { MenuFrame } from "./menuState.js";
+import type { MockupMenuFrame } from "./mockupState.js";
 
 interface Props {
-  readonly frame: MenuFrame;
+  readonly frame: MockupMenuFrame;
   readonly selectedIndex: number;
   readonly scrollOffset: number;
   readonly windowSize: number;
@@ -50,16 +50,13 @@ export function MenuPanel({
       {hiddenBelow > 0 ? (
         <Text dimColor>{`  ↓ ${hiddenBelow} more below`}</Text>
       ) : null}
-      {frame.backOption ? (
-        <Text dimColor>{`  0. ${labelOf(frame.backOption)}`}</Text>
-      ) : null}
     </Box>
   );
 }
 
-function labelOf(option: { kind: string; label?: string; verbId?: string; id?: string }): string {
+function labelOf(option: { label?: string; verbId?: string; id?: string }): string {
   if ("label" in option && typeof option.label === "string") return option.label;
   if ("verbId" in option && typeof option.verbId === "string") return option.verbId;
   if ("id" in option && typeof option.id === "string") return option.id;
-  return option.kind;
+  return "";
 }

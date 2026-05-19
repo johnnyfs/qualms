@@ -26,7 +26,7 @@ describe("handleInput", () => {
   it("returns DSL-shaped failure feedback when an action fails", () => {
     const model = loadStoryProgram(readFileSync(TUTORIAL_PATH, "utf-8"));
     const entries = handleInput(model, "Open(Player, Bars)");
-    expect(entries).toEqual([{ kind: "feedback", text: "fail { Locked(Bars); }" }]);
+    expect(entries).toEqual([{ kind: "feedback", text: "fail { !Locked(Bars); }" }]);
   });
 
   it("applies a set program and reports the resulting effects", () => {

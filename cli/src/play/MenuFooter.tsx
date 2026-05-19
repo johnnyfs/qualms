@@ -1,8 +1,8 @@
 import { Text } from "ink";
-import type { MenuFrame } from "./menuState.js";
+import type { MockupMenuFrame } from "./mockupState.js";
 
 interface Props {
-  readonly frame: MenuFrame;
+  readonly frame: MockupMenuFrame;
 }
 
 export function MenuFooter({ frame }: Props) {
@@ -12,9 +12,6 @@ export function MenuFooter({ frame }: Props) {
     "enter: select",
     "1-9: pick",
   ];
-  if (frame.backOption) {
-    parts.push(`0: ${frame.backOption.label}`);
-  }
-  parts.push("shift+tab: dsl", "ctrl+d: quit");
+  parts.push("shift+tab: coauthor", "ctrl+d: quit");
   return <Text dimColor>{`  ${parts.join("  ·  ")}`}</Text>;
 }
