@@ -27,6 +27,7 @@ import {
   handleCoauthorInput,
   type CoauthorSession,
 } from "./coauthor/runner.js";
+import { buildAboutLines } from "./aboutText.js";
 
 type Mode = "dsl" | "play" | "coauthor";
 
@@ -40,6 +41,7 @@ const DSL_HELP_LINES: readonly string[] = [
   "DSL mode — type a relation atom (Go(Player, Corridor)), a program",
   "statement (set { ... }, entity Foo { ... }), or a slash command:",
   "  /help        show this help",
+  "  /about       explain what Qualms is for",
   "  /show        print the current model counts",
   "  /reload      re-load the original story file(s)",
   "  /mode <m>    switch mode (play | coauthor | dsl); shift-tab also cycles",
@@ -57,6 +59,7 @@ const COAUTHOR_HELP_LINES: readonly string[] = [
   "runs queries, plays actions, and applies DSL mutations against the",
   "live model. All tool calls stream as pure DSL.",
   "  /cancel      abort an in-flight agent turn or pending question",
+  "  /about       explain what Qualms is for",
   "  /mode dsl    switch back to DSL mode (shift-tab also cycles)",
   "Configure provider/model via .env (see .env.template).",
 ];
@@ -124,6 +127,11 @@ export function App({
           return [{ kind: "info", text: "bye." }];
         case "/help":
           return helpLines.map((text) => ({ kind: "info", text }) as TranscriptEntry);
+        case "/about":
+          if (mode === "play") {
+            return [{ kind: "error", text: "/about is only available in DSL and coauthor modes" }];
+          }
+          return buildAboutLines(mode).map((text) => ({ kind: "info", text }) as TranscriptEntry);
         case "/show":
           return [
             {

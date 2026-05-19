@@ -7,6 +7,7 @@ import {
   selectMockupOption,
   type MockupMenuState,
 } from "./mockupState.js";
+import { buildAboutLines } from "../aboutText.js";
 import type { PlaySession } from "./runner.js";
 import { MessagePanel } from "./MessagePanel.js";
 import { MenuPanel } from "./MenuPanel.js";
@@ -17,6 +18,7 @@ export interface PlayUiState {
   readonly selectedIndex: number;
   readonly lastResult?: language.LanguagePlayResult;
   readonly lastError?: string;
+  readonly lastInfo?: readonly string[];
 }
 
 export const initialPlayUiState: PlayUiState = {
@@ -98,6 +100,15 @@ export function MenuController({
       setState({ ...state, selectedIndex: next });
       return;
     }
+    if (input === "?") {
+      setState({
+        ...state,
+        lastResult: undefined,
+        lastError: undefined,
+        lastInfo: buildAboutLines("play"),
+      });
+      return;
+    }
 
     const selectIndex = key.return
       ? state.selectedIndex
@@ -110,19 +121,29 @@ export function MenuController({
     const transition = selectMockupOption(session.model, option);
     switch (transition.kind) {
       case "state":
-        setState({ menu: transition.state, selectedIndex: 0 });
+        setState({
+          menu: transition.state,
+          selectedIndex: 0,
+          lastResult: undefined,
+          lastError: undefined,
+          lastInfo: undefined,
+        });
         return;
       case "action":
         setState({
           menu: transition.nextState,
           selectedIndex: 0,
+          lastError: undefined,
           lastResult: transition.result,
+          lastInfo: undefined,
         });
         return;
       case "error":
         setState({
           ...state,
+          lastResult: undefined,
           lastError: transition.message,
+          lastInfo: undefined,
         });
         return;
     }
@@ -130,7 +151,7 @@ export function MenuController({
 
   return (
     <Box flexDirection="column" width={panelWidth}>
-      <MessagePanel result={state.lastResult} error={state.lastError} />
+      <MessagePanel result={state.lastResult} error={state.lastError} info={state.lastInfo} />
       <MenuPanel
         frame={frame}
         selectedIndex={state.selectedIndex}
