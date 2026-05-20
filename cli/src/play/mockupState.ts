@@ -2,7 +2,6 @@ import { language } from "@quealm/qualms";
 
 const {
   languageRuntimeInternals,
-  parseRelationAtom,
   playLanguageCall,
   playLanguageQuery,
 } = language;
@@ -10,12 +9,10 @@ const {
 type Env = Record<string, language.GroundTerm>;
 
 export interface MockupMenuState {
-  readonly call: language.RelationAtom;
+  readonly call?: language.RelationAtom;
 }
 
-export const initialMockupMenuState: MockupMenuState = {
-  call: parseRelationAtom("MainMenu(Player)"),
-};
+export const initialMockupMenuState: MockupMenuState = {};
 
 export type MockupMenuOption = {
   readonly label: string;
@@ -42,10 +39,17 @@ export function buildMockupFrame(
   model: language.StoryModel,
   state: MockupMenuState,
 ): MockupMenuFrame {
-  const resolved = resolveMockup(model, state.call);
+  const call = state.call ?? model.startingMockup;
+  if (!call) {
+    return {
+      headers: ["No starting mockup defined."],
+      options: [],
+    };
+  }
+  const resolved = resolveMockup(model, call);
   if (!resolved) {
     return {
-      headers: [`Missing mockup: ${state.call.relation}`],
+      headers: [`Missing mockup: ${call.relation}`],
       options: [],
     };
   }

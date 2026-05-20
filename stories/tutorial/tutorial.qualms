@@ -34,9 +34,9 @@ relation Path(from: Location, to: Location)
 
 -- Actions define legal commands that can be run against the world model. Pattern
 -- matching rules determine whether the action applies, while `when` tests pre-
--- conditions. In practice, this determines whether the engine reports an action
--- as illegal or failed for a specific reason. Variables can be bound to patterns
--- by prefixing them with `?` and referenced elsewhere in the same scope.
+-- conditions. In practice, the difference determines whether the engine reports
+-- an action as illegal or failed for a specific reason. Variables can be bound to
+-- patterns by prefixing them with `?` and referenced elsewhere in the same scope.
 action Go(actor: (Actor & Locatable) { At(actor, ?here) }, target: Location) {
   when (Path(?here, target)) {
     set At(actor, target)
@@ -47,9 +47,9 @@ action Go(actor: (Actor & Locatable) { At(actor, ?here) }, target: Location) {
 -- match the argument patterns.
 entity Player { Actor, Locatable }
 
--- Namespaces group entity declarations so local names only need to be unique
+-- Namespaces group entity declarations so that local names only need to be unique
 -- within the namespace. References like Cell remain valid while unambiguous;
--- use ActOne.Cell if another namespace later defines its own Cell.
+-- use `ActOne.Cell` if another namespace later defines its own Cell.
 namespace ActOne {
   entity Cell { Location }
   entity Corridor { Location }
@@ -88,10 +88,13 @@ action Examine(actor: Actor, target) {
   }
 }
 
-entity Bars { Describable, Locatable }
-set {
-  At(Bars, Cell);
+namespace ActOne {
+  entity Bars { Describable, Locatable }
+  set {
+    At(Bars, Cell);
+  }
 }
+
 
 -- (3) Extend with portable items
 -- Introduces: after rules, queries.
@@ -117,6 +120,9 @@ action Take(actor: Actor, target: Portable) {
 -- after rule's arguments. This enables us to integrate
 -- carrying and locating without requiring that 
 -- the default rules uses anything except the core trait.
+-- Note that this rule only applies to a Locatable
+-- after Take. For a non-Locatable Portable entity,
+-- the rule will simply be ignored.
 after Take(_, target: Locatable { At(target, ?here) }) {
   set {
     !At(target, ?here);
@@ -131,15 +137,18 @@ action Drop(actor: Actor, target: Portable) {
   }
 }
 
+-- Again, this only fires for  Locatables.
 after Drop(actor: Locatable { At(actor, ?here) }, target: Locatable) {
   set {
     At(target, ?here);
   }
 }
 
-entity BoneShard { Portable, Describable, Locatable }
-set {
-  At(BoneShard, Cell);
+namespace ActOne {
+  entity BoneShard { Portable, Describable, Locatable }
+  set {
+      At(BoneShard, Cell);
+  }
 }
 
 -- (4) Extend with doors
@@ -507,10 +516,12 @@ validation TutorialSmoke {
 }
 
 -- (11) Playable mockup.
--- Introduces: mockup menus. Play mode starts at MainMenu(Player). A mockup is
+-- Introduces: mockup menus. Play mode starts at the declared mockup start call.
 -- intentionally raw: titles, details, option labels, successes, and failures
 -- come straight from ids and relation/action results so coauthoring agents can
 -- maintain it without also maintaining prose.
+
+mockup start { MainMenu(Player) }
 
 mockup MainMenu(cursor: Actor { At(cursor, ?here) }) {
   title { here }

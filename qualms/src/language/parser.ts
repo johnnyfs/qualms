@@ -13,6 +13,7 @@ import type {
   MockupBinding,
   MockupDetail,
   MockupOption,
+  MockupStartStatement,
   MockupStatement,
   NamespaceStatement,
   ParameterPattern,
@@ -263,7 +264,7 @@ class Parser {
     if (this.matchKeyword("action")) return this.callableStatement("action");
     if (this.matchKeyword("predicate")) return this.callableStatement("predicate");
     if (this.matchKeyword("query")) return this.queryStatement();
-    if (this.matchKeyword("mockup")) return this.mockupStatement();
+    if (this.matchKeyword("mockup")) return this.mockupTopLevelStatement();
     if (this.matchKeyword("before")) return this.ruleStatement("before");
     if (this.matchKeyword("after")) return this.ruleStatement("after");
     if (this.matchKeyword("namespace")) return this.namespaceStatement();
@@ -409,8 +410,24 @@ class Parser {
     return { kind: "query", id, parameters, body };
   }
 
+  private mockupTopLevelStatement(): MockupStatement | MockupStartStatement {
+    this.expectKeyword("mockup");
+    if (this.consumeKeywordIf("start")) {
+      this.expect("lbrace");
+      const call = this.relationAtom();
+      this.skipSemis();
+      this.expect("rbrace");
+      return { kind: "mockupStart", call };
+    }
+    return this.mockupStatementAfterKeyword();
+  }
+
   private mockupStatement(): MockupStatement {
     this.expectKeyword("mockup");
+    return this.mockupStatementAfterKeyword();
+  }
+
+  private mockupStatementAfterKeyword(): MockupStatement {
     const id = this.identifier();
     const parameters = this.callParameters();
     this.expect("lbrace");

@@ -19,6 +19,7 @@ describe("tutorial language parser", () => {
     expect(program.statements.filter((s) => s.kind === "predicate")).toHaveLength(5);
     expect(program.statements.filter((s) => s.kind === "action")).toHaveLength(15);
     expect(program.statements.filter((s) => s.kind === "case")).toHaveLength(0);
+    expect(program.statements.filter((s) => s.kind === "mockupStart")).toHaveLength(1);
     expect(program.statements.filter((s) => s.kind === "mockup")).toHaveLength(14);
     expect(program.statements.filter((s) => s.kind === "rule")).toHaveLength(9);
     expect(program.statements.filter((s) => s.kind === "namespace")).toHaveLength(1);
@@ -206,5 +207,18 @@ describe("tutorial language parser", () => {
         { relation: "MainMenu" },
       ],
     });
+  });
+
+  it("parses explicit mockup start declarations", () => {
+    const program = parseProgram("mockup start { MainMenu(Player) }");
+    expect(program.statements).toEqual([
+      {
+        kind: "mockupStart",
+        call: {
+          relation: "MainMenu",
+          args: [{ kind: "identifier", id: "Player" }],
+        },
+      },
+    ]);
   });
 });

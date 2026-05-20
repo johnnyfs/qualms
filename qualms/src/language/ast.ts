@@ -12,6 +12,7 @@ export type TopLevelStatement =
   | UndefCaseStatement
   | QueryStatement
   | MockupStatement
+  | MockupStartStatement
   | RuleStatement
   | NamespaceStatement
   | EntityStatement
@@ -101,6 +102,11 @@ export interface MockupStatement {
   readonly detail: readonly MockupDetail[];
   readonly options: readonly MockupOption[];
   readonly replace?: boolean;
+}
+
+export interface MockupStartStatement {
+  readonly kind: "mockupStart";
+  readonly call: RelationAtom;
 }
 
 export type MockupDetail = MockupBinding | MockupDetailLine;

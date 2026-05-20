@@ -52,7 +52,7 @@ const DSL_HELP_LINES: readonly string[] = [
 ];
 
 const PLAY_HELP_LINES: readonly string[] = [
-  "Play mode — use the story's mockup MainMenu(Player).",
+  "Play mode — use the story's declared mockup start call.",
   "  Up/Down      navigate options",
   "  /mode coauthor    switch to coauthor mode (shift-tab also cycles)",
 ];
@@ -78,7 +78,7 @@ export function App({
   const [model, setModel] = useState(initialModel);
   const savedModelRef = useRef(initialModel.clone());
   const saveTargetRef = useRef<string | undefined>(defaultSaveTarget(storyPaths));
-  const [mode, setMode] = useState<Mode>("play");
+  const [mode, setMode] = useState<Mode>(storyPaths.length === 0 ? "coauthor" : "play");
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [playUiState, setPlayUiState] = useState<PlayUiState>(initialPlayUiState);
 
@@ -106,7 +106,9 @@ export function App({
     [],
   );
 
-  const [transcript, setTranscript] = useState<readonly KeyedTranscriptEntry[]>([]);
+  const [transcript, setTranscript] = useState<readonly KeyedTranscriptEntry[]>(() =>
+    storyPaths.length === 0 ? keyed(coauthorModeWarnings(coauthorConfig)) : [],
+  );
 
   const append = useCallback(
     (next: readonly TranscriptEntry[]) => {
@@ -233,19 +235,14 @@ export function App({
   const cycleTo = useCallback(
     (next: Mode): readonly TranscriptEntry[] => {
       setMode(next);
+      if (next === "play") {
+        setPlayUiState(initialPlayUiState);
+      }
       const entries: TranscriptEntry[] = [
         { kind: "info", text: `mode: ${next}` },
       ];
-      if (next === "coauthor" && coauthorConfig && isCoauthorConfigError(coauthorConfig)) {
-        entries.push({
-          kind: "error",
-          text: `error: ${coauthorConfig.error}`,
-        });
-      } else if (next === "coauthor" && !coauthorConfig) {
-        entries.push({
-          kind: "error",
-          text: "error: coauthor mode is not configured (missing .env)",
-        });
+      if (next === "coauthor") {
+        entries.push(...coauthorModeWarnings(coauthorConfig));
       }
       return entries;
     },
@@ -318,4 +315,16 @@ export function App({
       <Footer mode={mode} />
     </Box>
   );
+}
+
+function coauthorModeWarnings(
+  coauthorConfig: CoauthorConfigResult | undefined,
+): readonly TranscriptEntry[] {
+  if (coauthorConfig && isCoauthorConfigError(coauthorConfig)) {
+    return [{ kind: "error", text: `error: ${coauthorConfig.error}` }];
+  }
+  if (!coauthorConfig) {
+    return [{ kind: "error", text: "error: coauthor mode is not configured (missing .env)" }];
+  }
+  return [];
 }

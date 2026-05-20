@@ -10,6 +10,7 @@ const TUTORIAL_PATH = resolve(__filename, "../../../stories/tutorial/tutorial.qu
 const {
   LanguageModelError,
   emitProgram,
+  emitStoryModel,
   idTerm,
   loadStoryProgram,
   parseProgram,
@@ -27,6 +28,7 @@ describe("tutorial language model", () => {
     expect(model.actions.size).toBe(12);
     expect(model.actionCases.map((actionCase) => actionCase.id)).toEqual([]);
     expect(model.rules).toHaveLength(9);
+    expect(model.startingMockup).toMatchObject({ relation: "MainMenu" });
     expect(model.validations.size).toBe(1);
     expect(model.entities.size).toBe(20);
     expect(model.entities.has("ActOne.Cell")).toBe(true);
@@ -117,5 +119,21 @@ describe("tutorial language model", () => {
     expect(reparsed.statements.map((s) => s.kind)).toEqual(
       program.statements.map((s) => s.kind),
     );
+  });
+
+  it("stores, clones, replaces, and emits the explicit mockup start", () => {
+    const model = loadStoryProgram(`
+      trait Actor
+      entity Player { Actor }
+      mockup start { MainMenu(Player) }
+      mockup start { OtherMenu(Player) }
+    `);
+
+    expect(model.startingMockup).toEqual({
+      relation: "OtherMenu",
+      args: [{ kind: "identifier", id: "Player" }],
+    });
+    expect(model.clone().startingMockup).toEqual(model.startingMockup);
+    expect(emitStoryModel(model)).toContain("mockup start { OtherMenu(Player) }");
   });
 });

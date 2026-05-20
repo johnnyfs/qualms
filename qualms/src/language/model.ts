@@ -72,6 +72,7 @@ export class StoryModel {
   readonly actionCases: StoredActionCaseStatement[] = [];
   readonly queries = new Map<string, QueryStatement>();
   readonly mockups = new Map<string, MockupStatement>();
+  startingMockup: RelationAtom | undefined;
   readonly rules: RuleStatement[] = [];
   readonly validations = new Map<string, ValidationStatement>();
   readonly entities = new Map<string, Set<string>>();
@@ -93,6 +94,7 @@ export class StoryModel {
     clone.actionCases.push(...this.actionCases);
     for (const [id, query] of this.queries) clone.queries.set(id, query);
     for (const [id, mockup] of this.mockups) clone.mockups.set(id, mockup);
+    clone.startingMockup = this.startingMockup;
     clone.rules.push(...this.rules);
     for (const [id, validation] of this.validations) clone.validations.set(id, validation);
     for (const [id, traits] of this.entities) clone.entities.set(id, new Set(traits));
@@ -137,6 +139,9 @@ export class StoryModel {
             break;
           case "mockup":
             this.addMockup(statement);
+            break;
+          case "mockupStart":
+            this.startingMockup = statement.call;
             break;
           case "rule":
             this.validateRule(statement);
@@ -213,6 +218,7 @@ export class StoryModel {
     for (const [id, v] of other.queries) this.queries.set(id, v);
     this.mockups.clear();
     for (const [id, v] of other.mockups) this.mockups.set(id, v);
+    this.startingMockup = other.startingMockup;
     this.rules.length = 0;
     this.rules.push(...other.rules);
     this.validations.clear();

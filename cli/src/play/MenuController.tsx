@@ -59,13 +59,14 @@ export function MenuController({
   const frame = buildMockupFrame(session.model, state.menu);
   const optionCount = frame.options.length;
   const scrollOffset = clampScrollOffset(state.selectedIndex, optionCount);
+  const menuKey = state.menu.call ? JSON.stringify(state.menu.call) : "";
 
   useEffect(() => {
     if (state.selectedIndex >= optionCount || state.selectedIndex < 0) {
       setState({ ...state, selectedIndex: 0 });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.menu.call.relation, optionCount]);
+  }, [menuKey, optionCount]);
 
   useInput((input, key) => {
     if (key.ctrl && input === "d") {

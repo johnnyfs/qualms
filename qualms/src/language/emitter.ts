@@ -11,6 +11,7 @@ import type {
   ExtendStatement,
   MockupDetail,
   MockupOption,
+  MockupStartStatement,
   MockupStatement,
   NamespaceStatement,
   NotExpression,
@@ -61,6 +62,7 @@ export function programFromModel(model: StoryModel): Program {
     ...model.actions.values(),
     ...model.actionCases,
     ...model.queries.values(),
+    ...(model.startingMockup ? [{ kind: "mockupStart" as const, call: model.startingMockup }] : []),
     ...model.mockups.values(),
     ...model.rules,
   ];
@@ -131,6 +133,8 @@ export function emitTopLevelStatement(statement: TopLevelStatement): string {
       return emitQuery(statement);
     case "mockup":
       return emitMockup(statement);
+    case "mockupStart":
+      return emitMockupStart(statement);
     case "rule":
       return emitRule(statement);
     case "namespace":
@@ -207,6 +211,10 @@ function emitMockup(statement: MockupStatement): string {
   }
   parts.push(`options {\n${statement.options.map((option) => indent(emitMockupOption(option))).join("\n")}\n}`);
   return `${prefix}mockup ${statement.id}(${statement.parameters.map(emitParameter).join(", ")}) {\n${parts.map(indent).join("\n")}\n}`;
+}
+
+function emitMockupStart(statement: MockupStartStatement): string {
+  return `mockup start { ${emitRelationAtom(statement.call)} }`;
 }
 
 function emitMockupDetail(detail: MockupDetail): string {

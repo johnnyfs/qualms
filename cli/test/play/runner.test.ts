@@ -28,6 +28,20 @@ function option(frame: ReturnType<typeof buildMockupFrame>, label: string) {
 }
 
 describe("mockup play runner", () => {
+  it("requires an explicit starting mockup", () => {
+    const model = language.loadStoryProgram(`
+      trait Actor
+      entity Player { Actor }
+      mockup MainMenu(cursor: Actor) {
+        title { "Main" }
+        options { "stay" -> MainMenu(cursor) }
+      }
+    `);
+    const frame = buildMockupFrame(model, initialMockupMenuState);
+    expect(frame.headers).toEqual(["No starting mockup defined."]);
+    expect(frame.options).toEqual([]);
+  });
+
   it("starts from MainMenu(Player) and renders raw details", () => {
     const session = loadSession();
     const frame = buildMockupFrame(session.model, initialMockupMenuState);
@@ -54,6 +68,7 @@ describe("mockup play runner", () => {
     if (blocked.kind !== "action") throw new Error("expected action transition");
     expect(blocked.result.status).toBe("failed");
     expect(blocked.result.reasons).toContain("!Opened(Bars)");
+    expect(buildMockupFrame(session.model, blocked.nextState).headers[0]).toBe("Cell");
   });
 
   it("uses InventoryMenu for carried-item detail and examination", () => {
