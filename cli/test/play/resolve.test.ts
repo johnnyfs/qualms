@@ -53,7 +53,7 @@ describe("visibleEntities", () => {
     // so Guard (in Corridor) should be visible from the Cell.
     const { ids, usedFallback } = visibleEntities(model, defaultPlayConfig());
     expect(usedFallback).toBe(false);
-    expect(ids).toContain("Bars");
+    expect(ids).toContain("ActOne.Bars");
     expect(ids).toContain("Guard");
     // Mop is in the Closet, but the ClosetDoor is opaque and closed.
     expect(ids).not.toContain("Mop");

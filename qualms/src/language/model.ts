@@ -149,7 +149,7 @@ export class StoryModel {
             this.rules.push(statement);
             break;
           case "namespace":
-            this.addNamespace(statement);
+            this.addNamespace(statement, effects);
             break;
           case "entity":
             this.addEntity(statement);
@@ -292,8 +292,8 @@ export class StoryModel {
     return candidates?.size === 1 ? local : id;
   }
 
-  groundTermFromTerm(term: Term): GroundTerm {
-    return this.normalizeGroundTerm(groundTermFromTerm(term));
+  groundTermFromTerm(term: Term, namespace?: string): GroundTerm {
+    return this.normalizeGroundTerm(this.groundTermFromTermInScope(term, namespace));
   }
 
   normalizeGroundTerm(term: GroundTerm): GroundTerm {
@@ -319,8 +319,9 @@ export class StoryModel {
     };
   }
 
-  private addNamespace(statement: NamespaceStatement): void {
+  private addNamespace(statement: NamespaceStatement, sink: Effect[]): void {
     for (const entity of statement.entities) this.addEntity(entity, statement.id);
+    for (const set of statement.sets) this.applySet(set.effects, sink, statement.id);
   }
 
   private addEntity(statement: EntityStatement, namespace?: string): void {
@@ -350,9 +351,9 @@ export class StoryModel {
     }
   }
 
-  private applySet(setEffects: readonly SetEffect[], sink: Effect[]): void {
+  private applySet(setEffects: readonly SetEffect[], sink: Effect[], namespace?: string): void {
     for (const setEffect of setEffects) {
-      const fact = this.groundFactFromAtom(setEffect.atom);
+      const fact = this.groundFactFromAtom(setEffect.atom, namespace);
       if (setEffect.polarity === "assert") {
         for (const retracted of this.assertFact(fact)) {
           sink.push({ polarity: "retract", fact: retracted });
@@ -582,11 +583,32 @@ export class StoryModel {
     throw new LanguageModelError(`unknown type '${type.id}'`);
   }
 
-  private groundFactFromAtom(atom: RelationAtom): Fact {
+  private groundFactFromAtom(atom: RelationAtom, namespace?: string): Fact {
     return {
       relation: atom.relation,
-      args: atom.args.map((arg) => this.groundTermFromTerm(arg)),
+      args: atom.args.map((arg) => this.groundTermFromTerm(arg, namespace)),
     };
+  }
+
+  private groundTermFromTermInScope(term: Term, namespace?: string): GroundTerm {
+    switch (term.kind) {
+      case "identifier":
+        return { kind: "id", id: this.scopedEntityId(term.id, namespace) };
+      case "relationInstance":
+        return {
+          kind: "relation",
+          relation: term.atom.relation,
+          args: term.atom.args.map((arg) => this.groundTermFromTermInScope(arg, namespace)),
+        };
+      default:
+        return groundTermFromTerm(term);
+    }
+  }
+
+  private scopedEntityId(id: string, namespace?: string): string {
+    if (!namespace || id.includes(".")) return id;
+    const scoped = `${namespace}.${id}`;
+    return this.entities.has(scoped) ? scoped : id;
   }
 
   private validateFact(fact: Fact): void {

@@ -78,7 +78,7 @@ export function programFromModel(model: StoryModel): Program {
     namespaceEntities.set(namespace, entities);
   }
   for (const [id, entities] of namespaceEntities) {
-    statements.push({ kind: "namespace", id, entities });
+    statements.push({ kind: "namespace", id, entities, sets: [] });
   }
   const effects = model.listFacts().map(factToEffect);
   if (effects.length > 0) statements.push({ kind: "set", effects });
@@ -243,7 +243,11 @@ function emitRule(statement: RuleStatement): string {
 }
 
 function emitNamespace(statement: NamespaceStatement): string {
-  return `namespace ${statement.id} {\n${statement.entities.map((entity) => indent(emitEntity(entity))).join("\n")}\n}`;
+  const statements = [
+    ...statement.entities.map(emitEntity),
+    ...statement.sets.map(emitSet),
+  ];
+  return `namespace ${statement.id} {\n${statements.map(indent).join("\n")}\n}`;
 }
 
 function emitEntity(statement: EntityStatement): string {

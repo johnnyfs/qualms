@@ -598,17 +598,21 @@ class Parser {
     const id = this.identifier();
     this.expect("lbrace");
     const entities: EntityStatement[] = [];
+    const sets: SetStatement[] = [];
     while (!this.at("rbrace")) {
       this.skipSemis();
       if (this.at("rbrace")) break;
-      if (!this.matchKeyword("entity")) {
-        this.fail(`namespace '${id}' can only contain entity declarations`);
+      if (this.matchKeyword("entity")) {
+        entities.push(this.entityStatement());
+      } else if (this.matchKeyword("set")) {
+        sets.push(this.setStatement());
+      } else {
+        this.fail(`namespace '${id}' can only contain entity or set declarations`);
       }
-      entities.push(this.entityStatement());
       this.skipSemis();
     }
     this.expect("rbrace");
-    return { kind: "namespace", id, entities };
+    return { kind: "namespace", id, entities, sets };
   }
 
   private extendStatement(): ExtendStatement {

@@ -66,6 +66,32 @@ describe("tutorial language model", () => {
     expect(model.hasFact("Path", [idTerm("Cell"), idTerm("Corridor")])).toBe(true);
   });
 
+  it("resolves set statements inside namespaces against enclosed entities", () => {
+    const model = loadStoryProgram(`
+      trait Actor
+      trait Location
+      trait Portable
+      relation At(Portable, Location)
+      relation StartsAt(Actor, Location)
+
+      entity Player { Actor }
+      namespace ActOne {
+        entity Cell { Location }
+        entity BoneShard { Portable }
+        set {
+          At(BoneShard, Cell);
+          StartsAt(Player, Cell);
+        }
+      }
+      namespace ActTwo {
+        entity Cell { Location }
+      }
+    `);
+
+    expect(model.hasFact("At", [idTerm("ActOne.BoneShard"), idTerm("ActOne.Cell")])).toBe(true);
+    expect(model.hasFact("StartsAt", [idTerm("Player"), idTerm("ActOne.Cell")])).toBe(true);
+  });
+
   it("requires qualified references when local entity names are ambiguous", () => {
     expect(() => loadStoryProgram(`
       trait Location

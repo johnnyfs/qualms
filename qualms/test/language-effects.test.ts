@@ -24,13 +24,13 @@ describe("engine-tracked effects", () => {
     const unlock = playLanguageCall(model, "Unlock(Player, Bars, MasterKey)");
     expect(unlock.status).toBe("passed");
     expect(unlock.effects).toEqual([
-      { polarity: "retract", fact: { relation: "Locked", args: [idTerm("Bars")] } },
+      { polarity: "retract", fact: { relation: "Locked", args: [idTerm("ActOne.Bars")] } },
     ]);
 
     const open = playLanguageCall(model, "Open(Player, Bars)");
     expect(open.status).toBe("passed");
     expect(open.effects).toEqual([
-      { polarity: "assert", fact: { relation: "Opened", args: [idTerm("Bars")] } },
+      { polarity: "assert", fact: { relation: "Opened", args: [idTerm("ActOne.Bars")] } },
     ]);
 
     const go = playLanguageCall(model, "Go(Player, Corridor)");

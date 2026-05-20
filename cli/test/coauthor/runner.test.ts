@@ -111,6 +111,8 @@ describe("coauthor runner", () => {
       setPendingQuestion: () => {},
     });
 
+    expect(transcript[0]).toEqual({ kind: "info", text: "agent: working..." });
+    expect(transcript.at(-1)).toEqual({ kind: "info", text: "agent: done." });
     const narrative = transcript.filter((e) => e.kind === "narrative");
     expect(narrative.length).toBeGreaterThan(1);
     expect(narrative.map((e) => e.text).join(" ")).toContain(

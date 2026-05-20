@@ -22,10 +22,10 @@ describe("tutorial language parser", () => {
     expect(program.statements.filter((s) => s.kind === "mockupStart")).toHaveLength(1);
     expect(program.statements.filter((s) => s.kind === "mockup")).toHaveLength(14);
     expect(program.statements.filter((s) => s.kind === "rule")).toHaveLength(9);
-    expect(program.statements.filter((s) => s.kind === "namespace")).toHaveLength(1);
-    expect(program.statements.filter((s) => s.kind === "entity")).toHaveLength(17);
+    expect(program.statements.filter((s) => s.kind === "namespace")).toHaveLength(3);
+    expect(program.statements.filter((s) => s.kind === "entity")).toHaveLength(15);
     expect(program.statements.filter((s) => s.kind === "extend")).toHaveLength(3);
-    expect(program.statements.filter((s) => s.kind === "set")).toHaveLength(9);
+    expect(program.statements.filter((s) => s.kind === "set")).toHaveLength(7);
     expect(program.statements.filter((s) => s.kind === "validation")).toHaveLength(1);
   });
 
@@ -44,6 +44,35 @@ describe("tutorial language parser", () => {
       entities: [
         { kind: "entity", id: "Cell", traits: ["Location"] },
         { kind: "entity", id: "Corridor", traits: ["Location"] },
+      ],
+      sets: [],
+    });
+  });
+
+  it("parses set blocks inside namespace blocks", () => {
+    const program = parseProgram(`
+      trait Location
+      relation Seen(Location)
+      namespace ActOne {
+        entity Cell { Location }
+        set Seen(Cell)
+      }
+    `);
+    const namespace = program.statements.find((s) => s.kind === "namespace");
+    expect(namespace).toMatchObject({
+      kind: "namespace",
+      id: "ActOne",
+      entities: [{ kind: "entity", id: "Cell", traits: ["Location"] }],
+      sets: [
+        {
+          kind: "set",
+          effects: [
+            {
+              polarity: "assert",
+              atom: { relation: "Seen", args: [{ kind: "identifier", id: "Cell" }] },
+            },
+          ],
+        },
       ],
     });
   });
@@ -64,9 +93,9 @@ describe("tutorial language parser", () => {
     ]);
   });
 
-  it("rejects non-entity declarations inside namespace blocks", () => {
+  it("rejects unsupported declarations inside namespace blocks", () => {
     expect(() => parseProgram("namespace ActOne { trait Location }")).toThrow(
-      "namespace 'ActOne' can only contain entity declarations",
+      "namespace 'ActOne' can only contain entity or set declarations",
     );
   });
 

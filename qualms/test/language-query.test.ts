@@ -141,8 +141,8 @@ describe("tutorial engine queries", () => {
       expect(result.status).toBe("passed");
       const ids = idsOf(result.bindings, "target");
       // Co-located (Cell): Bars, BoneShard
-      expect(ids).toContain("Bars");
-      expect(ids).toContain("BoneShard");
+      expect(ids).toContain("ActOne.Bars");
+      expect(ids).toContain("ActOne.BoneShard");
       // Cross-room via transparent bars + ConveysVisibility: Guard in Corridor
       expect(ids).toContain("Guard");
       // The Mop is behind an opaque closed door (ClosetDoor) — not visible

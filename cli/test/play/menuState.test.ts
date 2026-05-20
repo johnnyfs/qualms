@@ -77,8 +77,8 @@ describe("buildFrame — slot", () => {
     const ids = frame.options
       .filter((o) => o.kind === "candidate")
       .map((o) => (o.kind === "candidate" ? o.id : ""));
-    expect(ids).toContain("BoneShard");
-    expect(ids).toContain("Bars");
+    expect(ids).toContain("ActOne.BoneShard");
+    expect(ids).toContain("ActOne.Bars");
     expect(ids).toContain("Guard");
     expect(ids).not.toContain("Player");
     expect(ids).not.toContain("Cell");
@@ -103,8 +103,8 @@ describe("buildFrame — slot", () => {
     expect(ids).toEqual(["ActOne.Corridor"]);
     // Visible-only entities (BoneShard, Bars, Guard) must NOT appear; Go
     // targets locations, and the per-slot Adjacent query enforces that.
-    expect(ids).not.toContain("BoneShard");
-    expect(ids).not.toContain("Bars");
+    expect(ids).not.toContain("ActOne.BoneShard");
+    expect(ids).not.toContain("ActOne.Bars");
     expect(ids).not.toContain("Guard");
   });
 
@@ -122,7 +122,7 @@ describe("buildFrame — slot", () => {
       .filter((o) => o.kind === "candidate")
       .map((o) => (o.kind === "candidate" ? o.id : ""));
     // Visible enumeration: BoneShard is co-located, Corridor is not visible.
-    expect(ids).toContain("BoneShard");
+    expect(ids).toContain("ActOne.BoneShard");
     expect(ids).not.toContain("Corridor");
   });
 

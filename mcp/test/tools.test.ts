@@ -48,7 +48,7 @@ describe("tool handlers for the tutorial-era DSL", () => {
     const summary = handleQuery(manager, { sessionId });
     expect(summary.kind).toBe("summary");
     if (summary.kind !== "summary") throw new Error("expected summary");
-    expect(summary.facts.some((fact) => fact.text === "Locked(Bars)")).toBe(true);
+    expect(summary.facts.some((fact) => fact.text === "Locked(ActOne.Bars)")).toBe(true);
 
     const show = handleQuery(manager, { sessionId, expr: "show action Open" });
     expect(show.kind).toBe("show");

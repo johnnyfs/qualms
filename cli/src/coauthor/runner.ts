@@ -91,6 +91,7 @@ export async function handleCoauthorInput(
   session.running = true;
   const abort = new AbortController();
   session.abort = abort;
+  callbacks.append([{ kind: "info", text: "agent: working..." }]);
 
   const ctx: CoauthorContext = {
     model: session.model,
@@ -197,6 +198,7 @@ export async function handleCoauthorInput(
   } finally {
     session.running = false;
     session.abort = null;
+    callbacks.append([{ kind: "info", text: "agent: done." }]);
   }
 }
 
