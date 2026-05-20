@@ -59,6 +59,48 @@ describe("tool handlers for the tutorial-era DSL", () => {
     expect(query.kind).toBe("query");
     if (query.kind !== "query") throw new Error("expected query");
     expect(query.rows).toEqual([{ key: "MasterKey" }]);
+    expect(query.text).toBe("[LockedWith(key=MasterKey)];");
+  });
+
+  it("routes declared query calls through playLanguageQuery", () => {
+    const sessionId = handleStart(manager, { storyPaths: [TUTORIAL_PATH] }).sessionId;
+
+    expect(handlePlay(manager, { sessionId, call: "TalkTo(Player, Guard)" }).status).toBe("passed");
+
+    const current = handleQuery(manager, { sessionId, expr: "CurrentTopic(Player, Guard)" });
+    expect(current.kind).toBe("query");
+    if (current.kind !== "query") throw new Error("expected query");
+    expect(current.rows).toEqual([{ topic: "Whatever" }]);
+    expect(current.text).toBe("[CurrentTopic(Player, Guard) -> topic=Whatever];");
+
+    const topics = handleQuery(manager, { sessionId, expr: "Topics(Player, Guard)" });
+    expect(topics.kind).toBe("query");
+    if (topics.kind !== "query") throw new Error("expected query");
+    expect(topics.rows).toEqual(
+      expect.arrayContaining([
+        { current: "Whatever", topic: "Bribery" },
+        { current: "Whatever", topic: "Weather" },
+      ]),
+    );
+    expect(topics.text).toContain("Topics(Player, Guard) -> current=Whatever, topic=Bribery");
+  });
+
+  it("keeps raw relation pattern queries on the expression evaluator", () => {
+    const sessionId = handleStart(manager, { storyPaths: [TUTORIAL_PATH] }).sessionId;
+
+    const leads = handleQuery(manager, {
+      sessionId,
+      expr: "LeadsTo(?speaker, ?from, ?to)",
+    });
+    expect(leads.kind).toBe("query");
+    if (leads.kind !== "query") throw new Error("expected query");
+    expect(leads.rows).toEqual(
+      expect.arrayContaining([
+        { speaker: "Guard", from: "Whatever", to: "Bribery" },
+        { speaker: "Guard", from: "Whatever", to: "Weather" },
+      ]),
+    );
+    expect(leads.text).toContain("LeadsTo(speaker=Guard, from=Whatever, to=Bribery)");
   });
 
   it("plays calls and returns compact DSL feedback", () => {

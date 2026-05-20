@@ -8,6 +8,7 @@ import { buildSystemPrompt } from "./prompt.js";
 import { buildTools, type CoauthorContext } from "./tools.js";
 
 type StoryModel = language.StoryModel;
+const STREAM_CHUNK_SIZE = 48;
 
 export interface CoauthorRunnerCallbacks {
   readonly append: (entries: readonly TranscriptEntry[]) => void;
@@ -113,13 +114,33 @@ export async function handleCoauthorInput(
     });
 
     let textBuffer = "";
-    const flushText = () => {
-      if (textBuffer.length === 0) return;
-      const lines = textBuffer.split("\n");
-      for (const line of lines) {
-        if (line.length === 0) continue;
-        callbacks.append([{ kind: "narrative", text: line }]);
+    const appendNarrative = (text: string) => {
+      if (text.length === 0) return;
+      callbacks.append([{ kind: "narrative", text }]);
+    };
+    const flushReadyLines = () => {
+      while (true) {
+        const newline = textBuffer.indexOf("\n");
+        if (newline < 0) return;
+        appendNarrative(textBuffer.slice(0, newline));
+        textBuffer = textBuffer.slice(newline + 1);
       }
+    };
+    const flushPartialChunks = () => {
+      flushReadyLines();
+      while (textBuffer.length >= STREAM_CHUNK_SIZE) {
+        const window = textBuffer.slice(0, STREAM_CHUNK_SIZE);
+        const space = Math.max(window.lastIndexOf(" "), window.lastIndexOf("\t"));
+        const end = space >= Math.floor(STREAM_CHUNK_SIZE / 2) ? space : STREAM_CHUNK_SIZE;
+        appendNarrative(textBuffer.slice(0, end).trimEnd());
+        textBuffer = textBuffer.slice(end).replace(/^[ \t]+/, "");
+        flushReadyLines();
+      }
+    };
+    const flushText = () => {
+      flushReadyLines();
+      if (textBuffer.length === 0) return;
+      appendNarrative(textBuffer);
       textBuffer = "";
     };
 
@@ -127,15 +148,7 @@ export async function handleCoauthorInput(
       switch (part.type) {
         case "text-delta":
           textBuffer += part.text;
-          if (textBuffer.includes("\n")) {
-            const lastNewline = textBuffer.lastIndexOf("\n");
-            const ready = textBuffer.slice(0, lastNewline);
-            textBuffer = textBuffer.slice(lastNewline + 1);
-            for (const line of ready.split("\n")) {
-              if (line.length === 0) continue;
-              callbacks.append([{ kind: "narrative", text: line }]);
-            }
-          }
+          flushPartialChunks();
           break;
         case "text-end":
           flushText();

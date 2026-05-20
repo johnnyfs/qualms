@@ -97,6 +97,27 @@ function scriptedLm(steps: StreamPart[][]): LanguageModel {
 }
 
 describe("coauthor runner", () => {
+  it("streams long prose without waiting for a newline", async () => {
+    const model = freshModel();
+    const llm = scriptedLm([
+      textStep(
+        "This is a deliberately long coauthor response with no newline so it should be appended in chunks while the stream is still active.",
+      ),
+    ]);
+    const session = createCoauthorSession(model, config, { llm });
+    const transcript: TranscriptEntry[] = [];
+    await handleCoauthorInput(session, "Explain the current room.", {
+      append: (entries) => transcript.push(...entries),
+      setPendingQuestion: () => {},
+    });
+
+    const narrative = transcript.filter((e) => e.kind === "narrative");
+    expect(narrative.length).toBeGreaterThan(1);
+    expect(narrative.map((e) => e.text).join(" ")).toContain(
+      "deliberately long coauthor response",
+    );
+  });
+
   it("streams a tool call as DSL transcript entries", async () => {
     const model = freshModel();
     const llm = scriptedLm([
@@ -165,7 +186,7 @@ describe("coauthor runner", () => {
     });
 
     expect(model.inTransaction).toBe(false);
-    expect(transcript.some((e) => e.kind === "input" && e.text === "~ begin;")).toBe(true);
-    expect(transcript.some((e) => e.kind === "input" && e.text === "~ commit;")).toBe(true);
+    expect(transcript.some((e) => e.kind === "input" && e.text === "begin;")).toBe(true);
+    expect(transcript.some((e) => e.kind === "input" && e.text === "commit;")).toBe(true);
   });
 });

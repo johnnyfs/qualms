@@ -4,6 +4,7 @@ import type { SessionManager } from "./session.js";
 
 type GroundTerm = languageNs.GroundTerm;
 type Expression = languageNs.Expression;
+type RelationAtom = languageNs.RelationAtom;
 type Env = Record<string, GroundTerm>;
 
 export class QueryError extends Error {
@@ -148,6 +149,24 @@ export function handleQuery(manager: SessionManager, input: QueryInput): QueryOu
   }
 
   try {
+    if (parsed.kind === "relation" && session.model.queries.has(parsed.atom.relation)) {
+      const result = languageNs.playLanguageQuery(session.model, parsed.atom);
+      if (result.status !== "passed") {
+        throw new QueryError(
+          result.failures[0]?.message ?? `query '${parsed.atom.relation}' failed`,
+          "evaluate",
+        );
+      }
+      const rows = result.bindings.map((env) => formatRow(env));
+      return {
+        kind: "query",
+        expr,
+        rows,
+        count: rows.length,
+        text: renderNamedQueryRows(rows, parsed.atom),
+      };
+    }
+
     const rows = languageNs.languageRuntimeInternals
       .evalExpression(session.model, parsed, {})
       .map((env) => formatRow(env));
@@ -156,9 +175,10 @@ export function handleQuery(manager: SessionManager, input: QueryInput): QueryOu
       expr,
       rows,
       count: rows.length,
-      text: renderRows(rows),
+      text: renderRows(rows, parsed, expr),
     };
   } catch (err) {
+    if (err instanceof QueryError) throw err;
     throw new QueryError(errorMessage(err), "evaluate");
   }
 }
@@ -406,9 +426,73 @@ function formatGroundTermText(term: GroundTerm): string {
   }
 }
 
-function renderRows(rows: Array<Record<string, unknown>>): string {
+function renderRows(
+  rows: Array<Record<string, unknown>>,
+  expression?: Expression,
+  exprText?: string,
+): string {
   if (rows.length === 0) return "[];";
-  return `${JSON.stringify(rows)};`;
+  return `[${rows.map((row) => renderExpressionRow(row, expression, exprText)).join(", ")}];`;
+}
+
+function renderNamedQueryRows(rows: Array<Record<string, unknown>>, atom: RelationAtom): string {
+  if (rows.length === 0) return "[];";
+  const call = `${atom.relation}(${atom.args.map(formatTermText).join(", ")})`;
+  return `[${rows.map((row) => `${call} -> ${renderRowFields(row)}`).join(", ")}];`;
+}
+
+function renderExpressionRow(
+  row: Record<string, unknown>,
+  expression: Expression | undefined,
+  exprText: string | undefined,
+): string {
+  if (expression?.kind === "relation") {
+    const fields = renderRowFields(row);
+    if (fields.length > 0) return `${expression.atom.relation}(${fields})`;
+    return exprText?.replace(/;$/, "") ?? `${expression.atom.relation}()`;
+  }
+  const fields = renderRowFields(row);
+  return fields.length > 0 ? fields : "{}";
+}
+
+function renderRowFields(row: Record<string, unknown>): string {
+  return Object.entries(row)
+    .map(([name, value]) => `${name}=${formatPlainValueText(value)}`)
+    .join(", ");
+}
+
+function formatPlainValueText(value: unknown): string {
+  if (
+    value &&
+    typeof value === "object" &&
+    "relation" in value &&
+    "args" in value &&
+    typeof (value as { relation: unknown }).relation === "string" &&
+    Array.isArray((value as { args: unknown }).args)
+  ) {
+    const relation = (value as { relation: string }).relation;
+    const args = (value as { args: unknown[] }).args;
+    return `${relation}(${args.map(formatPlainValueText).join(", ")})`;
+  }
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
+}
+
+function formatTermText(term: languageNs.Term): string {
+  switch (term.kind) {
+    case "identifier":
+      return term.id;
+    case "variable":
+      return `?${term.id}`;
+    case "wildcard":
+      return "_";
+    case "string":
+      return JSON.stringify(term.value);
+    case "number":
+      return String(term.value);
+    case "relationInstance":
+      return `${term.atom.relation}(${term.atom.args.map(formatTermText).join(", ")})`;
+  }
 }
 
 function errorMessage(err: unknown): string {

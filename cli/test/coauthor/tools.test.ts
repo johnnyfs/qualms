@@ -14,6 +14,10 @@ function freshModel(): InstanceType<typeof language.StoryModel> {
       relation At(subject: Locatable, location: Location) unique(subject)
       relation Path(Location, Location)
 
+      query CurrentLocation(actor: Actor) {
+        At(actor, ?room)
+      }
+
       action Go(actor: (Actor & Locatable) { At(actor, ?here) }, target: Location) {
         when (Path(?here, target)) {
           set At(actor, target)
@@ -61,6 +65,22 @@ describe("coauthor tools", () => {
     expect(transcript[0]).toEqual({ kind: "input", text: "? At(?actor, ?room)" });
     expect(transcript[1]?.kind).toBe("feedback");
     expect(transcript[1]?.text).toContain("Player");
+  });
+
+  it("query routes declared query calls and renders DSL-like rows", async () => {
+    const model = freshModel();
+    const { ctx, transcript } = makeCtx(model);
+    const tools = buildTools(ctx);
+    const result = (await tools.query.execute!(
+      { expr: "CurrentLocation(Player)" },
+      { toolCallId: "1", messages: [] },
+    )) as { kind: string; rows: unknown[] };
+    expect(result.kind).toBe("query");
+    expect(result.rows).toEqual([{ room: "Cell" }]);
+    expect(transcript[1]).toEqual({
+      kind: "feedback",
+      text: "[CurrentLocation(Player) -> room=Cell];",
+    });
   });
 
   it("query show prints relation definitions", async () => {

@@ -7,6 +7,8 @@ import { formatEffect, formatPlayResult, formatProgramEffects } from "../format.
 type StoryModel = language.StoryModel;
 type Effect = language.Effect;
 type GroundTerm = language.GroundTerm;
+type Expression = language.Expression;
+type RelationAtom = language.RelationAtom;
 
 const {
   LanguageParseError,
@@ -17,6 +19,7 @@ const {
   parseExpression,
   parseProgram,
   playLanguageCall,
+  playLanguageQuery,
   programFromModel,
 } = language;
 
@@ -68,9 +71,20 @@ export function buildTools(ctx: CoauthorContext) {
         }
         try {
           const parsed = parseExpression(trimmed);
+          if (parsed.kind === "relation" && ctx.model.queries.has(parsed.atom.relation)) {
+            const result = playLanguageQuery(ctx.model, parsed.atom);
+            if (result.status !== "passed") {
+              throw new Error(result.failures[0]?.message ?? `query '${parsed.atom.relation}' failed`);
+            }
+            const rows: QueryRow[] = result.bindings.map(formatRow);
+            entries.push({ kind: "feedback", text: renderNamedQueryRows(rows, parsed.atom) });
+            ctx.append(entries);
+            return { kind: "query", expr: trimmed, count: rows.length, rows };
+          }
+
           const envs = languageRuntimeInternals.evalExpression(ctx.model, parsed, {});
           const rows: QueryRow[] = envs.map(formatRow);
-          entries.push({ kind: "feedback", text: renderRows(rows) });
+          entries.push({ kind: "feedback", text: renderRows(rows, parsed, trimmed) });
           ctx.append(entries);
           return { kind: "query", expr: trimmed, count: rows.length, rows };
         } catch (err) {
@@ -219,8 +233,7 @@ function plainGroundTerm(term: GroundTerm): unknown {
 function formatMutateInput(source: string): readonly string[] {
   return source
     .split("\n")
-    .map((line) => `~ ${line}`)
-    .filter((line, index, arr) => !(index === arr.length - 1 && line.trim() === "~"));
+    .filter((line, index, arr) => !(index === arr.length - 1 && line.trim() === ""));
 }
 
 function formatRow(env: Record<string, GroundTerm>): QueryRow {
@@ -231,9 +244,69 @@ function formatRow(env: Record<string, GroundTerm>): QueryRow {
   return row;
 }
 
-function renderRows(rows: readonly QueryRow[]): string {
+function renderRows(rows: readonly QueryRow[], expression?: Expression, exprText?: string): string {
   if (rows.length === 0) return "[];";
-  return `${JSON.stringify(rows)};`;
+  return `[${rows.map((row) => renderExpressionRow(row, expression, exprText)).join(", ")}];`;
+}
+
+function renderNamedQueryRows(rows: readonly QueryRow[], atom: RelationAtom): string {
+  if (rows.length === 0) return "[];";
+  const call = `${atom.relation}(${atom.args.map(formatTermText).join(", ")})`;
+  return `[${rows.map((row) => `${call} -> ${renderRowFields(row)}`).join(", ")}];`;
+}
+
+function renderExpressionRow(
+  row: QueryRow,
+  expression: Expression | undefined,
+  exprText: string | undefined,
+): string {
+  if (expression?.kind === "relation") {
+    const fields = renderRowFields(row);
+    if (fields.length > 0) return `${expression.atom.relation}(${fields})`;
+    return exprText?.replace(/;$/, "") ?? `${expression.atom.relation}()`;
+  }
+  const fields = renderRowFields(row);
+  return fields.length > 0 ? fields : "{}";
+}
+
+function renderRowFields(row: QueryRow): string {
+  return Object.entries(row)
+    .map(([name, value]) => `${name}=${formatPlainValueText(value)}`)
+    .join(", ");
+}
+
+function formatPlainValueText(value: unknown): string {
+  if (
+    value &&
+    typeof value === "object" &&
+    "relation" in value &&
+    "args" in value &&
+    typeof (value as { relation: unknown }).relation === "string" &&
+    Array.isArray((value as { args: unknown }).args)
+  ) {
+    const relation = (value as { relation: string }).relation;
+    const args = (value as { args: unknown[] }).args;
+    return `${relation}(${args.map(formatPlainValueText).join(", ")})`;
+  }
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
+}
+
+function formatTermText(term: language.Term): string {
+  switch (term.kind) {
+    case "identifier":
+      return term.id;
+    case "variable":
+      return `?${term.id}`;
+    case "wildcard":
+      return "_";
+    case "string":
+      return JSON.stringify(term.value);
+    case "number":
+      return String(term.value);
+    case "relationInstance":
+      return `${term.atom.relation}(${term.atom.args.map(formatTermText).join(", ")})`;
+  }
 }
 
 interface ShowRequest {
