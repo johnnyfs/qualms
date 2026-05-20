@@ -94,7 +94,7 @@ export function buildTools(ctx: CoauthorContext) {
         const entries: TranscriptEntry[] = [{ kind: "input", text: `> ${trimmed}` }];
         try {
           const result = playLanguageCall(ctx.model, trimmed);
-          entries.push(...formatPlayResult(result));
+          entries.push(...formatPlayResult(result, ctx.model));
           ctx.append(entries);
           return {
             kind: "play",
@@ -133,7 +133,7 @@ export function buildTools(ctx: CoauthorContext) {
             entries.push({ kind: "feedback", text: "ok;" });
           } else {
             for (const effect of effects) {
-              entries.push({ kind: "effect", text: formatEffect(effect) });
+              entries.push({ kind: "effect", text: formatEffect(effect, ctx.model) });
             }
           }
           ctx.append(entries);

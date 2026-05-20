@@ -100,7 +100,7 @@ describe("buildFrame — slot", () => {
       .map((o) => (o.kind === "candidate" ? o.id : ""));
     // Cell → Corridor: Path-adjacent. Selectable regardless of door state
     // so a blocked attempt yields a useful denial.
-    expect(ids).toEqual(["Corridor"]);
+    expect(ids).toEqual(["ActOne.Corridor"]);
     // Visible-only entities (BoneShard, Bars, Guard) must NOT appear; Go
     // targets locations, and the per-slot Adjacent query enforces that.
     expect(ids).not.toContain("BoneShard");

@@ -24,7 +24,8 @@ export function tokenizeCamelCase(id: string): string[] {
 }
 
 export function defaultDisplayName(id: string): string {
-  return tokenizeCamelCase(id)
+  const local = id.includes(".") ? id.slice(id.lastIndexOf(".") + 1) : id;
+  return tokenizeCamelCase(local)
     .map((t) => t.toLowerCase())
     .join(" ");
 }

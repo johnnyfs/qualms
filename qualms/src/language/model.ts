@@ -6,6 +6,7 @@ import type {
   EntityStatement,
   ExternPredicateStatement,
   ExtendStatement,
+  NamespaceStatement,
   MockupStatement,
   Program,
   QueryStatement,
@@ -74,6 +75,7 @@ export class StoryModel {
   readonly rules: RuleStatement[] = [];
   readonly validations = new Map<string, ValidationStatement>();
   readonly entities = new Map<string, Set<string>>();
+  private readonly entityLocalIndex = new Map<string, Set<string>>();
   private readonly facts = new Map<string, Fact>();
   private snapshot: StoryModel | null = null;
 
@@ -94,6 +96,7 @@ export class StoryModel {
     clone.rules.push(...this.rules);
     for (const [id, validation] of this.validations) clone.validations.set(id, validation);
     for (const [id, traits] of this.entities) clone.entities.set(id, new Set(traits));
+    for (const [id, candidates] of this.entityLocalIndex) clone.entityLocalIndex.set(id, new Set(candidates));
     for (const [key, fact] of this.facts) clone.facts.set(key, fact);
     return clone;
   }
@@ -139,6 +142,9 @@ export class StoryModel {
             this.validateRule(statement);
             this.validateRulePurity(statement);
             this.rules.push(statement);
+            break;
+          case "namespace":
+            this.addNamespace(statement);
             break;
           case "entity":
             this.addEntity(statement);
@@ -213,12 +219,14 @@ export class StoryModel {
     for (const [id, v] of other.validations) this.validations.set(id, v);
     this.entities.clear();
     for (const [id, v] of other.entities) this.entities.set(id, new Set(v));
+    this.entityLocalIndex.clear();
+    for (const [id, v] of other.entityLocalIndex) this.entityLocalIndex.set(id, new Set(v));
     this.facts.clear();
     for (const [k, v] of other.facts) this.facts.set(k, v);
   }
 
   hasFact(relation: string, args: readonly GroundTerm[]): boolean {
-    return this.facts.has(factKey({ relation, args }));
+    return this.facts.has(factKey(this.normalizeFact({ relation, args })));
   }
 
   listFacts(relation?: string): Fact[] {
@@ -227,6 +235,7 @@ export class StoryModel {
   }
 
   assertFact(fact: Fact): readonly Fact[] {
+    fact = this.normalizeFact(fact);
     this.validateFact(fact);
     const retracted = this.applyCardinality(fact);
     this.facts.set(factKey(fact), fact);
@@ -234,30 +243,100 @@ export class StoryModel {
   }
 
   retractFact(fact: Fact): void {
+    fact = this.normalizeFact(fact);
     this.validateFact(fact);
     this.facts.delete(factKey(fact));
   }
 
   entityTraits(id: string): Set<string> {
-    const traits = this.entities.get(id);
+    const canonical = this.resolveEntityId(id);
+    const traits = this.entities.get(canonical);
     if (!traits) throw new LanguageModelError(`unknown entity '${id}'`);
     return new Set(traits);
   }
 
-  private addEntity(statement: EntityStatement): void {
-    if (this.entities.has(statement.id)) {
-      throw new LanguageModelError(`duplicate entity '${statement.id}'`);
+  resolveEntityId(id: string): string {
+    if (id.includes(".")) {
+      if (!this.entities.has(id)) throw new LanguageModelError(`unknown entity '${id}'`);
+      return id;
+    }
+    const candidates = this.entityLocalIndex.get(id);
+    if (!candidates || candidates.size === 0) throw new LanguageModelError(`unknown entity '${id}'`);
+    if (candidates.size > 1) {
+      throw new LanguageModelError(
+        `ambiguous entity '${id}' (${[...candidates].sort((a, b) => a.localeCompare(b)).join(", ")})`,
+      );
+    }
+    return [...candidates][0]!;
+  }
+
+  tryResolveEntityId(id: string): string | undefined {
+    try {
+      return this.resolveEntityId(id);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (!message.startsWith("unknown entity")) throw e;
+      return undefined;
+    }
+  }
+
+  displayEntityId(id: string): string {
+    const local = localEntityName(id);
+    const candidates = this.entityLocalIndex.get(local);
+    return candidates?.size === 1 ? local : id;
+  }
+
+  groundTermFromTerm(term: Term): GroundTerm {
+    return this.normalizeGroundTerm(groundTermFromTerm(term));
+  }
+
+  normalizeGroundTerm(term: GroundTerm): GroundTerm {
+    switch (term.kind) {
+      case "id":
+        return { kind: "id", id: this.tryResolveEntityId(term.id) ?? term.id };
+      case "relation":
+        return {
+          kind: "relation",
+          relation: term.relation,
+          args: term.args.map((arg) => this.normalizeGroundTerm(arg)),
+        };
+      case "number":
+      case "string":
+        return term;
+    }
+  }
+
+  private normalizeFact(fact: Fact): Fact {
+    return {
+      relation: fact.relation,
+      args: fact.args.map((arg) => this.normalizeGroundTerm(arg)),
+    };
+  }
+
+  private addNamespace(statement: NamespaceStatement): void {
+    for (const entity of statement.entities) this.addEntity(entity, statement.id);
+  }
+
+  private addEntity(statement: EntityStatement, namespace?: string): void {
+    const id = namespace ? `${namespace}.${statement.id}` : statement.id;
+    if (this.entities.has(id)) {
+      throw new LanguageModelError(`duplicate entity '${id}'`);
     }
     const traits = new Set<string>();
     for (const traitId of statement.traits) {
       this.requireTrait(traitId);
       traits.add(traitId);
     }
-    this.entities.set(statement.id, traits);
+    this.entities.set(id, traits);
+    const local = localEntityName(id);
+    const candidates = this.entityLocalIndex.get(local) ?? new Set<string>();
+    candidates.add(id);
+    this.entityLocalIndex.set(local, candidates);
   }
 
   private extendEntity(statement: ExtendStatement): void {
-    const traits = this.entities.get(statement.id);
+    const canonical = this.resolveEntityId(statement.id);
+    const traits = this.entities.get(canonical);
     if (!traits) throw new LanguageModelError(`unknown entity '${statement.id}'`);
     for (const traitId of statement.traits) {
       this.requireTrait(traitId);
@@ -267,7 +346,7 @@ export class StoryModel {
 
   private applySet(setEffects: readonly SetEffect[], sink: Effect[]): void {
     for (const setEffect of setEffects) {
-      const fact = factFromAtom(setEffect.atom);
+      const fact = this.groundFactFromAtom(setEffect.atom);
       if (setEffect.polarity === "assert") {
         for (const retracted of this.assertFact(fact)) {
           sink.push({ polarity: "retract", fact: retracted });
@@ -336,6 +415,15 @@ export class StoryModel {
     ) {
       throw new LanguageModelError(`duplicate callable '${statement.id}'`);
     }
+    if (statement.replace) {
+      if (!this.mockups.has(statement.id)) {
+        throw new LanguageModelError(
+          `replace mockup '${statement.id}' has no prior definition`,
+        );
+      }
+      this.mockups.set(statement.id, statement);
+      return;
+    }
     this.addUnique(this.mockups, statement.id, statement, "mockup");
   }
 
@@ -400,7 +488,7 @@ export class StoryModel {
     }
     for (const assertion of statement.assertions) {
       if (assertion.kind === "fact") {
-        this.validateFact(factFromAtom(assertion.atom));
+        this.validateFact(this.groundFactFromAtom(assertion.atom));
       } else if (assertion.kind === "play") {
         const action = this.actions.get(assertion.atom.relation);
         if (!action) throw new LanguageModelError(`unknown validation action '${assertion.atom.relation}'`);
@@ -410,7 +498,7 @@ export class StoryModel {
           );
         }
         for (const effect of assertion.expectedEffects ?? []) {
-          this.validateFact(factFromAtom(effect.atom));
+          this.validateFact(this.groundFactFromAtom(effect.atom));
         }
       }
     }
@@ -484,8 +572,15 @@ export class StoryModel {
       return;
     }
     if (type.id === "Any") return;
-    if (this.traits.has(type.id) || this.relations.has(type.id) || this.entities.has(type.id)) return;
+    if (this.traits.has(type.id) || this.relations.has(type.id) || this.tryResolveEntityId(type.id)) return;
     throw new LanguageModelError(`unknown type '${type.id}'`);
+  }
+
+  private groundFactFromAtom(atom: RelationAtom): Fact {
+    return {
+      relation: atom.relation,
+      args: atom.args.map((arg) => this.groundTermFromTerm(arg)),
+    };
   }
 
   private validateFact(fact: Fact): void {
@@ -515,6 +610,10 @@ export class StoryModel {
     if (this.traits.has(type.id)) {
       return value.kind === "id" && this.entities.get(value.id)?.has(type.id) === true;
     }
+    const entityId = this.tryResolveEntityId(type.id);
+    if (entityId) {
+      return value.kind === "id" && value.id === entityId;
+    }
     if (this.relations.has(type.id)) {
       if (value.kind !== "relation" || value.relation !== type.id) return false;
       this.validateFact({ relation: value.relation, args: value.args });
@@ -524,6 +623,9 @@ export class StoryModel {
   }
 
   private groundTermIsValid(value: GroundTerm): boolean {
+    if (value.kind === "id") {
+      this.resolveEntityId(value.id);
+    }
     if (value.kind === "relation") {
       this.validateFact({ relation: value.relation, args: value.args });
     }
@@ -578,6 +680,11 @@ function invertIndexes(length: number, indexes: readonly number[]): number[] {
 
 function sameProjection(left: Fact, right: Fact, indexes: readonly number[]): boolean {
   return indexes.every((index) => termKey(left.args[index]) === termKey(right.args[index]));
+}
+
+function localEntityName(id: string): string {
+  const dot = id.lastIndexOf(".");
+  return dot >= 0 ? id.slice(dot + 1) : id;
 }
 
 export function loadStoryProgram(source: string | Program): StoryModel {

@@ -7,7 +7,7 @@ import {
   selectMockupOption,
   type MockupMenuState,
 } from "./mockupState.js";
-import { buildAboutLines } from "../aboutText.js";
+import { buildAboutLines, type AboutLine } from "../aboutText.js";
 import type { PlaySession } from "./runner.js";
 import { MessagePanel } from "./MessagePanel.js";
 import { MenuPanel } from "./MenuPanel.js";
@@ -18,7 +18,7 @@ export interface PlayUiState {
   readonly selectedIndex: number;
   readonly lastResult?: language.LanguagePlayResult;
   readonly lastError?: string;
-  readonly lastInfo?: readonly string[];
+  readonly lastInfo?: readonly AboutLine[];
 }
 
 export const initialPlayUiState: PlayUiState = {

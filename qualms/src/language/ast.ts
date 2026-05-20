@@ -13,6 +13,7 @@ export type TopLevelStatement =
   | QueryStatement
   | MockupStatement
   | RuleStatement
+  | NamespaceStatement
   | EntityStatement
   | ExtendStatement
   | SetStatement
@@ -99,6 +100,7 @@ export interface MockupStatement {
   readonly title: readonly Term[];
   readonly detail: readonly MockupDetail[];
   readonly options: readonly MockupOption[];
+  readonly replace?: boolean;
 }
 
 export type MockupDetail = MockupBinding | MockupDetailLine;
@@ -141,6 +143,12 @@ export interface RuleStatement {
   readonly target: string;
   readonly parameters: readonly ParameterPattern[];
   readonly body: Block;
+}
+
+export interface NamespaceStatement {
+  readonly kind: "namespace";
+  readonly id: string;
+  readonly entities: readonly EntityStatement[];
 }
 
 export interface EntityStatement {

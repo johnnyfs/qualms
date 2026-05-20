@@ -21,10 +21,52 @@ describe("tutorial language parser", () => {
     expect(program.statements.filter((s) => s.kind === "case")).toHaveLength(0);
     expect(program.statements.filter((s) => s.kind === "mockup")).toHaveLength(14);
     expect(program.statements.filter((s) => s.kind === "rule")).toHaveLength(9);
-    expect(program.statements.filter((s) => s.kind === "entity")).toHaveLength(20);
+    expect(program.statements.filter((s) => s.kind === "namespace")).toHaveLength(1);
+    expect(program.statements.filter((s) => s.kind === "entity")).toHaveLength(17);
     expect(program.statements.filter((s) => s.kind === "extend")).toHaveLength(3);
     expect(program.statements.filter((s) => s.kind === "set")).toHaveLength(9);
     expect(program.statements.filter((s) => s.kind === "validation")).toHaveLength(1);
+  });
+
+  it("parses namespace blocks containing entity declarations", () => {
+    const program = parseProgram(`
+      trait Location
+      namespace ActOne {
+        entity Cell { Location }
+        entity Corridor { Location }
+      }
+    `);
+    const namespace = program.statements.find((s) => s.kind === "namespace");
+    expect(namespace).toEqual({
+      kind: "namespace",
+      id: "ActOne",
+      entities: [
+        { kind: "entity", id: "Cell", traits: ["Location"] },
+        { kind: "entity", id: "Corridor", traits: ["Location"] },
+      ],
+    });
+  });
+
+  it("parses qualified entity references", () => {
+    const program = parseProgram(`
+      trait Location
+      relation Path(Location, Location)
+      namespace ActOne { entity Cell { Location } }
+      namespace ActTwo { entity Cell { Location } }
+      set Path(ActOne.Cell, ActTwo.Cell)
+    `);
+    const set = program.statements.find((s) => s.kind === "set");
+    if (!set || set.kind !== "set") throw new Error("missing set");
+    expect(set.effects[0]?.atom.args).toEqual([
+      { kind: "identifier", id: "ActOne.Cell" },
+      { kind: "identifier", id: "ActTwo.Cell" },
+    ]);
+  });
+
+  it("rejects non-entity declarations inside namespace blocks", () => {
+    expect(() => parseProgram("namespace ActOne { trait Location }")).toThrow(
+      "namespace 'ActOne' can only contain entity declarations",
+    );
   });
 
   it("parses constrained action parameters", () => {

@@ -40,7 +40,7 @@ describe("engine-tracked effects", () => {
     // a separate effect (only explicit set/retract statements are tracked).
     expect(go.effects).toContainEqual({
       polarity: "assert",
-      fact: { relation: "At", args: [idTerm("Player"), idTerm("Corridor")] },
+      fact: { relation: "At", args: [idTerm("Player"), idTerm("ActOne.Corridor")] },
     });
   });
 

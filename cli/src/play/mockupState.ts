@@ -1,7 +1,6 @@
 import { language } from "@quealm/qualms";
 
 const {
-  groundTermFromTerm,
   languageRuntimeInternals,
   parseRelationAtom,
   playLanguageCall,
@@ -51,7 +50,7 @@ export function buildMockupFrame(
     };
   }
   const { mockup, env } = resolved;
-  const title = mockup.title.map((term) => renderTerm(term, env)).join(" ");
+  const title = mockup.title.map((term) => renderTerm(model, term, env)).join(" ");
   const headers = [title || mockup.id, ...renderDetails(model, mockup.detail, env)];
   return {
     headers,
@@ -65,7 +64,7 @@ export function selectMockupOption(
 ): MockupMenuTransition {
   let atom: language.RelationAtom;
   try {
-    atom = languageRuntimeInternals.groundAtom(option.targets[0]!, option.env);
+    atom = languageRuntimeInternals.groundAtom(model, option.targets[0]!, option.env);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     return { kind: "error", message };
@@ -110,11 +109,11 @@ function formatEffect(effect: language.Effect): string {
 }
 
 function formatFact(fact: language.Fact): string {
-  return `${fact.relation}(${fact.args.map(renderGroundTerm).join(", ")})`;
+  return `${fact.relation}(${fact.args.map((arg) => renderGroundTerm(undefined, arg)).join(", ")})`;
 }
 
 function formatEvent(event: language.LanguageEvent): string {
-  return `${event.event}(${event.args.map(renderGroundTerm).join(", ")})`;
+  return `${event.event}(${event.args.map((arg) => renderGroundTerm(undefined, arg)).join(", ")})`;
 }
 
 function resolveMockup(
@@ -123,7 +122,7 @@ function resolveMockup(
 ): { readonly mockup: language.MockupStatement; readonly env: Env } | undefined {
   const mockup = model.mockups.get(call.relation);
   if (!mockup) return undefined;
-  const args = call.args.map(groundTermFromTerm);
+  const args = call.args.map((arg) => model.groundTermFromTerm(arg));
   const envs = languageRuntimeInternals.bindParameters(model, mockup.parameters, args);
   const env = envs[0];
   return env ? { mockup, env } : undefined;
@@ -145,7 +144,7 @@ function renderDetails(
     const values: string[] = [];
     for (const match of matches) {
       const value = match[item.name];
-      if (value) values.push(renderGroundTerm(value));
+      if (value) values.push(renderGroundTerm(model, value));
     }
     const rendered = [...dedupe(values)].sort((a, b) => a.localeCompare(b));
     if (rendered.length > 0) lines.push(`${item.name}: ${rendered.join(", ")}`);
@@ -178,7 +177,7 @@ function renderOptions(
       const value = match[option.name];
       if (!value) continue;
       pushOption(rendered, seen, {
-        label: renderGroundTerm(value),
+        label: renderGroundTerm(model, value),
         targets: option.targets,
         env: match,
       });
@@ -204,7 +203,7 @@ function evalMockupBinding(
   if (expression.kind === "relation" && model.queries.has(expression.atom.relation)) {
     let atom: language.RelationAtom;
     try {
-      atom = languageRuntimeInternals.groundAtom(expression.atom, env);
+      atom = languageRuntimeInternals.groundAtom(model, expression.atom, env);
     } catch {
       return [];
     }
@@ -228,10 +227,10 @@ function renderDetailTerm(
   env: Env,
 ): string {
   if (term.kind === "relationInstance" && model.queries.has(term.atom.relation)) {
-    const values = evalQueryTerm(model, term.atom, env).map(renderGroundTerm);
+    const values = evalQueryTerm(model, term.atom, env).map((value) => renderGroundTerm(model, value));
     return [...dedupe(values)].sort((a, b) => a.localeCompare(b)).join(", ");
   }
-  return renderTerm(term, env);
+  return renderTerm(model, term, env);
 }
 
 function evalQueryTerm(
@@ -241,7 +240,7 @@ function evalQueryTerm(
 ): readonly language.GroundTerm[] {
   let grounded: language.RelationAtom;
   try {
-    grounded = languageRuntimeInternals.groundAtom(atom, env);
+    grounded = languageRuntimeInternals.groundAtom(model, atom, env);
   } catch {
     return [];
   }
@@ -285,20 +284,21 @@ function nextMockupState(
   env: Env,
 ): MockupMenuState | undefined {
   for (const target of targets) {
-    const atom = languageRuntimeInternals.groundAtom(target, env);
+    const atom = languageRuntimeInternals.groundAtom(model, target, env);
     if (model.mockups.has(atom.relation)) return { call: atom };
   }
   return undefined;
 }
 
-function renderTerm(term: language.Term, env: Env): string {
-  const resolved = languageRuntimeInternals.resolveTerm(term, env);
-  return resolved ? renderGroundTerm(resolved) : emitTerm(term);
+function renderTerm(model: language.StoryModel, term: language.Term, env: Env): string {
+  const resolved = languageRuntimeInternals.resolveTerm(model, term, env);
+  return resolved ? renderGroundTerm(model, resolved) : emitTerm(term);
 }
 
-function renderGroundTerm(term: language.GroundTerm): string {
+function renderGroundTerm(model: language.StoryModel | undefined, term: language.GroundTerm): string {
   if (term.kind === "string") return term.value;
-  return languageRuntimeInternals.emitGroundTerm(term);
+  if (term.kind === "id" && model) return model.displayEntityId(term.id);
+  return languageRuntimeInternals.emitGroundTerm(term, model);
 }
 
 function emitTerm(term: language.Term): string {

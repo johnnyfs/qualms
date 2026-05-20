@@ -14,6 +14,7 @@ import type {
   MockupDetail,
   MockupOption,
   MockupStatement,
+  NamespaceStatement,
   ParameterPattern,
   QueryStatement,
   ReplaceActionCaseStatement,
@@ -45,6 +46,7 @@ type TokenType =
   | "rbrace"
   | "comma"
   | "colon"
+  | "dot"
   | "semi"
   | "bang"
   | "question"
@@ -196,6 +198,7 @@ function tokenize(source: string): Token[] {
       "}": "rbrace",
       ",": "comma",
       ":": "colon",
+      ".": "dot",
       ";": "semi",
       "!": "bang",
       "?": "question",
@@ -263,6 +266,7 @@ class Parser {
     if (this.matchKeyword("mockup")) return this.mockupStatement();
     if (this.matchKeyword("before")) return this.ruleStatement("before");
     if (this.matchKeyword("after")) return this.ruleStatement("after");
+    if (this.matchKeyword("namespace")) return this.namespaceStatement();
     if (this.matchKeyword("entity")) return this.entityStatement();
     if (this.matchKeyword("extend")) return this.extendStatement();
     if (this.matchKeyword("set")) return this.setStatement();
@@ -282,7 +286,7 @@ class Parser {
     this.fail(`expected top-level statement, got '${this.peek().image}'`);
   }
 
-  private replaceStatement(): CallableStatement | ValidationStatement | ReplaceActionCaseStatement {
+  private replaceStatement(): CallableStatement | ValidationStatement | ReplaceActionCaseStatement | MockupStatement {
     this.expectKeyword("replace");
     if (this.matchKeyword("case")) {
       return this.replaceActionCaseStatement();
@@ -293,11 +297,14 @@ class Parser {
     if (this.matchKeyword("predicate")) {
       return { ...this.callableStatement("predicate"), replace: true };
     }
+    if (this.matchKeyword("mockup")) {
+      return { ...this.mockupStatement(), replace: true };
+    }
     if (this.matchKeyword("validation")) {
       return { ...this.validationStatement(), replace: true };
     }
     this.fail(
-      `expected 'case', 'action', 'predicate', or 'validation' after 'replace', got '${this.peek().image}'`,
+      `expected 'case', 'action', 'predicate', 'mockup', or 'validation' after 'replace', got '${this.peek().image}'`,
     );
   }
 
@@ -569,9 +576,27 @@ class Parser {
     return { kind: "entity", id, traits: this.traitSet() };
   }
 
+  private namespaceStatement(): NamespaceStatement {
+    this.expectKeyword("namespace");
+    const id = this.identifier();
+    this.expect("lbrace");
+    const entities: EntityStatement[] = [];
+    while (!this.at("rbrace")) {
+      this.skipSemis();
+      if (this.at("rbrace")) break;
+      if (!this.matchKeyword("entity")) {
+        this.fail(`namespace '${id}' can only contain entity declarations`);
+      }
+      entities.push(this.entityStatement());
+      this.skipSemis();
+    }
+    this.expect("rbrace");
+    return { kind: "namespace", id, entities };
+  }
+
   private extendStatement(): ExtendStatement {
     this.expectKeyword("extend");
-    const id = this.identifier();
+    const id = this.qualifiedIdentifier();
     return { kind: "extend", id, traits: this.traitSet() };
   }
 
@@ -896,7 +921,7 @@ class Parser {
       return { kind: "variable", id: this.identifier() };
     }
 
-    const id = this.identifier();
+    const id = this.qualifiedIdentifier();
     if (this.at("lparen")) {
       this.expect("lparen");
       const args: Term[] = [];
@@ -917,12 +942,19 @@ class Parser {
       this.expect("rparen");
       return types.length === 1 ? types[0]! : { kind: "intersection", types };
     }
-    return { kind: "named", id: this.identifier() };
+    return { kind: "named", id: this.qualifiedIdentifier() };
   }
 
   private identifier(): string {
     const token = this.expect("identifier");
     return token.image;
+  }
+
+  private qualifiedIdentifier(): string {
+    const head = this.identifier();
+    if (!this.consumeIf("dot")) return head;
+    const tail = this.identifier();
+    return `${head}.${tail}`;
   }
 
   private skipSemis(): void {

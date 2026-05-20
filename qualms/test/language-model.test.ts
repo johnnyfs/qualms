@@ -29,6 +29,8 @@ describe("tutorial language model", () => {
     expect(model.rules).toHaveLength(9);
     expect(model.validations.size).toBe(1);
     expect(model.entities.size).toBe(20);
+    expect(model.entities.has("ActOne.Cell")).toBe(true);
+    expect(model.entities.has("Cell")).toBe(false);
     expect(model.listFacts()).toHaveLength(28);
     expect(model.hasFact("TalksAbout", [idTerm("Guard"), idTerm("Bribery")])).toBe(false);
     expect(model.hasFact("TalksAbout", [idTerm("Guard"), idTerm("Whatever")])).toBe(true);
@@ -45,6 +47,40 @@ describe("tutorial language model", () => {
       ]),
     ).toBe(true);
     expect(model.hasFact("Locked", [idTerm("Bars")])).toBe(true);
+  });
+
+  it("resolves unambiguous namespaced entity references", () => {
+    const model = loadStoryProgram(`
+      trait Location
+      relation Path(Location, Location)
+      namespace ActOne {
+        entity Cell { Location }
+        entity Corridor { Location }
+      }
+      set Path(Cell, Corridor)
+    `);
+
+    expect(model.hasFact("Path", [idTerm("ActOne.Cell"), idTerm("ActOne.Corridor")])).toBe(true);
+    expect(model.hasFact("Path", [idTerm("Cell"), idTerm("Corridor")])).toBe(true);
+  });
+
+  it("requires qualified references when local entity names are ambiguous", () => {
+    expect(() => loadStoryProgram(`
+      trait Location
+      relation Seen(Location)
+      namespace ActOne { entity Cell { Location } }
+      namespace ActTwo { entity Cell { Location } }
+      set Seen(Cell)
+    `)).toThrow("ambiguous entity 'Cell' (ActOne.Cell, ActTwo.Cell)");
+
+    const model = loadStoryProgram(`
+      trait Location
+      relation Seen(Location)
+      namespace ActOne { entity Cell { Location } }
+      namespace ActTwo { entity Cell { Location } }
+      set Seen(ActTwo.Cell)
+    `);
+    expect(model.hasFact("Seen", [idTerm("ActTwo.Cell")])).toBe(true);
   });
 
   it("rejects unknown traits and relations during model load", () => {

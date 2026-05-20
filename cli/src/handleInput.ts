@@ -15,12 +15,12 @@ export function handleInput(model: StoryModel, source: string): TranscriptEntry[
   switch (classification.kind) {
     case "call": {
       const result = evalLanguageAtom(model, classification.atom);
-      return formatPlayResult(result);
+      return formatPlayResult(result, model);
     }
     case "program": {
       try {
         const effects = model.apply(classification.program);
-        return formatProgramEffects(effects);
+        return formatProgramEffects(effects, model);
       } catch (e) {
         const message =
           e instanceof LanguageModelError ? e.message : e instanceof Error ? e.message : String(e);

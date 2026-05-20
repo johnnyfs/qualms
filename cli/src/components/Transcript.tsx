@@ -26,7 +26,7 @@ function entryColor(entry: TranscriptEntry): string | undefined {
 }
 
 function entryBold(entry: TranscriptEntry): boolean {
-  return entry.kind === "title";
+  return entry.kind === "title" || Boolean(entry.bold);
 }
 
 export function Transcript({ entries }: Props) {

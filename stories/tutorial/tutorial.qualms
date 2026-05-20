@@ -4,6 +4,14 @@
 -- to the seam between the domain of the story specification and the
 -- domain of the simulator (ie, game engine) that hosts it.
 
+-- Principles of design
+-- 1. Minimize coupling: introduce new traits and relations for each
+-- distinct behavior. Avoid editing existing rules to accomodate new
+-- concepts, instead introduce before or after rules to augment the
+-- behavior of existing rules.
+-- 2. Minimize new definitions: if a new behavior can be expressed
+-- in terms of existing behaviors, prefer to do so.
+
 -- (1) Minimal location
 -- Introduces: traits, relations, actions, entities, and the set statement.
 
@@ -37,11 +45,16 @@ action Go(actor: (Actor & Locatable) { At(actor, ?here) }, target: Location) {
 
 -- Entities aggregate traits. Actions can be applied to entities whose traits
 -- match the argument patterns.
-entity Cell { Location }
-entity Corridor { Location }
-entity Outside { Location }
-
 entity Player { Actor, Locatable }
+
+-- Namespaces group entity declarations so local names only need to be unique
+-- within the namespace. References like Cell remain valid while unambiguous;
+-- use ActOne.Cell if another namespace later defines its own Cell.
+namespace ActOne {
+  entity Cell { Location }
+  entity Corridor { Location }
+  entity Outside { Location }
+}
 
 -- `set` causes a relation to be true. It can be applied to a single relation
 -- or to a block enclosed in `{}`. Multiple relations are delimited with `;`.

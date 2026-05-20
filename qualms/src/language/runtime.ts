@@ -86,13 +86,13 @@ export function playLanguageCall(
   const atom = typeof call === "string" ? parseRelationAtom(call) : call;
   const callable = model.actions.get(atom.relation);
   if (!callable) {
-    return failResult([`!${emitRelationAtom(atom, {})}`], [], [], {
+    return failResult([`!${emitRelationAtom(undefined, atom, {})}`], [], [], {
       kind: "unknown_action",
       callable: atom.relation,
     });
   }
 
-  const args = atom.args.map(groundTermFromTerm);
+  const args = atom.args.map((arg) => model.groundTermFromTerm(arg));
   const working = model.clone();
   const effects: Effect[] = [];
   const events: LanguageEvent[] = [];
@@ -147,7 +147,7 @@ export function playLanguageQuery(
       status: "failed",
       bindings: [],
       outputs: [],
-      reasons: [`!${emitRelationAtom(atom, {})}`],
+      reasons: [`!${emitRelationAtom(undefined, atom, {})}`],
       failures: [
         {
           kind: "unknown_action",
@@ -158,7 +158,7 @@ export function playLanguageQuery(
     };
   }
 
-  const args = atom.args.map(groundTermFromTerm);
+  const args = atom.args.map((arg) => model.groundTermFromTerm(arg));
   const effects: Effect[] = [];
   const events: LanguageEvent[] = [];
   const bound = bindParameters(model, query.parameters, args, effects, events, options);
@@ -173,7 +173,7 @@ export function playLanguageQuery(
       status: "failed",
       bindings: [],
       outputs,
-      reasons: [`!${emitRelationAtom(atom, {})}`],
+      reasons: [`!${emitRelationAtom(undefined, atom, {})}`],
       failures: [
         {
           kind: "action_failed",
@@ -286,8 +286,8 @@ function evaluateValidationAssertion(
       const matched = model.hasFact(fact.relation, fact.args);
       if (assertion.negate ? !matched : matched) return undefined;
       return assertion.negate
-        ? `expected fact to be absent: ${emitRelationAtom(assertion.atom, {})}`
-        : `expected fact: ${emitRelationAtom(assertion.atom, {})}`;
+        ? `expected fact to be absent: ${emitRelationAtom(model, assertion.atom, {})}`
+        : `expected fact: ${emitRelationAtom(model, assertion.atom, {})}`;
     }
     case "query": {
       const matches = evalExpression(model, assertion.expression, {}, [], [], options);
@@ -296,16 +296,16 @@ function evaluateValidationAssertion(
         : matches.length > 0;
       if (assertion.negate ? !matched : matched) return undefined;
       if (assertion.expectedBindings) {
-        return `expected query bindings: ${emitExpression(assertion.expression, {})}`;
+        return `expected query bindings: ${emitExpression(model, assertion.expression, {})}`;
       }
       return assertion.negate
-        ? `expected query to have no matches: ${emitExpression(assertion.expression, {})}`
-        : `expected query to match: ${emitExpression(assertion.expression, {})}`;
+        ? `expected query to have no matches: ${emitExpression(model, assertion.expression, {})}`
+        : `expected query to match: ${emitExpression(model, assertion.expression, {})}`;
     }
     case "play": {
       const result = playLanguageCall(model.clone(), assertion.atom, options);
       if (result.status !== assertion.expected) {
-        return `expected play ${emitRelationAtom(assertion.atom, {})} to ${assertion.expected}, got ${result.status}`;
+        return `expected play ${emitRelationAtom(model, assertion.atom, {})} to ${assertion.expected}, got ${result.status}`;
       }
       if (assertion.expectedEffects) {
         const expected = assertion.expectedEffects.map((effect) => ({
@@ -313,14 +313,14 @@ function evaluateValidationAssertion(
           fact: factFromAtom(effect.atom),
         }));
         if (!sameEffects(result.effects, expected)) {
-          return `expected play ${emitRelationAtom(assertion.atom, {})} effects to match`;
+          return `expected play ${emitRelationAtom(model, assertion.atom, {})} effects to match`;
         }
       }
       if (assertion.expectedReasons) {
-        const expectedReasons = assertion.expectedReasons.map((reason) => emitExpression(reason, {}));
+        const expectedReasons = assertion.expectedReasons.map((reason) => emitExpression(model, reason, {}));
         const missing = expectedReasons.filter((reason) => !result.reasons.includes(reason));
         if (missing.length > 0) {
-          return `expected play ${emitRelationAtom(assertion.atom, {})} reasons to include ${missing.join(", ")}`;
+          return `expected play ${emitRelationAtom(model, assertion.atom, {})} reasons to include ${missing.join(", ")}`;
         }
       }
       return undefined;
@@ -432,7 +432,7 @@ function executeActionCallable(
     env: {},
     reasons: failureReasons.length > 0
       ? failureReasons
-      : [`!${callable.id}(${args.map(emitGroundTerm).join(", ")})`],
+      : [`!${callable.id}(${args.map((arg) => emitGroundTerm(model, arg)).join(", ")})`],
     callable: callable.id,
   };
 }
@@ -517,7 +517,7 @@ function executePredicateCallable(
   return {
     status: "failed",
     env: {},
-    reasons: [`!${callable.id}(${args.map(emitGroundTerm).join(", ")})`],
+    reasons: [`!${callable.id}(${args.map((arg) => emitGroundTerm(model, arg)).join(", ")})`],
     callable: callable.id,
   };
 }
@@ -606,7 +606,7 @@ function explainParameterBinding(
   callableId: string,
 ): string[] {
   if (patterns.length !== args.length) {
-    return [`!${callableId}(${args.map(emitGroundTerm).join(", ")})`];
+    return [`!${callableId}(${args.map((arg) => emitGroundTerm(model, arg)).join(", ")})`];
   }
   let envs: Env[] = [{}];
   const reasons: string[] = [];
@@ -621,7 +621,7 @@ function explainParameterBinding(
       }
       const named = pattern.name ? bindName(pattern.name, arg, env) : env;
       if (!named) {
-        reasons.push(`!${pattern.name} == ${emitGroundTerm(arg)}`);
+        reasons.push(`!${pattern.name} == ${emitGroundTerm(model, arg)}`);
         continue;
       }
       let constrained = [named];
@@ -643,7 +643,7 @@ function explainParameterBinding(
   }
   return reasons.length > 0
     ? reasons
-    : [`!${callableId}(${args.map(emitGroundTerm).join(", ")})`];
+    : [`!${callableId}(${args.map((arg) => emitGroundTerm(model, arg)).join(", ")})`];
 }
 
 function explainTypeMismatch(
@@ -656,7 +656,7 @@ function explainTypeMismatch(
       matchesType(model, value, inner) ? [] : explainTypeMismatch(model, value, inner),
     );
   }
-  return [`!${type.id}(${emitGroundTerm(value)})`];
+  return [`!${type.id}(${emitGroundTerm(model, value)})`];
 }
 
 function executeBlock(
@@ -698,7 +698,7 @@ function executeBodyStatement(
       applySet(model, statement, env, effects);
       return { status: "passed", env, reasons: [] };
     case "emit":
-      applyEmit(statement.atom, env, events);
+      applyEmit(model, statement.atom, env, events);
       return { status: "passed", env, reasons: [] };
     case "succeed":
       return { status: "passed", env, reasons: [], terminal: "succeed" };
@@ -725,7 +725,7 @@ function executeWhen(
     if (body.status === "failed" && body.terminal === "fail") {
       return {
         ...body,
-        reasons: explainPositiveCondition(statement.condition, match),
+        reasons: explainPositiveCondition(statement.condition, match, model),
       };
     }
     if (body.status === "passed") return body;
@@ -735,8 +735,11 @@ function executeWhen(
 
 function applySet(model: StoryModel, statement: SetStatement, env: Env, effects: Effect[]): void {
   for (const setEffect of statement.effects) {
-    const atom = groundAtom(setEffect.atom, env);
-    const fact = factFromAtom(atom);
+    const atom = groundAtom(model, setEffect.atom, env);
+    const fact = {
+      relation: atom.relation,
+      args: atom.args.map((arg) => model.groundTermFromTerm(arg)),
+    };
     if (setEffect.polarity === "assert") {
       for (const retracted of model.assertFact(fact)) {
         effects.push({ polarity: "retract", fact: retracted });
@@ -748,9 +751,9 @@ function applySet(model: StoryModel, statement: SetStatement, env: Env, effects:
   }
 }
 
-function applyEmit(atom: RelationAtom, env: Env, events: LanguageEvent[]): void {
-  const grounded = groundAtom(atom, env);
-  events.push({ event: grounded.relation, args: grounded.args.map(groundTermFromTerm) });
+function applyEmit(model: StoryModel, atom: RelationAtom, env: Env, events: LanguageEvent[]): void {
+  const grounded = groundAtom(model, atom, env);
+  events.push({ event: grounded.relation, args: grounded.args.map((arg) => model.groundTermFromTerm(arg)) });
 }
 
 function commitEffects(model: StoryModel, effects: readonly Effect[]): void {
@@ -785,8 +788,8 @@ function evalExpression(
       ]);
     }
     case "equal": {
-      const left = resolveTerm(expression.left, env);
-      const right = resolveTerm(expression.right, env);
+      const left = resolveTerm(model, expression.left, env);
+      const right = resolveTerm(model, expression.right, env);
       if (left && right) return termKey(left) === termKey(right) ? [env] : [];
       if (!left && right && expression.left.kind === "variable") {
         const bound = bindName(expression.left.id, right, env);
@@ -811,14 +814,14 @@ function evalRelation(
 ): Env[] {
   const externalPredicate = model.externalPredicates.get(atom.relation);
   if (externalPredicate) {
-    const args = atom.args.map((term) => resolveTerm(term, env));
+    const args = atom.args.map((term) => resolveTerm(model, term, env));
     if (args.some((arg) => arg === undefined)) return [];
     return options.host?.evalPredicate({ predicate: atom.relation, args: args as GroundTerm[] }) ? [env] : [];
   }
 
   const predicate = model.predicates.get(atom.relation);
   if (predicate) {
-    const args = atom.args.map((term) => resolveTerm(term, env));
+    const args = atom.args.map((term) => resolveTerm(model, term, env));
     if (args.some((arg) => arg === undefined)) return [];
     const result = executeCallable(model, predicate, args as GroundTerm[], "predicate", effects, events, options);
     // Predicate parameter names live in the predicate's own scope; the
@@ -838,7 +841,7 @@ function matchAtom(atom: RelationAtom, fact: Fact, env: Env, model: StoryModel):
   if (atom.args.length !== fact.args.length) return undefined;
   let current = env;
   for (let i = 0; i < atom.args.length; i++) {
-    const next = matchTerm(atom.args[i]!, fact.args[i]!, current);
+    const next = matchTerm(model, atom.args[i]!, fact.args[i]!, current);
     if (!next) return undefined;
     current = next;
   }
@@ -856,12 +859,12 @@ function referenceFactsExist(value: GroundTerm, model: StoryModel): boolean {
   return value.args.every((arg) => referenceFactsExist(arg, model));
 }
 
-function matchTerm(pattern: Term, value: GroundTerm, env: Env): Env | undefined {
+function matchTerm(model: StoryModel, pattern: Term, value: GroundTerm, env: Env): Env | undefined {
   switch (pattern.kind) {
     case "wildcard":
       return env;
     case "identifier":
-      return matchIdentifier(pattern.id, value, env);
+      return matchIdentifier(model, pattern.id, value, env);
     case "variable":
       return bindName(pattern.id, value, env);
     case "string":
@@ -873,7 +876,7 @@ function matchTerm(pattern: Term, value: GroundTerm, env: Env): Env | undefined 
       if (value.args.length !== pattern.atom.args.length) return undefined;
       let current = env;
       for (let i = 0; i < pattern.atom.args.length; i++) {
-        const next = matchTerm(pattern.atom.args[i]!, value.args[i]!, current);
+        const next = matchTerm(model, pattern.atom.args[i]!, value.args[i]!, current);
         if (!next) return undefined;
         current = next;
       }
@@ -888,16 +891,17 @@ function bindName(name: string, value: GroundTerm, env: Env): Env | undefined {
   return { ...env, [name]: value };
 }
 
-function matchIdentifier(name: string, value: GroundTerm, env: Env): Env | undefined {
+function matchIdentifier(model: StoryModel, name: string, value: GroundTerm, env: Env): Env | undefined {
   const existing = env[name];
   if (existing) return termKey(existing) === termKey(value) ? env : undefined;
-  return value.kind === "id" && value.id === name ? env : undefined;
+  const expected = model.tryResolveEntityId(name) ?? name;
+  return value.kind === "id" && value.id === expected ? env : undefined;
 }
 
-function resolveTerm(term: Term, env: Env): GroundTerm | undefined {
+function resolveTerm(model: StoryModel, term: Term, env: Env): GroundTerm | undefined {
   switch (term.kind) {
     case "identifier":
-      return env[term.id] ?? { kind: "id", id: term.id };
+      return env[term.id] ?? model.normalizeGroundTerm({ kind: "id", id: term.id });
     case "variable":
       return env[term.id];
     case "wildcard":
@@ -907,19 +911,19 @@ function resolveTerm(term: Term, env: Env): GroundTerm | undefined {
     case "number":
       return { kind: "number", value: term.value };
     case "relationInstance": {
-      const args = term.atom.args.map((arg) => resolveTerm(arg, env));
+      const args = term.atom.args.map((arg) => resolveTerm(model, arg, env));
       if (args.some((arg) => arg === undefined)) return undefined;
       return { kind: "relation", relation: term.atom.relation, args: args as GroundTerm[] };
     }
   }
 }
 
-function groundAtom(atom: RelationAtom, env: Env): RelationAtom {
+function groundAtom(model: StoryModel, atom: RelationAtom, env: Env): RelationAtom {
   return {
     relation: atom.relation,
     args: atom.args.map((term) => {
-      const resolved = resolveTerm(term, env);
-      if (!resolved) throw new Error(`cannot ground '${emitTerm(term, env)}'`);
+      const resolved = resolveTerm(model, term, env);
+      if (!resolved) throw new Error(`cannot ground '${emitTerm(model, term, env)}'`);
       return termFromGround(resolved);
     }),
   };
@@ -953,9 +957,10 @@ function matchesType(model: StoryModel, value: GroundTerm, type: TypeExpr): bool
     if (value.kind !== "relation" || value.relation !== type.id) return false;
     return referenceFactsExist(value, model);
   }
-  if (model.entities.has(type.id)) {
+  const entityId = model.tryResolveEntityId(type.id);
+  if (entityId) {
     // Entity-literal slot: parameter only binds when the arg is this entity.
-    return value.kind === "id" && value.id === type.id;
+    return value.kind === "id" && value.id === entityId;
   }
   return false;
 }
@@ -969,7 +974,7 @@ function explainExpression(model: StoryModel, expression: Expression, env: Env):
     case "relation": {
       const predicate = model.predicates.get(expression.atom.relation);
       if (predicate) {
-        const args = expression.atom.args.map((term) => resolveTerm(term, env));
+        const args = expression.atom.args.map((term) => resolveTerm(model, term, env));
         if (args.every((arg) => arg !== undefined)) {
           const result = executeCallable(model, predicate, args as GroundTerm[], "predicate", discard, [], {});
           if (result.status === "failed" && result.reasons.length > 0) {
@@ -977,10 +982,10 @@ function explainExpression(model: StoryModel, expression: Expression, env: Env):
           }
         }
       }
-      return [`!${emitRelationAtom(expression.atom, env)}`];
+      return [`!${emitRelationAtom(model, expression.atom, env)}`];
     }
     case "not":
-      return explainPositiveCondition(expression.operand, env);
+      return explainPositiveCondition(expression.operand, env, model);
     case "binary":
       if (expression.op === "|") {
         return [
@@ -995,12 +1000,12 @@ function explainExpression(model: StoryModel, expression: Expression, env: Env):
         explainExpression(model, expression.right, leftEnv),
       );
     case "equal":
-      return [`!${emitExpression(expression, env)}`];
+      return [`!${emitExpression(model, expression, env)}`];
   }
 }
 
-function explainPositiveCondition(expression: Expression, env: Env): string[] {
-  return [emitExpression(expression, env)];
+function explainPositiveCondition(expression: Expression, env: Env, model?: StoryModel): string[] {
+  return [emitExpression(model, expression, env)];
 }
 
 function failResult(
@@ -1029,39 +1034,59 @@ function dedupeEnvs(envs: Env[]): Env[] {
   return out;
 }
 
-function emitExpression(expression: Expression, env: Env): string {
+function emitExpression(model: StoryModel | undefined, expression: Expression, env: Env): string {
   switch (expression.kind) {
     case "relation":
-      return emitRelationAtom(expression.atom, env);
+      return emitRelationAtom(model, expression.atom, env);
     case "not":
-      return `!${emitExpression(expression.operand, env)}`;
+      return `!${emitExpression(model, expression.operand, env)}`;
     case "binary":
-      return `${emitExpression(expression.left, env)} ${expression.op} ${emitExpression(expression.right, env)}`;
+      return `${emitExpression(model, expression.left, env)} ${expression.op} ${emitExpression(model, expression.right, env)}`;
     case "equal":
-      return `${emitTerm(expression.left, env)} == ${emitTerm(expression.right, env)}`;
+      return `${emitTerm(model, expression.left, env)} == ${emitTerm(model, expression.right, env)}`;
   }
 }
 
-function emitRelationAtom(atom: RelationAtom, env: Env): string {
-  return `${atom.relation}(${atom.args.map((arg) => emitTerm(arg, env)).join(", ")})`;
+function emitRelationAtom(model: StoryModel | undefined, atom: RelationAtom, env: Env): string {
+  return `${atom.relation}(${atom.args.map((arg) => emitTerm(model, arg, env)).join(", ")})`;
 }
 
-function emitTerm(term: Term, env: Env): string {
+function emitTerm(model: StoryModel | undefined, term: Term, env: Env): string {
   if (term.kind === "variable" && !env[term.id]) return `?${term.id}`;
-  const resolved = resolveTerm(term, env);
-  return resolved ? emitGroundTerm(resolved) : "_";
+  const resolved = model ? resolveTerm(model, term, env) : resolveTermWithoutModel(term, env);
+  return resolved ? emitGroundTerm(model, resolved) : "_";
 }
 
-function emitGroundTerm(term: GroundTerm): string {
+function resolveTermWithoutModel(term: Term, env: Env): GroundTerm | undefined {
+  switch (term.kind) {
+    case "identifier":
+      return env[term.id] ?? { kind: "id", id: term.id };
+    case "variable":
+      return env[term.id];
+    case "wildcard":
+      return undefined;
+    case "string":
+      return { kind: "string", value: term.value };
+    case "number":
+      return { kind: "number", value: term.value };
+    case "relationInstance": {
+      const args = term.atom.args.map((arg) => resolveTermWithoutModel(arg, env));
+      if (args.some((arg) => arg === undefined)) return undefined;
+      return { kind: "relation", relation: term.atom.relation, args: args as GroundTerm[] };
+    }
+  }
+}
+
+function emitGroundTerm(model: StoryModel | undefined, term: GroundTerm): string {
   switch (term.kind) {
     case "id":
-      return term.id;
+      return model ? model.displayEntityId(term.id) : term.id;
     case "string":
       return JSON.stringify(term.value);
     case "number":
       return String(term.value);
     case "relation":
-      return `${term.relation}(${term.args.map(emitGroundTerm).join(", ")})`;
+      return `${term.relation}(${term.args.map((arg) => emitGroundTerm(model, arg)).join(", ")})`;
   }
 }
 
@@ -1075,5 +1100,5 @@ export const languageRuntimeInternals = {
   ): Env[] => bindParameters(model, patterns, args, [], [], {}),
   groundAtom,
   resolveTerm,
-  emitGroundTerm,
+  emitGroundTerm: (term: GroundTerm, model?: StoryModel): string => emitGroundTerm(model, term),
 };

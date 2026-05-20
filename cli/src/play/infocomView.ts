@@ -44,7 +44,8 @@ export const infocomView: View = {
     out.push({ kind: "title", text: ctx.names.titleName(location) });
     out.push(BLANK);
 
-    const desc = ctx.config.descriptions.get(location);
+    const desc = ctx.config.descriptions.get(location) ??
+      ctx.config.descriptions.get(ctx.model.displayEntityId(location));
     if (desc) {
       out.push({ kind: "narrative", text: desc });
       out.push(BLANK);
@@ -54,7 +55,8 @@ export const infocomView: View = {
     const presentations: string[] = [];
     for (const id of visible.ids) {
       if (id === location) continue;
-      const presentation = ctx.config.presentations.get(id);
+      const presentation = ctx.config.presentations.get(id) ??
+        ctx.config.presentations.get(ctx.model.displayEntityId(id));
       if (presentation) presentations.push(presentation);
     }
     for (let i = 0; i < presentations.length; i++) {

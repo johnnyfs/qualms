@@ -28,6 +28,7 @@ import {
   type CoauthorSession,
 } from "./coauthor/runner.js";
 import { buildAboutLines } from "./aboutText.js";
+import { defaultSaveTarget, saveStoryModel } from "./persistence.js";
 
 type Mode = "dsl" | "play" | "coauthor";
 
@@ -42,6 +43,8 @@ const DSL_HELP_LINES: readonly string[] = [
   "statement (set { ... }, entity Foo { ... }), or a slash command:",
   "  /help        show this help",
   "  /about       explain what Qualms is for",
+  "  /save        persist the current model to the loaded file or /save <path>",
+  "  /revert      restore the last saved model in memory",
   "  /show        print the current model counts",
   "  /reload      re-load the original story file(s)",
   "  /mode <m>    switch mode (play | coauthor | dsl); shift-tab also cycles",
@@ -58,6 +61,8 @@ const COAUTHOR_HELP_LINES: readonly string[] = [
   "Coauthor mode — describe a change in natural language. The agent",
   "runs queries, plays actions, and applies DSL mutations against the",
   "live model. All tool calls stream as pure DSL.",
+  "  /save        persist the current model to the loaded file or /save <path>",
+  "  /revert      restore the last saved model in memory",
   "  /cancel      abort an in-flight agent turn or pending question",
   "  /about       explain what Qualms is for",
   "  /mode dsl    switch back to DSL mode (shift-tab also cycles)",
@@ -71,6 +76,8 @@ export function App({
 }: AppProps) {
   const { exit } = useApp();
   const [model, setModel] = useState(initialModel);
+  const savedModelRef = useRef(initialModel.clone());
+  const saveTargetRef = useRef<string | undefined>(defaultSaveTarget(storyPaths));
   const [mode, setMode] = useState<Mode>("play");
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [playUiState, setPlayUiState] = useState<PlayUiState>(initialPlayUiState);
@@ -131,7 +138,34 @@ export function App({
           if (mode === "play") {
             return [{ kind: "error", text: "/about is only available in DSL and coauthor modes" }];
           }
-          return buildAboutLines(mode).map((text) => ({ kind: "info", text }) as TranscriptEntry);
+          return buildAboutLines(mode).map((line) => ({
+            kind: "info",
+            text: line.text,
+            bold: line.bold,
+          })) as TranscriptEntry[];
+        case "/save": {
+          const explicit = parts.slice(1).join(" ").trim();
+          const target = explicit.length > 0 ? explicit : saveTargetRef.current;
+          if (!target) {
+            return [{ kind: "error", text: "usage: /save <path> (no default save target is available)" }];
+          }
+          try {
+            const absolutePath = saveStoryModel(model, target);
+            savedModelRef.current = model.clone();
+            saveTargetRef.current = absolutePath;
+            return [{ kind: "info", text: `saved to ${absolutePath}` }];
+          } catch (e) {
+            const message = e instanceof Error ? e.message : String(e);
+            return [{ kind: "error", text: `error: ${message}` }];
+          }
+        }
+        case "/revert": {
+          setModel(savedModelRef.current.clone());
+          setPlayUiState(initialPlayUiState);
+          setPendingQuestion(null);
+          coauthorSessionRef.current = null;
+          return [{ kind: "info", text: "reverted to the last saved model" }];
+        }
         case "/show":
           return [
             {
@@ -146,6 +180,8 @@ export function App({
           try {
             const reloaded = loadStories(storyPaths);
             setModel(reloaded.model);
+            savedModelRef.current = reloaded.model.clone();
+            saveTargetRef.current = defaultSaveTarget(reloaded.resolvedPaths);
             setPlayUiState(initialPlayUiState);
             return [{ kind: "info", text: `reloaded ${storyPaths.length} story file(s)` }];
           } catch (e) {

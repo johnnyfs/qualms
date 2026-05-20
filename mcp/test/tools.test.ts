@@ -66,7 +66,7 @@ describe("tool handlers for the tutorial-era DSL", () => {
 
     expect(handlePlay(manager, { sessionId, call: "Open(Player, Bars)" })).toMatchObject({
       status: "failed",
-      feedback: "fail { !Locked(Bars); }",
+      feedback: "fail { Locked(Bars); }",
     });
     // Walk the stage-9 conversation to receive the master key.
     handlePlay(manager, { sessionId, call: "TalkTo(Player, Guard)" });
@@ -88,7 +88,7 @@ describe("tool handlers for the tutorial-era DSL", () => {
     const at = handleQuery(manager, { sessionId, expr: "At(Player, ?here)" });
     expect(at.kind).toBe("query");
     if (at.kind !== "query") throw new Error("expected query");
-    expect(at.rows).toEqual([{ here: "Corridor" }]);
+    expect(at.rows).toEqual([{ here: "ActOne.Corridor" }]);
   });
 
   it("mutates arbitrary current-syntax story fragments inside transactions", () => {

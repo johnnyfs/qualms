@@ -15,7 +15,7 @@ const TUTORIAL = readFileSync(
 describe("currentLocation", () => {
   it("finds the player's location via At facts", () => {
     const model = loadStoryProgram(TUTORIAL);
-    expect(currentLocation(model, defaultPlayConfig())).toBe("Cell");
+    expect(currentLocation(model, defaultPlayConfig())).toBe("ActOne.Cell");
   });
 
   it("returns undefined when the player has no location fact", () => {

@@ -12,6 +12,7 @@ import type {
   MockupDetail,
   MockupOption,
   MockupStatement,
+  NamespaceStatement,
   NotExpression,
   ParameterPattern,
   Program,
@@ -63,8 +64,19 @@ export function programFromModel(model: StoryModel): Program {
     ...model.mockups.values(),
     ...model.rules,
   ];
+  const namespaceEntities = new Map<string, EntityStatement[]>();
   for (const [id, traits] of model.entities) {
-    statements.push({ kind: "entity", id, traits: [...traits] });
+    const [namespace, local] = splitEntityId(id);
+    if (!namespace) {
+      statements.push({ kind: "entity", id, traits: [...traits] });
+      continue;
+    }
+    const entities = namespaceEntities.get(namespace) ?? [];
+    entities.push({ kind: "entity", id: local, traits: [...traits] });
+    namespaceEntities.set(namespace, entities);
+  }
+  for (const [id, entities] of namespaceEntities) {
+    statements.push({ kind: "namespace", id, entities });
   }
   const effects = model.listFacts().map(factToEffect);
   if (effects.length > 0) statements.push({ kind: "set", effects });
@@ -121,6 +133,8 @@ export function emitTopLevelStatement(statement: TopLevelStatement): string {
       return emitMockup(statement);
     case "rule":
       return emitRule(statement);
+    case "namespace":
+      return emitNamespace(statement);
     case "entity":
       return emitEntity(statement);
     case "extend":
@@ -184,6 +198,7 @@ function emitQuery(statement: QueryStatement): string {
 }
 
 function emitMockup(statement: MockupStatement): string {
+  const prefix = statement.replace ? "replace " : "";
   const parts = [
     `title { ${statement.title.map(emitTerm).join("; ")} }`,
   ];
@@ -191,7 +206,7 @@ function emitMockup(statement: MockupStatement): string {
     parts.push(`detail {\n${statement.detail.map((detail) => indent(emitMockupDetail(detail))).join("\n")}\n}`);
   }
   parts.push(`options {\n${statement.options.map((option) => indent(emitMockupOption(option))).join("\n")}\n}`);
-  return `mockup ${statement.id}(${statement.parameters.map(emitParameter).join(", ")}) {\n${parts.map(indent).join("\n")}\n}`;
+  return `${prefix}mockup ${statement.id}(${statement.parameters.map(emitParameter).join(", ")}) {\n${parts.map(indent).join("\n")}\n}`;
 }
 
 function emitMockupDetail(detail: MockupDetail): string {
@@ -217,6 +232,10 @@ function emitMockupTargets(targets: readonly RelationAtom[]): string {
 
 function emitRule(statement: RuleStatement): string {
   return `${statement.phase} ${statement.target}(${statement.parameters.map(emitParameter).join(", ")}) ${emitBlock(statement.body)}`;
+}
+
+function emitNamespace(statement: NamespaceStatement): string {
+  return `namespace ${statement.id} {\n${statement.entities.map((entity) => indent(emitEntity(entity))).join("\n")}\n}`;
 }
 
 function emitEntity(statement: EntityStatement): string {
@@ -367,4 +386,9 @@ function indent(text: string): string {
     .split("\n")
     .map((line) => `  ${line}`)
     .join("\n");
+}
+
+function splitEntityId(id: string): readonly [string | undefined, string] {
+  const dot = id.lastIndexOf(".");
+  return dot >= 0 ? [id.slice(0, dot), id.slice(dot + 1)] : [undefined, id];
 }

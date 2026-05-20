@@ -57,7 +57,7 @@ describe("MCP play with tutorial-syntax stories", () => {
       (await call(client, "play", { sessionId, call: "Open(Player, Bars)" })).structuredContent,
     ).toMatchObject({
       status: "failed",
-      feedback: "fail { !Locked(Bars); }",
+      feedback: "fail { Locked(Bars); }",
     });
     // Walk the stage-9 conversation tree to receive the master key from
     // the guard; only then can Unlock succeed.
@@ -80,7 +80,7 @@ describe("MCP play with tutorial-syntax stories", () => {
     const query = await call(client, "query", { sessionId, expr: "At(Player, ?here)" });
     expect(query.structuredContent).toMatchObject({
       kind: "query",
-      rows: [{ here: "Corridor" }],
+      rows: [{ here: "ActOne.Corridor" }],
     });
   });
 
