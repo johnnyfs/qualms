@@ -92,6 +92,25 @@ describe("tutorial language model", () => {
     expect(model.hasFact("StartsAt", [idTerm("Player"), idTerm("ActOne.Cell")])).toBe(true);
   });
 
+  it("extends namespace-local entities inside namespace blocks before applying sets", () => {
+    const model = loadStoryProgram(`
+      trait Location
+      trait Locatable
+      trait Openable
+      relation At(Locatable, Location)
+
+      namespace ActOne {
+        entity Cell { Location }
+        entity Bars { Locatable }
+        extend Bars { Openable }
+        set At(Bars, Cell)
+      }
+    `);
+
+    expect(model.entityTraits("ActOne.Bars")).toEqual(new Set(["Locatable", "Openable"]));
+    expect(model.hasFact("At", [idTerm("ActOne.Bars"), idTerm("ActOne.Cell")])).toBe(true);
+  });
+
   it("requires qualified references when local entity names are ambiguous", () => {
     expect(() => loadStoryProgram(`
       trait Location

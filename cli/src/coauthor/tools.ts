@@ -81,7 +81,7 @@ export function buildTools(ctx: CoauthorContext) {
         expr: z
           .string()
           .describe(
-            "A DSL expression to evaluate, or a 'show' command. Use ?var for unbound variables.",
+            "A DSL expression to evaluate, or a 'show' command. Use ?var only to introduce a new query binding; reuse it later as bare var.",
           ),
       }),
       execute: async ({ expr }) => {

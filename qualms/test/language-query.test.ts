@@ -53,7 +53,7 @@ describe("playLanguageQuery — evaluation", () => {
       Carrying(actor, ?item)
     }
     query VisibleAt(actor: Actor) {
-      At(actor, ?here) & At(?item, ?here)
+      At(actor, ?here) & At(?item, here)
     }
     entity Player { Actor, Locatable }
     entity Cell { Location }

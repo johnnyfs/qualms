@@ -58,8 +58,15 @@ DSL building blocks:
 Pattern constraints:
 - Parameters can be typed by trait, by relation, or by an intersection:
     actor: (Actor & Locatable) { At(actor, ?here) }
-- A "{ ... }" block after a parameter type is a constraint; "?name" is a
-  scoped variable.
+- A "{ ... }" block after a parameter type is a constraint.
+- Use "?name" only to introduce a new local binding. Repeating "?name"
+  in the same scope is an error, including "?actor" when "actor" is a
+  parameter. Use bare "name" to reference a parameter or prior binding:
+    actor: (Actor & Locatable) { At(actor, ?here) }
+    when (Path(here, target)) { ... }
+- Model names such as entities, traits, relations, actions, predicates,
+  queries, and mockups start uppercase. Local names start lowercase and
+  cannot be keywords.
 
 Transactions (this is critical):
 - ALL story-changing work must be wrapped in a transaction. Open with

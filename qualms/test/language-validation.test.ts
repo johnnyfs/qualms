@@ -95,4 +95,64 @@ describe("semantic model validation", () => {
       `),
     ).toThrow(LanguageModelError);
   });
+
+  it("requires explicit bindings and bare references", () => {
+    expect(() =>
+      loadStoryProgram(`
+        trait Actor
+        trait Location
+        relation At(Actor, Location)
+        relation Path(Location, Location)
+        action Go(actor: Actor { At(actor, ?here) }, target: Location) {
+          when (Path(?here, target)) { succeed; }
+        }
+      `),
+    ).toThrow("binding '?here' already exists");
+
+    expect(() =>
+      loadStoryProgram(`
+        trait Actor
+        trait Location
+        relation At(Actor, Location)
+        action Check(actor: Actor) {
+          when (At(?actor, Cell)) { succeed; }
+        }
+      `),
+    ).toThrow("binding '?actor' already exists");
+
+    expect(() =>
+      loadStoryProgram(`
+        trait Actor
+        trait Location
+        relation Path(Location, Location)
+        action Go(actor: Actor, target: Location) {
+          when (Path(here, target)) { succeed; }
+        }
+      `),
+    ).toThrow("references unknown binding 'here'");
+
+    expect(() =>
+      loadStoryProgram(`
+        trait Thing
+        relation Seen(Thing)
+        entity Player { Thing }
+        action Check(target: Thing) {
+          when ((Seen(?item) | Seen(Player)) & item == target) { succeed; }
+        }
+      `),
+    ).toThrow("references unknown binding 'item'");
+  });
+
+  it("enforces model and local name capitalization", () => {
+    expect(() => loadStoryProgram("trait actor")).toThrow(
+      "trait 'actor' must start with an uppercase letter",
+    );
+
+    expect(() =>
+      loadStoryProgram(`
+        trait Actor
+        action Wave(Actor: Actor) { succeed; }
+      `),
+    ).toThrow("parameter 'Actor' must start with a lowercase letter");
+  });
 });

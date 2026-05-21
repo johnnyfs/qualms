@@ -530,9 +530,7 @@ class Parser {
         this.expect("colon");
         const expression = bindMockupNameInExpression(this.expression(), name);
         this.expect("arrow");
-        const targets = this.mockupTargetChain().map((target) =>
-          bindMockupNameInAtom(target, name),
-        );
+        const targets = this.mockupTargetChain();
         options.push({ kind: "dynamic", name, expression, targets });
       }
       this.consumeMockupSeparator();
@@ -562,9 +560,7 @@ class Parser {
         this.expect("colon");
         const expression = bindMockupNameInExpression(this.expression(), name);
         this.expect("arrow");
-        const targets = this.mockupTargetChain().map((target) =>
-          bindMockupNameInAtom(target, name),
-        );
+        const targets = this.mockupTargetChain();
         options.push({ kind: "dynamic", name, expression, targets });
       }
       this.consumeMockupSeparator();
@@ -598,21 +594,30 @@ class Parser {
     const id = this.identifier();
     this.expect("lbrace");
     const entities: EntityStatement[] = [];
+    const extends_: ExtendStatement[] = [];
     const sets: SetStatement[] = [];
     while (!this.at("rbrace")) {
       this.skipSemis();
       if (this.at("rbrace")) break;
       if (this.matchKeyword("entity")) {
         entities.push(this.entityStatement());
+      } else if (this.matchKeyword("extend")) {
+        extends_.push(this.extendStatement());
       } else if (this.matchKeyword("set")) {
         sets.push(this.setStatement());
       } else {
-        this.fail(`namespace '${id}' can only contain entity or set declarations`);
+        this.fail(`namespace '${id}' can only contain entity, extend, or set declarations`);
       }
       this.skipSemis();
     }
     this.expect("rbrace");
-    return { kind: "namespace", id, entities, sets };
+    return {
+      kind: "namespace",
+      id,
+      entities,
+      ...(extends_.length > 0 ? { extends: extends_ } : {}),
+      sets,
+    };
   }
 
   private extendStatement(): ExtendStatement {

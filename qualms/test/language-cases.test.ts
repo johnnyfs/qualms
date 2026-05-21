@@ -183,8 +183,8 @@ describe("action cases", () => {
       }
 
       case Pick(actor: Actor, target: Item { Alias(target, ?actual) }) as PickAlias {
-        when (?actual == Right) {
-          set Marked(?actual)
+        when (actual == Right) {
+          set Marked(actual)
         }
       }
 

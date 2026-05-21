@@ -22,10 +22,10 @@ describe("tutorial language parser", () => {
     expect(program.statements.filter((s) => s.kind === "mockupStart")).toHaveLength(1);
     expect(program.statements.filter((s) => s.kind === "mockup")).toHaveLength(14);
     expect(program.statements.filter((s) => s.kind === "rule")).toHaveLength(9);
-    expect(program.statements.filter((s) => s.kind === "namespace")).toHaveLength(3);
+    expect(program.statements.filter((s) => s.kind === "namespace")).toHaveLength(4);
     expect(program.statements.filter((s) => s.kind === "entity")).toHaveLength(15);
-    expect(program.statements.filter((s) => s.kind === "extend")).toHaveLength(3);
-    expect(program.statements.filter((s) => s.kind === "set")).toHaveLength(7);
+    expect(program.statements.filter((s) => s.kind === "extend")).toHaveLength(2);
+    expect(program.statements.filter((s) => s.kind === "set")).toHaveLength(5);
     expect(program.statements.filter((s) => s.kind === "validation")).toHaveLength(1);
   });
 
@@ -77,6 +77,24 @@ describe("tutorial language parser", () => {
     });
   });
 
+  it("parses extend declarations inside namespace blocks", () => {
+    const program = parseProgram(`
+      trait Openable
+      namespace ActOne {
+        entity Bars { }
+        extend Bars { Openable }
+      }
+    `);
+    const namespace = program.statements.find((s) => s.kind === "namespace");
+    expect(namespace).toMatchObject({
+      kind: "namespace",
+      id: "ActOne",
+      entities: [{ kind: "entity", id: "Bars", traits: [] }],
+      extends: [{ kind: "extend", id: "Bars", traits: ["Openable"] }],
+      sets: [],
+    });
+  });
+
   it("parses qualified entity references", () => {
     const program = parseProgram(`
       trait Location
@@ -95,13 +113,13 @@ describe("tutorial language parser", () => {
 
   it("rejects unsupported declarations inside namespace blocks", () => {
     expect(() => parseProgram("namespace ActOne { trait Location }")).toThrow(
-      "namespace 'ActOne' can only contain entity or set declarations",
+      "namespace 'ActOne' can only contain entity, extend, or set declarations",
     );
   });
 
   it("parses constrained action parameters", () => {
     const program = parseProgram(
-      "trait Actor\ntrait Locatable\ntrait Location\naction Go(actor: (Actor & Locatable) { At(actor, ?here) }, target: Location) { when (Path(?here, target)) { set At(actor, target) } }",
+      "trait Actor\ntrait Locatable\ntrait Location\naction Go(actor: (Actor & Locatable) { At(actor, ?here) }, target: Location) { when (Path(here, target)) { set At(actor, target) } }",
     );
     const go = program.statements.find((s) => s.kind === "action" && s.id === "Go");
     if (!go || go.kind !== "action") throw new Error("missing Go action");

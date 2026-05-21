@@ -155,6 +155,7 @@ export interface NamespaceStatement {
   readonly kind: "namespace";
   readonly id: string;
   readonly entities: readonly EntityStatement[];
+  readonly extends?: readonly ExtendStatement[];
   readonly sets: readonly SetStatement[];
 }
 

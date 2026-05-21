@@ -6,7 +6,9 @@ import type {
   EntityStatement,
   ExternPredicateStatement,
   ExtendStatement,
+  Expression,
   NamespaceStatement,
+  ParameterPattern,
   MockupStatement,
   Program,
   QueryStatement,
@@ -63,6 +65,33 @@ export class LanguageValidationFailedError extends LanguageModelError {
   }
 }
 
+const RESERVED_LOCAL_NAMES = new Set([
+  "action",
+  "after",
+  "as",
+  "before",
+  "begin",
+  "case",
+  "commit",
+  "emit",
+  "entity",
+  "extern",
+  "fail",
+  "namespace",
+  "predicate",
+  "query",
+  "relation",
+  "replace",
+  "rollback",
+  "set",
+  "succeed",
+  "trait",
+  "undef",
+  "unique",
+  "validation",
+  "when",
+]);
+
 export class StoryModel {
   readonly traits = new Map<string, TraitStatement>();
   readonly relations = new Map<string, RelationStatement>();
@@ -110,9 +139,11 @@ export class StoryModel {
       for (const statement of program.statements) {
         switch (statement.kind) {
           case "trait":
+            validateModelName(statement.id, "trait");
             this.addUnique(this.traits, statement.id, statement, "trait");
             break;
           case "relation":
+            validateModelName(statement.id, "relation");
             this.validateRelation(statement);
             this.addUnique(this.relations, statement.id, statement, "relation");
             break;
@@ -320,11 +351,14 @@ export class StoryModel {
   }
 
   private addNamespace(statement: NamespaceStatement, sink: Effect[]): void {
+    validateModelName(statement.id, "namespace");
     for (const entity of statement.entities) this.addEntity(entity, statement.id);
+    for (const extend of statement.extends ?? []) this.extendEntity(extend, statement.id);
     for (const set of statement.sets) this.applySet(set.effects, sink, statement.id);
   }
 
   private addEntity(statement: EntityStatement, namespace?: string): void {
+    validateModelName(statement.id, "entity");
     const id = namespace ? `${namespace}.${statement.id}` : statement.id;
     if (this.entities.has(id)) {
       throw new LanguageModelError(`duplicate entity '${id}'`);
@@ -341,8 +375,8 @@ export class StoryModel {
     this.entityLocalIndex.set(local, candidates);
   }
 
-  private extendEntity(statement: ExtendStatement): void {
-    const canonical = this.resolveEntityId(statement.id);
+  private extendEntity(statement: ExtendStatement, namespace?: string): void {
+    const canonical = this.resolveEntityId(this.scopedEntityId(statement.id, namespace));
     const traits = this.entities.get(canonical);
     if (!traits) throw new LanguageModelError(`unknown entity '${statement.id}'`);
     for (const traitId of statement.traits) {
@@ -375,6 +409,8 @@ export class StoryModel {
     statement: CallableStatement,
     kind: string,
   ): void {
+    validateModelName(statement.id, kind);
+    validateCallableScope(statement);
     this.validateCallableTypes(statement);
     if (kind === "predicate" && blockContainsImpureStatement(statement.body)) {
       throw new LanguageModelError(`predicate '${statement.id}' cannot contain set or emit effects`);
@@ -392,6 +428,8 @@ export class StoryModel {
   }
 
   private addExternPredicate(statement: ExternPredicateStatement): void {
+    validateModelName(statement.id, "external predicate");
+    validateParameters(statement.parameters, `external predicate '${statement.id}'`);
     this.validateCallableTypes(statement);
     if (this.predicates.has(statement.id) || this.actions.has(statement.id) || this.queries.has(statement.id)) {
       throw new LanguageModelError(`duplicate callable '${statement.id}'`);
@@ -400,6 +438,8 @@ export class StoryModel {
   }
 
   private addQuery(statement: QueryStatement): void {
+    validateModelName(statement.id, "query");
+    validateQueryScope(statement);
     this.validateCallableTypes(statement);
     if (
       this.predicates.has(statement.id) ||
@@ -413,6 +453,8 @@ export class StoryModel {
   }
 
   private addMockup(statement: MockupStatement): void {
+    validateModelName(statement.id, "mockup");
+    validateMockupScope(statement);
     this.validateCallableTypes(statement);
     if (
       this.predicates.has(statement.id) ||
@@ -435,6 +477,7 @@ export class StoryModel {
   }
 
   private addActionCase(statement: ActionCaseStatement): void {
+    if (statement.id) validateModelName(statement.id, "case");
     const id = statement.id ?? this.nextGeneratedCaseId(statement.target);
     if (this.caseIndex(id) >= 0) throw new LanguageModelError(`duplicate case '${id}'`);
     const stored: StoredActionCaseStatement = { ...statement, id };
@@ -484,6 +527,7 @@ export class StoryModel {
   }
 
   private addValidation(statement: ValidationStatement): void {
+    validateModelName(statement.id, "validation");
     if (statement.replace) {
       if (!this.validations.has(statement.id)) {
         throw new LanguageModelError(
@@ -507,6 +551,14 @@ export class StoryModel {
         for (const effect of assertion.expectedEffects ?? []) {
           this.validateFact(this.groundFactFromAtom(effect.atom));
         }
+        for (const reason of assertion.expectedReasons ?? []) {
+          validateExpression(reason, new Set(), true, `validation '${statement.id}' expected reasons`);
+        }
+      } else if (assertion.kind === "query") {
+        const scope = validateExpression(assertion.expression, new Set(), true, `validation '${statement.id}' query assertion`);
+        for (const expected of assertion.expectedBindings ?? []) {
+          validateExpression(expected, new Set(scope.locals), false, `validation '${statement.id}' expected bindings`);
+        }
       }
     }
     this.validations.set(statement.id, statement);
@@ -516,6 +568,7 @@ export class StoryModel {
     const seenNames = new Set<string>();
     for (const parameter of statement.parameters) {
       if (parameter.name) {
+        validateLocalName(parameter.name, `relation '${statement.id}' parameter`);
         if (seenNames.has(parameter.name)) {
           throw new LanguageModelError(`relation '${statement.id}' has duplicate parameter name '${parameter.name}'`);
         }
@@ -558,6 +611,7 @@ export class StoryModel {
     for (const parameter of statement.parameters) {
       if (parameter.type) this.validateTypeExpr(parameter.type);
     }
+    validateRuleScope(statement);
   }
 
   private validateActionCase(statement: StoredActionCaseStatement): void {
@@ -571,6 +625,7 @@ export class StoryModel {
     for (const parameter of statement.parameters) {
       if (parameter.type) this.validateTypeExpr(parameter.type);
     }
+    validateActionCaseScope(statement);
   }
 
   private validateTypeExpr(type: TypeExpr): void {
@@ -593,6 +648,9 @@ export class StoryModel {
   private groundTermFromTermInScope(term: Term, namespace?: string): GroundTerm {
     switch (term.kind) {
       case "identifier":
+        if (isLocalName(term.id)) {
+          throw new LanguageModelError(`ground fact references unknown binding '${term.id}'`);
+        }
         return { kind: "id", id: this.scopedEntityId(term.id, namespace) };
       case "relationInstance":
         return {
@@ -764,6 +822,210 @@ export function idTerm(id: string): GroundTerm {
 
 export function relationTerm(relation: string, args: readonly GroundTerm[]): GroundTerm {
   return { kind: "relation", relation, args };
+}
+
+interface ScopeValidationResult {
+  readonly locals: Set<string>;
+}
+
+function validateCallableScope(statement: CallableStatement): void {
+  const scope = validateParameters(statement.parameters, `${statement.kind} '${statement.id}'`);
+  validateBlock(statement.body, scope.locals, `${statement.kind} '${statement.id}' body`);
+}
+
+function validateQueryScope(statement: QueryStatement): void {
+  const scope = validateParameters(statement.parameters, `query '${statement.id}'`);
+  validateExpression(statement.body, scope.locals, true, `query '${statement.id}' body`);
+}
+
+function validateRuleScope(statement: RuleStatement): void {
+  const scope = validateParameters(statement.parameters, `${statement.phase} rule '${statement.target}'`);
+  validateBlock(statement.body, scope.locals, `${statement.phase} rule '${statement.target}' body`);
+}
+
+function validateActionCaseScope(statement: StoredActionCaseStatement): void {
+  const scope = validateParameters(statement.parameters, `case '${statement.id}'`);
+  validateBlock(statement.body, scope.locals, `case '${statement.id}' body`);
+}
+
+function validateMockupScope(statement: MockupStatement): void {
+  const scope = validateParameters(statement.parameters, `mockup '${statement.id}'`);
+  for (const term of statement.title) validateTerm(term, scope.locals, false, `mockup '${statement.id}' title`);
+  for (const detail of statement.detail) {
+    if (detail.kind === "line") {
+      for (const term of detail.terms) validateTerm(term, scope.locals, false, `mockup '${statement.id}' detail`);
+      continue;
+    }
+    validateLocalName(detail.name, `mockup '${statement.id}' detail binding`);
+    if (scope.locals.has(detail.name)) {
+      throw new LanguageModelError(`mockup '${statement.id}' detail binding '${detail.name}' already exists`);
+    }
+    const next = validateExpression(detail.expression, scope.locals, true, `mockup '${statement.id}' detail binding`);
+    scope.locals.clear();
+    for (const local of next.locals) scope.locals.add(local);
+    scope.locals.add(detail.name);
+  }
+  validateMockupOptions(statement.options, scope.locals, `mockup '${statement.id}' options`);
+}
+
+function validateMockupOptions(
+  options: readonly MockupStatement["options"][number][],
+  locals: Set<string>,
+  label: string,
+): void {
+  for (const option of options) {
+    if (option.kind === "when") {
+      validateExpression(option.condition, new Set(locals), false, `${label} condition`);
+      validateMockupOptions(option.options, new Set(locals), label);
+      continue;
+    }
+    if (option.kind === "dynamic") {
+      validateLocalName(option.name, `${label} dynamic binding`);
+      if (locals.has(option.name)) {
+        throw new LanguageModelError(`${label} dynamic binding '${option.name}' already exists`);
+      }
+      const next = validateExpression(option.expression, locals, true, `${label} dynamic binding`);
+      const optionLocals = new Set(next.locals);
+      optionLocals.add(option.name);
+      for (const target of option.targets) validateAtomReferences(target, optionLocals, `${label} target`);
+      continue;
+    }
+    for (const target of option.targets) validateAtomReferences(target, locals, `${label} target`);
+  }
+}
+
+function validateParameters(patterns: readonly ParameterPattern[], label: string): ScopeValidationResult {
+  const locals = new Set<string>();
+  for (const pattern of patterns) {
+    if (pattern.name) {
+      validateLocalName(pattern.name, `${label} parameter`);
+      if (locals.has(pattern.name)) {
+        throw new LanguageModelError(`${label} parameter '${pattern.name}' already exists`);
+      }
+      locals.add(pattern.name);
+    }
+    for (const constraint of pattern.constraints) {
+      const next = validateExpression(constraint, locals, true, `${label} constraint`);
+      locals.clear();
+      for (const local of next.locals) locals.add(local);
+    }
+  }
+  return { locals };
+}
+
+function validateBlock(block: Block, locals: Set<string>, label: string): ScopeValidationResult {
+  const current = new Set(locals);
+  for (const statement of block.statements) {
+    switch (statement.kind) {
+      case "when": {
+        const condition = validateExpression(statement.condition, current, true, `${label} when`);
+        const body = validateBlock(statement.body, condition.locals, `${label} when body`);
+        current.clear();
+        for (const local of body.locals) current.add(local);
+        break;
+      }
+      case "set":
+        for (const effect of statement.effects) validateAtomReferences(effect.atom, current, `${label} set`);
+        break;
+      case "emit":
+        validateAtomReferences(statement.atom, current, `${label} emit`);
+        break;
+      case "succeed":
+      case "fail":
+        break;
+    }
+  }
+  return { locals: current };
+}
+
+function validateExpression(
+  expression: Expression,
+  locals: Set<string>,
+  allowBindings: boolean,
+  label: string,
+): ScopeValidationResult {
+  switch (expression.kind) {
+    case "relation": {
+      const current = new Set(locals);
+      for (const term of expression.atom.args) validateTerm(term, current, allowBindings, label);
+      return { locals: current };
+    }
+    case "not":
+      validateExpression(expression.operand, new Set(locals), allowBindings, `${label} negation`);
+      return { locals: new Set(locals) };
+    case "binary":
+      if (expression.op === "&") {
+        const left = validateExpression(expression.left, locals, allowBindings, label);
+        return validateExpression(expression.right, left.locals, allowBindings, label);
+      }
+      return intersectLocals(
+        validateExpression(expression.left, new Set(locals), allowBindings, label).locals,
+        validateExpression(expression.right, new Set(locals), allowBindings, label).locals,
+      );
+    case "equal": {
+      const current = new Set(locals);
+      validateTerm(expression.left, current, allowBindings, label);
+      validateTerm(expression.right, current, allowBindings, label);
+      return { locals: current };
+    }
+  }
+}
+
+function validateAtomReferences(atom: RelationAtom, locals: Set<string>, label: string): void {
+  for (const term of atom.args) validateTerm(term, locals, false, label);
+}
+
+function validateTerm(term: Term, locals: Set<string>, allowBinding: boolean, label: string): void {
+  switch (term.kind) {
+    case "variable":
+      validateLocalName(term.id, `${label} binding`);
+      if (!allowBinding) throw new LanguageModelError(`${label} cannot introduce binding '?${term.id}' here`);
+      if (locals.has(term.id)) throw new LanguageModelError(`${label} binding '?${term.id}' already exists`);
+      locals.add(term.id);
+      return;
+    case "identifier":
+      if (isLocalName(term.id) && !locals.has(term.id)) {
+        throw new LanguageModelError(`${label} references unknown binding '${term.id}'`);
+      }
+      return;
+    case "relationInstance":
+      for (const arg of term.atom.args) validateTerm(arg, locals, allowBinding, label);
+      return;
+    case "wildcard":
+    case "string":
+    case "number":
+      return;
+  }
+}
+
+function intersectLocals(left: Set<string>, right: Set<string>): ScopeValidationResult {
+  const out = new Set<string>();
+  for (const value of left) {
+    if (right.has(value)) out.add(value);
+  }
+  return { locals: out };
+}
+
+function validateModelName(id: string, label: string): void {
+  const first = id[0];
+  if (!first || first < "A" || first > "Z") {
+    throw new LanguageModelError(`${label} '${id}' must start with an uppercase letter`);
+  }
+}
+
+function validateLocalName(id: string, label: string): void {
+  const first = id[0];
+  if (!first || first < "a" || first > "z") {
+    throw new LanguageModelError(`${label} '${id}' must start with a lowercase letter`);
+  }
+  if (RESERVED_LOCAL_NAMES.has(id)) {
+    throw new LanguageModelError(`${label} '${id}' cannot be a keyword`);
+  }
+}
+
+function isLocalName(id: string): boolean {
+  const first = id[0];
+  return first !== undefined && first >= "a" && first <= "z";
 }
 
 function blockContainsImpureStatement(block: Block): boolean {

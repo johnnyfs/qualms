@@ -792,11 +792,11 @@ function evalExpression(
       const right = resolveTerm(model, expression.right, env);
       if (left && right) return termKey(left) === termKey(right) ? [env] : [];
       if (!left && right && expression.left.kind === "variable") {
-        const bound = bindName(expression.left.id, right, env);
+        const bound = bindFreshName(expression.left.id, right, env);
         return bound ? [bound] : [];
       }
       if (!right && left && expression.right.kind === "variable") {
-        const bound = bindName(expression.right.id, left, env);
+        const bound = bindFreshName(expression.right.id, left, env);
         return bound ? [bound] : [];
       }
       return [];
@@ -866,7 +866,7 @@ function matchTerm(model: StoryModel, pattern: Term, value: GroundTerm, env: Env
     case "identifier":
       return matchIdentifier(model, pattern.id, value, env);
     case "variable":
-      return bindName(pattern.id, value, env);
+      return bindFreshName(pattern.id, value, env);
     case "string":
       return value.kind === "string" && value.value === pattern.value ? env : undefined;
     case "number":
@@ -891,9 +891,15 @@ function bindName(name: string, value: GroundTerm, env: Env): Env | undefined {
   return { ...env, [name]: value };
 }
 
+function bindFreshName(name: string, value: GroundTerm, env: Env): Env | undefined {
+  if (env[name]) return undefined;
+  return { ...env, [name]: value };
+}
+
 function matchIdentifier(model: StoryModel, name: string, value: GroundTerm, env: Env): Env | undefined {
   const existing = env[name];
   if (existing) return termKey(existing) === termKey(value) ? env : undefined;
+  if (isLocalName(name)) return undefined;
   const expected = model.tryResolveEntityId(name) ?? name;
   return value.kind === "id" && value.id === expected ? env : undefined;
 }
@@ -901,7 +907,7 @@ function matchIdentifier(model: StoryModel, name: string, value: GroundTerm, env
 function resolveTerm(model: StoryModel, term: Term, env: Env): GroundTerm | undefined {
   switch (term.kind) {
     case "identifier":
-      return env[term.id] ?? model.normalizeGroundTerm({ kind: "id", id: term.id });
+      return env[term.id] ?? (isLocalName(term.id) ? undefined : model.normalizeGroundTerm({ kind: "id", id: term.id }));
     case "variable":
       return env[term.id];
     case "wildcard":
@@ -916,6 +922,11 @@ function resolveTerm(model: StoryModel, term: Term, env: Env): GroundTerm | unde
       return { kind: "relation", relation: term.atom.relation, args: args as GroundTerm[] };
     }
   }
+}
+
+function isLocalName(name: string): boolean {
+  const first = name[0];
+  return first !== undefined && first >= "a" && first <= "z";
 }
 
 function groundAtom(model: StoryModel, atom: RelationAtom, env: Env): RelationAtom {

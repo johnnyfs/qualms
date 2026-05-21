@@ -30,7 +30,7 @@ describe("tutorial language runtime", () => {
       relation Path(Location, Location)
 
       action Go(actor: (Actor & Locatable) { At(actor, ?here) }, target: Location) {
-        when (Path(?here, target)) {
+        when (Path(here, target)) {
           set At(actor, target)
         }
       }
@@ -440,7 +440,7 @@ describe("tutorial language runtime", () => {
         speaker: Speaker { InConversation(actor, speaker, ?topic) },
         subTopic: Topic
       ) {
-        when (LeadsTo(speaker, ?topic, subTopic)) {
+        when (LeadsTo(speaker, topic, subTopic)) {
           set InConversation(actor, speaker, subTopic);
           succeed;
         }
@@ -657,7 +657,7 @@ describe("tutorial language runtime", () => {
 
       -- The rule's a constraint variable must bind freshly from the Marks
       -- fact, not inherit Player from the enclosing action.
-      before IsMarked(t: Tag { Marks(a, t) }) {
+      before IsMarked(t: Tag { Marks(?a, t) }) {
         when (a == Witness) { succeed; }
       }
 

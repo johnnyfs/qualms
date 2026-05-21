@@ -217,11 +217,11 @@ and must not mutate the story model or host simulation.
 
 ```
 predicate IsColocated(actor: (Actor & Locatable) { At(actor, ?here) }, target: Locatable) {
-  when (At(target, ?here)) { succeed; }
+  when (At(target, here)) { succeed; }
 }
 
 action Go(actor: (Actor & Locatable) { At(actor, ?here) }, target: Location) {
-  when (Path(?here, target)) { set At(actor, target) }
+  when (Path(here, target)) { set At(actor, target) }
 }
 ```
 
@@ -250,12 +250,12 @@ raises `LanguageModelError("replace … '…' has no prior definition")`.
 
 ```
 before Go(actor: (Actor & Locatable) { At(actor, ?here) },
-          target: Location { Gated(Path(?here, target), ?door) }) {
-  when (!Opened(?door)) { fail; }
+          target: Location { Gated(Path(here, target), ?door) }) {
+  when (!Opened(door)) { fail; }
 }
 
 after Take(_, target: Locatable { At(target, ?here) }) {
-  set { !At(target, ?here); }
+  set { !At(target, here); }
 }
 ```
 
@@ -275,13 +275,13 @@ Rules must target an existing callable. `after` rules may target actions only;
 
 ```
 case Take(actor: Actor, target: Portable { At(target, ?here) }) as TakeFromGround {
-  when (At(actor, ?here)) {
+  when (At(actor, here)) {
     set Carrying(actor, target)
   }
 }
 
 replace case TakeFromGround {
-  when (At(actor, ?here)) {
+  when (At(actor, here)) {
     set Carrying(actor, target)
     emit Took(target);
   }
@@ -638,21 +638,22 @@ Semantics:
 
 - **Equality (`==`).** Both operands are resolved against the environment.
   If both ground, they must be structurally equal (same kind, same value,
-  recursively equal for relation instances). If one operand is an unbound
-  explicit variable, the runtime unifies the variable with the other
-  operand and returns the augmented environment.
+  recursively equal for relation instances). If one operand is a fresh
+  explicit variable, the runtime binds the variable to the other operand
+  and returns the augmented environment.
 
 #### 5.5.1 Term shapes
 
 Terms used in expressions include identifiers, explicit variables (`?name`),
 numbers, strings, the wildcard `_`, and relation instances `R(t1, …, tn)`.
 Bare identifiers resolve to an existing parameter or variable binding when
-one exists; otherwise they are ground ids such as entity names. Bare
-identifiers no longer introduce free query bindings.
+one exists; otherwise capitalized identifiers are ground ids such as entity
+names. Lowercase bare identifiers must refer to an existing parameter or
+binding. Bare identifiers do not introduce free query bindings.
 
 A relation-instance term used as an *argument* to another relation
-denotes a ground relation reference (e.g. `Gated(Path(?here, target),
-?door)` references the relation tuple `Path(?here, target)` as the first
+denotes a ground relation reference (e.g. `Gated(Path(here, target),
+?door)` references the relation tuple `Path(here, target)` as the first
 argument to `Gated`). A relation-instance term used as the top of an
 expression is a relation lookup or predicate call.
 
@@ -681,11 +682,13 @@ An environment is a partial map from identifier to ground term. The
 runtime carries a single environment through a chain of conjuncts,
 forking it at disjunctions and at multi-match relations.
 
-An explicit variable referenced in a relation pattern is bound by the match
-if the corresponding fact argument is concrete. Subsequent uses of the same
-variable within the same conjunction are constrained to that same value.
-Inside a callable, parameter names are pre-bound to the supplied arguments.
-MCP query rows contain all explicit variables bound by the query.
+An explicit variable (`?name`) referenced in a relation pattern introduces
+a new binding if the corresponding fact argument is concrete. Repeating
+`?name` in the same scope is invalid; subsequent uses must be bare `name`
+and are constrained to the same value. Inside a callable, parameter names
+are pre-bound to the supplied arguments, so `?actor` is invalid when
+`actor` is already a parameter. MCP query rows contain all explicit
+variables bound by the query.
 
 ---
 

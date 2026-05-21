@@ -1,80 +1,43 @@
--- Tutorial for the qualms story specification language.
--- It specifies a minimally playable rpg-like story, demonstrating core
--- principles and expected usage of the language, with special attention
--- to the seam between the domain of the story specification and the
--- domain of the simulator (ie, game engine) that hosts it.
-
--- Principles of design
--- 1. Minimize coupling: introduce new traits and relations for each
--- distinct behavior. Avoid editing existing rules to accomodate new
--- concepts, instead introduce before or after rules to augment the
--- behavior of existing rules.
--- 2. Minimize new definitions: if a new behavior can be expressed
--- in terms of existing behaviors, prefer to do so.
-
 -- (1) Minimal location
--- Introduces: traits, relations, actions, entities, and the set statement.
 
--- Traits can be attached to an entity and used by pattern-matching rules.
--- For example, a rule about an entity trying to perform an action might only
--- apply to Actors. A test for reachability might only apply to Locations.
 trait Actor
 trait Locatable
 trait Location
 
--- Relations link entities that have some number of traits. They are implicitly
--- unique in their arguments. For example, only one Path from `The Oak Tree` to
--- `The Old Well` will ever exist. They can be made further unique in one
--- argument. For example, a Locatable is only ever at one Location at a time.
--- This is expressed, postgres style, with a unique constraint on subject.
--- NOTE: Argument names are scoped only to constraints and otherwise only
--- function as usage hints.
 relation At(subject: Locatable, location: Location) unique(subject)
 relation Path(from: Location, to: Location)
 
--- Actions define legal commands that can be run against the world model. Pattern
--- matching rules determine whether the action applies, while `when` tests pre-
--- conditions. In practice, the difference determines whether the engine reports
--- an action as illegal or failed for a specific reason. Variables can be bound to
--- patterns by prefixing them with `?` and referenced elsewhere in the same scope.
 action Go(actor: (Actor & Locatable) { At(actor, ?here) }, target: Location) {
-  when (Path(?here, target)) {
+  when (Path(here, target)) {
     set At(actor, target)
   }
 }
 
--- Entities aggregate traits. Actions can be applied to entities whose traits
--- match the argument patterns.
+query GetExits(actor: Actor) {
+  At(actor, ?here) & Path(here, ?target)
+}
+
 entity Player { Actor, Locatable }
 
--- Namespaces group entity declarations so that local names only need to be unique
--- within the namespace. References like Cell remain valid while unambiguous;
--- use `ActOne.Cell` if another namespace later defines its own Cell.
 namespace ActOne {
   entity Cell { Location }
   entity Corridor { Location }
   entity Outside { Location }
-}
-
--- `set` causes a relation to be true. It can be applied to a single relation
--- or to a block enclosed in `{}`. Multiple relations are delimited with `;`.
-set {
-  Path(Cell, Corridor);
-  Path(Corridor, Cell);
-  Path(Corridor, Outside);
-  Path(Outside, Corridor);
-  At(Player, Cell);
+  set {
+    Path(Cell, Corridor);
+    Path(Corridor, Cell);
+    Path(Corridor, Outside);
+    Path(Outside, Corridor);
+    At(Player, Cell);
+  }
 }
 
 -- (2) Extend with descriptions
--- Introduces: predicates.
 
 trait Describable
 
--- A predicate is a test against the current world state. It always fails against
--- entities that do not match its patterns. It must be pure.
 predicate IsColocated(actor: (Actor & Locatable) { At(actor, ?here) }, target: Locatable) {
-  when (At(target, ?here)) {
+  when (At(target, here)) {
     succeed;
   }
 }
@@ -97,15 +60,12 @@ namespace ActOne {
 
 
 -- (3) Extend with portable items
--- Introduces: after rules, queries.
 
 trait Portable
 
 relation Carrying(Actor, item: Portable) unique(item)
 
--- A query is an test of the current state of the story. It yeilds a list
--- of all items matching the provided pattern(s).
-query Inventory(actor: Actor) {
+query GetInventory(actor: Actor) {
   Carrying(actor, ?item)
 }
 
@@ -115,17 +75,11 @@ action Take(actor: Actor, target: Portable) {
   }
 }
 
--- "After rules" run after any successful action of the
--- same name for any entity whose pattern matches the
--- after rule's arguments. This enables us to integrate
--- carrying and locating without requiring that 
--- the default rules uses anything except the core trait.
--- Note that this rule only applies to a Locatable
--- after Take. For a non-Locatable Portable entity,
--- the rule will simply be ignored.
+-- Note: this will not run if the target is Portable but
+-- not also Locatable.
 after Take(_, target: Locatable { At(target, ?here) }) {
   set {
-    !At(target, ?here);
+    !At(target, here);
   }
 }
 
@@ -137,10 +91,9 @@ action Drop(actor: Actor, target: Portable) {
   }
 }
 
--- Again, this only fires for  Locatables.
 after Drop(actor: Locatable { At(actor, ?here) }, target: Locatable) {
   set {
-    At(target, ?here);
+    At(target, here);
   }
 }
 
@@ -152,34 +105,24 @@ namespace ActOne {
 }
 
 -- (4) Extend with doors
--- Introduces: before rules and relations between relations.
 
 trait Openable
 
 relation Opened(Openable)
 
--- Relations may also be defined in reference to other relations.
--- Nested relations are by-reference: the Gated fact stays in storage
--- even if its Path is unset, but it only *matches* (in queries, when
--- clauses, parameter binding) while the referenced Path exists. So
--- Gated(Path(Corridor, Closet), ClosetDoor) reads as "any path from
--- Corridor to Closet that ever exists is gated by ClosetDoor": retract
--- the Path and the gate goes dormant; re-assert it and the gate is
--- back, with no instance identity in between.
+-- Note: a Gated relation may describe a Path that does not exist (or
+-- which once existed). It remains legal but will never match unless
+-- the referenced relation is explicitly (re)declared.
 relation Gated(path: Path, door: Openable) unique(path)
 
--- "before rules" run before the action is processed. They run for any
--- matching entity regardless of whether the default rule would run
--- or succeed. A before rule may fail, succeed, or neither. Both failure
--- and success prevent any futher rule execution. No action defers to
--- the next eligible rule. This is useful for creating conditional
--- exceptions or for making state changes triggered by an attempt,
--- regardless of whether the action succeeds.
+-- Note: before rules run before the referenced action is considered.
+-- before rules that do not return explict failure or success defer
+-- to the next relevant rule.
 before Go(
   actor: (Actor & Locatable) { At(actor, ?here) },
-  target: Location { Gated(Path(?here, target), ?door) }
+  target: Location { Gated(Path(here, target), ?door) }
 ) {
-  when (!Opened(?door)) {
+  when (!Opened(door)) {
     fail;
   }
 }
@@ -190,7 +133,7 @@ before IsColocated(
   actor: (Actor & Locatable) { At(actor, ?here) },
   target: Locatable
 ) {
-  when (Gated(Path(?here, _), ?door) & target == ?door) {
+  when (Gated(Path(here, _), ?door) & target == door) {
     succeed;
   }
 }
@@ -207,15 +150,16 @@ action Close(actor: Actor, door: Openable) {
   }
 }
 
-extend Bars { Openable }
-set {
-  !At(Bars, Cell);
-  Gated(Path(Cell, Corridor), Bars);
-  Gated(Path(Corridor, Cell), Bars);
+namespace ActOne {
+  extend Bars { Openable }
+  set {
+    !At(Bars, Cell);
+    Gated(Path(Cell, Corridor), Bars);
+    Gated(Path(Corridor, Cell), Bars);
+  }
 }
 
 -- (5) Extend doors to be lockable.
--- Introduces: reusable reachability predicates and action preconditions.
 
 trait Key
 trait Lockable
@@ -257,11 +201,8 @@ set {
 }
 
 -- (6) Visibility
--- Introduces: the `Any` built-in type, the `replace` keyword for overriding
--- an earlier action, predicates extended by before-rules, and adjacency
--- encoded in parameter constraints. Anything not declared Transparent is
--- opaque by default.
 
+-- Ie, anything not explicitly transparent is opaque by default.
 relation Transparent(Any)
 relation ConveysVisibility(Path)
 
@@ -271,59 +212,39 @@ predicate IsVisibleTo(actor: Actor, target) {
   }
 }
 
-predicate Opaque(door: Openable) {
+predicate DoesBlockVisibility(door: Openable) {
   when (!Transparent(door) & !Opened(door)) {
     succeed;
   }
 }
 
--- A target visible across a path the actor can see along, unless an opaque
--- closed door gates that path. The parameter constraints encode adjacency;
--- the when clause tests only the visibility-specific rules, so a failure
--- here describes why the visibility rules failed.
 before IsVisibleTo(
   actor: Actor { At(actor, ?here) },
-  target: Locatable { At(target, ?location) & Path(?here, ?location) }
+  target: Locatable { At(target, ?location) & Path(here, location) }
 ) {
   when (
-    ConveysVisibility(Path(?here, ?location)) &
-    !(Gated(Path(?here, ?location), ?door) & Opaque(?door))
+    ConveysVisibility(Path(here, location)) &
+    !(Gated(Path(here, location), ?door) & DoesBlockVisibility(door))
   ) {
     succeed;
   }
 }
 
--- Examine now routes through IsVisibleTo, so visibility actually gates it.
+-- The player can now see through open or non-opaque closed doors.
 replace action Examine(actor: Actor, target) {
   when (IsVisibleTo(actor, target)) {
     succeed;
   }
 }
 
--- Enumerable counterpart to IsVisibleTo. Engine clients (menus, GUIs)
--- call this to populate "what can I see?" lists. The body inlines the
--- IsVisibleTo + IsColocated matching logic so the runtime can enumerate
--- ?target — predicates with variable arguments aren't yet enumerable.
--- The fourth clause covers gated doors (Bars are colocated with the
--- actor by virtue of gating a path from here); the fifth clause covers
--- cross-room targets through transparent or open gates (the Guard in
--- the Corridor as seen from the Cell).
--- Adjacent locations the actor could *attempt* to navigate to from here.
--- Distinct from Visible: a player knows the corridor lies past the bars
--- whether or not the bars are transparent, and `Go(Corridor)` should be a
--- selectable menu option that either succeeds or fails with a useful denial.
-query Adjacent(actor: Actor) {
-  At(actor, ?here) & Path(?here, ?target)
-}
-
-query Visible(actor: Actor) {
+query GetVisibles(actor: Actor) {
   At(actor, ?target)
-  | (At(actor, ?here) & At(?target, ?here))
+  | (At(actor, ?here) & At(?target, here))
   | Carrying(actor, ?target)
-  | (At(actor, ?here) & Gated(Path(?here, _), ?target))
-  | (At(actor, ?here) & At(?target, ?location) & Path(?here, ?location)
-     & ConveysVisibility(Path(?here, ?location))
-     & !(Gated(Path(?here, ?location), ?door) & !Transparent(?door) & !Opened(?door)))
+  | (At(actor, ?here) & Gated(Path(here, _), ?target))
+  | (At(actor, ?here) & At(?target, ?location) & Path(here, location)
+     & ConveysVisibility(Path(here, location))
+     & !(Gated(Path(here, location), ?door) & !Transparent(door) & !Opened(door)))
 }
 
 entity Guard { Actor, Locatable, Describable }
@@ -410,7 +331,7 @@ after TalkTo(actor: Actor, speaker: Speaker) {
 -- TalkAbout navigates from the current topic to one of its LeadsTo children.
 -- It is no longer an entry point; players must TalkTo first.
 predicate WillTalkAbout(actor: Actor, speaker: Speaker, subTopic: Topic) {
-  when (InConversation(actor, speaker, ?topic) & LeadsTo(speaker, ?topic, subTopic)) {
+  when (InConversation(actor, speaker, ?topic) & LeadsTo(speaker, topic, subTopic)) {
     succeed;
   }
 }
@@ -424,7 +345,7 @@ replace action TalkAbout(actor: Actor, speaker: Speaker, topic: Topic) {
 -- Record the back-pointer before InConversation is displaced, then advance.
 after TalkAbout(actor: Actor, speaker: Speaker, topic: Topic) {
   when (InConversation(actor, speaker, ?current)) {
-    set TopicHistory(actor, speaker, topic, ?current);
+    set TopicHistory(actor, speaker, topic, current);
   }
   set InConversation(actor, speaker, topic);
 }
@@ -432,22 +353,22 @@ after TalkAbout(actor: Actor, speaker: Speaker, topic: Topic) {
 -- SwitchTopics backs up one step along the history chain. Fails at the root
 -- of the conversation tree, which is where the UI flips to "Leave".
 action SwitchTopics(actor: Actor, speaker: Speaker) {
-  when (InConversation(actor, speaker, ?current) & TopicHistory(actor, speaker, ?current, ?prev)) {
-    set !TopicHistory(actor, speaker, ?current, ?prev);
-    set InConversation(actor, speaker, ?prev);
+  when (InConversation(actor, speaker, ?current) & TopicHistory(actor, speaker, current, ?prev)) {
+    set !TopicHistory(actor, speaker, current, prev);
+    set InConversation(actor, speaker, prev);
   }
 }
 
 action StopTalking(actor: Actor, speaker: Speaker) {
   when (InConversation(actor, speaker, ?topic)) {
-    set !InConversation(actor, speaker, ?topic);
+    set !InConversation(actor, speaker, topic);
   }
 }
 
 -- Topics enumerates the navigable children of the current topic. The conversation
 -- menu reads this; results outside the menu loop are unused.
 query Topics(actor: Actor, speaker: Speaker) {
-  InConversation(actor, speaker, ?current) & LeadsTo(speaker, ?current, ?topic)
+  InConversation(actor, speaker, ?current) & LeadsTo(speaker, current, ?topic)
 }
 
 -- Current conversation header — used to render "Talking about <topic>".
@@ -458,7 +379,7 @@ query CurrentTopic(actor: Actor, speaker: Speaker) {
 -- The menu probes this to decide whether the back option is "change topics"
 -- (history exists) or "leave" (we're at the root).
 query PreviousTopic(actor: Actor, speaker: Speaker) {
-  InConversation(actor, speaker, ?current) & TopicHistory(actor, speaker, ?current, ?prev)
+  InConversation(actor, speaker, ?current) & TopicHistory(actor, speaker, current, ?prev)
 }
 
 set {
@@ -526,8 +447,8 @@ mockup start { MainMenu(Player) }
 mockup MainMenu(cursor: Actor { At(cursor, ?here) }) {
   title { here }
   detail {
-    "visible here: " Visible(cursor)
-    "exits: " Adjacent(cursor)
+    "visible here: " GetVisibles(cursor)
+    "exits: " GetExits(cursor)
   }
   options {
     "go" -> GoMenu(cursor)
@@ -546,10 +467,10 @@ mockup MainMenu(cursor: Actor { At(cursor, ?here) }) {
 mockup InventoryMenu(cursor: Actor) {
   title { "Inventory" }
   detail {
-    "carrying: " Inventory(cursor)
+    "carrying: " GetInventory(cursor)
   }
   options {
-    item: Inventory(cursor) -> Examine(cursor, item)
+    item: GetInventory(cursor) -> Examine(cursor, item)
     "back" -> MainMenu(cursor)
   }
 }
@@ -565,7 +486,7 @@ mockup GoMenu(cursor: Actor { At(cursor, ?here) }) {
 mockup TakeMenu(cursor: Actor) {
   title { "Take..." }
   options {
-    item: Visible(cursor) -> Take(cursor, item)
+    item: GetVisibles(cursor) -> Take(cursor, item)
     "never mind" -> MainMenu(cursor)
   }
 }
@@ -581,7 +502,7 @@ mockup DropMenu(cursor: Actor) {
 mockup ExamineMenu(cursor: Actor) {
   title { "Examine..." }
   options {
-    item: Visible(cursor) -> Examine(cursor, item)
+    item: GetVisibles(cursor) -> Examine(cursor, item)
     "never mind" -> MainMenu(cursor)
   }
 }
@@ -589,7 +510,7 @@ mockup ExamineMenu(cursor: Actor) {
 mockup OpenMenu(cursor: Actor) {
   title { "Open..." }
   options {
-    item: Visible(cursor) -> Open(cursor, item)
+    item: GetVisibles(cursor) -> Open(cursor, item)
     "never mind" -> MainMenu(cursor)
   }
 }
@@ -597,7 +518,7 @@ mockup OpenMenu(cursor: Actor) {
 mockup CloseMenu(cursor: Actor) {
   title { "Close..." }
   options {
-    item: Visible(cursor) -> Close(cursor, item)
+    item: GetVisibles(cursor) -> Close(cursor, item)
     "never mind" -> MainMenu(cursor)
   }
 }
@@ -605,7 +526,7 @@ mockup CloseMenu(cursor: Actor) {
 mockup UnlockMenu(cursor: Actor) {
   title { "Unlock..." }
   options {
-    item: Visible(cursor) -> UnlockWithMenu(cursor, item)
+    item: GetVisibles(cursor) -> UnlockWithMenu(cursor, item)
     "never mind" -> MainMenu(cursor)
   }
 }
@@ -621,7 +542,7 @@ mockup UnlockWithMenu(cursor: Actor, item) {
 mockup LockMenu(cursor: Actor) {
   title { "Lock..." }
   options {
-    item: Visible(cursor) -> LockWithMenu(cursor, item)
+    item: GetVisibles(cursor) -> LockWithMenu(cursor, item)
     "never mind" -> MainMenu(cursor)
   }
 }
@@ -637,7 +558,7 @@ mockup LockWithMenu(cursor: Actor, item) {
 mockup TalkToMenu(cursor: Actor) {
   title { "Talk to..." }
   options {
-    speaker: Visible(cursor) -> TalkTo(cursor, speaker) -> TalkMenu(cursor, speaker)
+    speaker: GetVisibles(cursor) -> TalkTo(cursor, speaker) -> TalkMenu(cursor, speaker)
     "never mind" -> MainMenu(cursor)
   }
 }

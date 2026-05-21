@@ -245,6 +245,7 @@ function emitRule(statement: RuleStatement): string {
 function emitNamespace(statement: NamespaceStatement): string {
   const statements = [
     ...statement.entities.map(emitEntity),
+    ...(statement.extends ?? []).map(emitExtend),
     ...statement.sets.map(emitSet),
   ];
   return `namespace ${statement.id} {\n${statements.map(indent).join("\n")}\n}`;

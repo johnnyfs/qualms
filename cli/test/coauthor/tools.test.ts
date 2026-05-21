@@ -19,7 +19,7 @@ function freshModel(): InstanceType<typeof language.StoryModel> {
       }
 
       action Go(actor: (Actor & Locatable) { At(actor, ?here) }, target: Location) {
-        when (Path(?here, target)) {
+        when (Path(here, target)) {
           set At(actor, target)
         }
       }

@@ -209,7 +209,7 @@ classDiagram
 Notes:
 
 - `Term` of kind `relationInstance` carries a nested `RelationAtom`,
-  enabling relation-valued arguments such as `Gated(Path(?here, target),
+  enabling relation-valued arguments such as `Gated(Path(here, target),
   ?door)`. Nested relations are by-reference: the runtime treats the
   embedded tuple as a pointer to a fact in the store, and a wrapper match
   succeeds only when the referenced inner fact is present. See
