@@ -52,6 +52,22 @@ function makeCtx(model: InstanceType<typeof language.StoryModel>): {
 }
 
 describe("coauthor tools", () => {
+  it("read_skill returns story designer guidance", async () => {
+    const model = freshModel();
+    const { ctx, transcript } = makeCtx(model);
+    const tools = buildTools(ctx);
+    const result = (await tools.read_skill.execute!(
+      { skill: "story_designer" },
+      { toolCallId: "1", messages: [] },
+    )) as { kind: string; id: string; body: string };
+
+    expect(result.kind).toBe("skill");
+    expect(result.id).toBe("story_designer");
+    expect(result.body).toContain("Use this skill when the writer asks you to be creative");
+    expect(transcript).toContainEqual({ kind: "input", text: "skill story_designer" });
+    expect(transcript).toContainEqual({ kind: "info", text: "skill: Story Designer" });
+  });
+
   it("query renders the DSL expression and JSON rows", async () => {
     const model = freshModel();
     const { ctx, transcript } = makeCtx(model);

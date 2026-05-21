@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { renderSkillList } from "./skills.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -75,6 +76,9 @@ Transactions (this is critical):
 
 Tools you can call (their inputs and outputs are rendered to the writer
 as DSL lines):
+- "read_skill": load detailed guidance for one of your available skills.
+  Use it before acting when a skill's "use when" condition matches the
+  writer's request.
 - "query": run a DSL expression like "At(?actor, ?room)" or a "show"
   command ("show", "show action Go", "show predicate IsColocated").
   Prefer this BEFORE mutating — investigate the current model.
@@ -85,6 +89,9 @@ as DSL lines):
 - "ask_user": ask the writer a clarifying question. Their reply comes
   back to you as the tool result. Use this when intent is genuinely
   ambiguous; never use it as filler.
+
+Skills available:
+${renderSkillList()}
 
 Working style:
 - One coherent mutation block per turn. Don't sprinkle "begin;" and

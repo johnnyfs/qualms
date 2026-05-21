@@ -3,6 +3,7 @@ import { z } from "zod";
 import { language } from "@quealm/qualms";
 import type { TranscriptEntry } from "../types.js";
 import { formatEffect, formatPlayResult, formatProgramEffects } from "../format.js";
+import { findSkill, renderSkillList } from "./skills.js";
 
 type StoryModel = language.StoryModel;
 type Effect = language.Effect;
@@ -39,6 +40,40 @@ type QueryRow = Record<string, unknown>;
 
 export function buildTools(ctx: CoauthorContext) {
   return {
+    read_skill: tool({
+      description:
+        "Load detailed guidance for an available coauthor skill. Use when the writer's request matches a skill listed in the system prompt.",
+      inputSchema: z.object({
+        skill: z
+          .string()
+          .describe("Skill id or name, e.g. 'story_designer' or 'Story Designer'."),
+      }),
+      execute: async ({ skill }) => {
+        const trimmed = skill.trim();
+        const entries: TranscriptEntry[] = [{ kind: "input", text: `skill ${trimmed}` }];
+        const found = findSkill(trimmed);
+        if (!found) {
+          entries.push({ kind: "error", text: `! unknown skill '${trimmed}'` });
+          entries.push({ kind: "info", text: `available skills:\n${renderSkillList()}` });
+          ctx.append(entries);
+          return {
+            kind: "error",
+            error: `unknown skill '${trimmed}'`,
+            available: renderSkillList(),
+          };
+        }
+        entries.push({ kind: "info", text: `skill: ${found.name}` });
+        ctx.append(entries);
+        return {
+          kind: "skill",
+          id: found.id,
+          name: found.name,
+          useWhen: found.useWhen,
+          body: found.body,
+        };
+      },
+    }),
+
     query: tool({
       description:
         "Inspect the loaded story. Pass a DSL expression like 'At(?actor, ?room)' to get binding rows, or one of: 'show', 'show <kind>' (trait | relation | predicate | action | entity | rule | validation), 'show <kind> <name>'.",
