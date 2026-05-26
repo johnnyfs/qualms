@@ -30,6 +30,7 @@ import type {
   Term,
   TopLevelStatement,
   TraitStatement,
+  TryStatement,
   TypeExpr,
   UndefCaseStatement,
   ValidationAssertion,
@@ -596,6 +597,7 @@ class Parser {
     const entities: EntityStatement[] = [];
     const extends_: ExtendStatement[] = [];
     const sets: SetStatement[] = [];
+    const rules: RuleStatement[] = [];
     while (!this.at("rbrace")) {
       this.skipSemis();
       if (this.at("rbrace")) break;
@@ -605,8 +607,12 @@ class Parser {
         extends_.push(this.extendStatement());
       } else if (this.matchKeyword("set")) {
         sets.push(this.setStatement());
+      } else if (this.matchKeyword("before")) {
+        rules.push(this.ruleStatement("before"));
+      } else if (this.matchKeyword("after")) {
+        rules.push(this.ruleStatement("after"));
       } else {
-        this.fail(`namespace '${id}' can only contain entity, extend, or set declarations`);
+        this.fail(`namespace '${id}' can only contain entity, extend, set, before, or after declarations`);
       }
       this.skipSemis();
     }
@@ -617,6 +623,7 @@ class Parser {
       entities,
       ...(extends_.length > 0 ? { extends: extends_ } : {}),
       sets,
+      ...(rules.length > 0 ? { rules } : {}),
     };
   }
 
@@ -718,6 +725,7 @@ class Parser {
     if (this.matchKeyword("when")) return this.whenStatement();
     if (this.matchKeyword("set")) return this.setStatement();
     if (this.matchKeyword("emit")) return this.emitStatement();
+    if (this.matchKeyword("try")) return this.tryStatement();
     if (this.matchKeyword("succeed")) return this.succeedStatement();
     if (this.matchKeyword("fail")) return this.failStatement();
     this.fail(`expected body statement, got '${this.peek().image}'`);
@@ -772,6 +780,20 @@ class Parser {
     const atom = this.relationAtom();
     this.consumeIf("semi");
     return { kind: "emit", atom };
+  }
+
+  private tryStatement(): TryStatement {
+    this.expectKeyword("try");
+    this.expect("lbrace");
+    const calls: RelationAtom[] = [];
+    while (!this.at("rbrace")) {
+      this.skipSemis();
+      if (this.at("rbrace")) break;
+      calls.push(this.relationAtom());
+      this.consumeIf("semi");
+    }
+    this.expect("rbrace");
+    return { kind: "try", calls };
   }
 
   private validationStatement(): ValidationStatement {

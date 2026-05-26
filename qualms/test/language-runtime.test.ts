@@ -308,10 +308,10 @@ describe("tutorial language runtime", () => {
     const blocked = playLanguageCall(model, "Examine(Player, Mop)");
     expect(blocked.status).toBe("failed");
     // The failure chain should surface the visibility before-rule's failed
-    // when-condition — i.e. that the path is gated by an opaque closed door.
-    expect(blocked.reasons.some((r) => r.includes("Gated") && r.includes("Opaque"))).toBe(true);
+    // when-condition — i.e. that the path is gated by a door that blocks visibility.
+    expect(blocked.reasons.some((r) => r.includes("Gated") && r.includes("DoesBlockVisibility"))).toBe(true);
 
-    // Opening the ClosetDoor restores visibility: Opaque(ClosetDoor) becomes
+    // Opening the ClosetDoor restores visibility: DoesBlockVisibility(ClosetDoor) becomes
     // false, the `!(Gated & Opaque)` clause holds, IsVisibleTo passes.
     expect(playLanguageCall(model, "Open(Player, ClosetDoor)").status).toBe("passed");
     expect(playLanguageCall(model, "Examine(Player, Mop)").status).toBe("passed");
@@ -483,6 +483,87 @@ describe("tutorial language runtime", () => {
     ).toBe(true);
   });
 
+  it("namespace rules resolve scoped entities but remain attached to global actions", () => {
+    const model = loadStoryProgram(`
+      trait Actor
+      trait Location
+
+      relation At(actor: Actor, location: Location) unique(actor)
+      relation Flag(Actor, Actor)
+
+      action Wave(actor: Actor, target: Actor) {
+        succeed;
+      }
+
+      entity Player { Actor }
+      entity Guard { Actor }
+
+      namespace ActOne {
+        entity Cell { Location }
+        set At(Player, Cell)
+
+        after Wave(Player, Guard) {
+          when (At(Player, Cell)) {
+            set Flag(Player, Guard)
+          }
+        }
+      }
+    `);
+
+    expect(playLanguageCall(model, "Wave(Player, Guard)").status).toBe("passed");
+    expect(model.hasFact("Flag", [idTerm("Player"), idTerm("Guard")])).toBe(true);
+  });
+
+  it("try blocks run passing action calls in order and skip failed attempts", () => {
+    const model = loadStoryProgram(`
+      trait Actor
+      trait Location
+      trait Item
+
+      relation At(actor: Actor, location: Location) unique(actor)
+      relation Path(Location, Location)
+      relation Has(Actor, Item)
+
+      action Go(actor: Actor { At(actor, ?here) }, target: Location) {
+        when (Path(here, target)) {
+          set At(actor, target)
+        }
+      }
+
+      action Take(actor: Actor, item: Item) {
+        set Has(actor, item)
+      }
+
+      action Trigger(actor: Actor) {
+        succeed;
+      }
+
+      after Trigger(actor: Actor) {
+        try {
+          Go(actor, Outside);
+          Go(actor, Corridor);
+          Take(actor, Key);
+        }
+      }
+
+      entity Player { Actor }
+      entity Cell { Location }
+      entity Corridor { Location }
+      entity Outside { Location }
+      entity Key { Item }
+
+      set {
+        At(Player, Cell);
+        Path(Cell, Corridor);
+      }
+    `);
+
+    expect(playLanguageCall(model, "Trigger(Player)").status).toBe("passed");
+    expect(model.hasFact("At", [idTerm("Player"), idTerm("Corridor")])).toBe(true);
+    expect(model.hasFact("At", [idTerm("Player"), idTerm("Outside")])).toBe(false);
+    expect(model.hasFact("Has", [idTerm("Player"), idTerm("Key")])).toBe(true);
+  });
+
   it("section 8 — OfferAFavor needs the player to walk Whatever → Bribery first", () => {
     const model = loadStoryProgram(readFileSync(TUTORIAL_PATH, "utf-8"));
 
@@ -547,6 +628,23 @@ describe("tutorial language runtime", () => {
     expect(playLanguageCall(model, "Unlock(Player, Bars, MasterKey)").status).toBe("passed");
     expect(playLanguageCall(model, "Open(Player, Bars)").status).toBe("passed");
     expect(playLanguageCall(model, "Go(Player, Corridor)").status).toBe("passed");
+  });
+
+  it("section 10 — BriberyIsWrong triggers the guard's combat sequence", () => {
+    const model = loadStoryProgram(readFileSync(TUTORIAL_PATH, "utf-8"));
+
+    const blocked = playLanguageCall(model, "Fight(Player, Guard)");
+    expect(blocked.status).toBe("failed");
+    expect(blocked.reasons).toContain("!Opened(Bars) & At(Player, Cell) & !At(Guard, Cell)");
+
+    expect(playLanguageCall(model, "TalkTo(Player, Guard)").status).toBe("passed");
+    expect(playLanguageCall(model, "TalkAbout(Player, Guard, Bribery)").status).toBe("passed");
+    expect(playLanguageCall(model, "TalkAbout(Player, Guard, BriberyIsWrong)").status).toBe("passed");
+
+    expect(model.hasFact("Locked", [idTerm("Bars")])).toBe(false);
+    expect(model.hasFact("Opened", [idTerm("Bars")])).toBe(true);
+    expect(model.hasFact("At", [idTerm("Guard"), idTerm("Cell")])).toBe(true);
+    expect(model.hasFact("EngagedInCombat", [idTerm("Guard"), idTerm("Player")])).toBe(true);
   });
 
   it("entity-literal parameter sugar binds only when the arg matches the entity", () => {

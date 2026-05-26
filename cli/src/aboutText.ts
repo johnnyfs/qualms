@@ -1,4 +1,4 @@
-export type AboutMode = "dsl" | "play" | "coauthor";
+export type AboutMode = "dsl" | "play" | "adaptive" | "coauthor";
 
 export interface AboutLine {
   readonly text: string;
@@ -55,6 +55,9 @@ export function buildAboutLines(mode: AboutMode): readonly AboutLine[] {
     },
     {
       text: `• Play mode${current("play")} lets you test the model through dynamic mockups defined by the story.`,
+    },
+    {
+      text: `• Adaptive mode${current("adaptive")} lets you play through an agent narrator that can inspect and play declared story actions without editing definitions.`,
     },
   ];
 }

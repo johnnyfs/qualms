@@ -247,6 +247,7 @@ function emitNamespace(statement: NamespaceStatement): string {
     ...statement.entities.map(emitEntity),
     ...(statement.extends ?? []).map(emitExtend),
     ...statement.sets.map(emitSet),
+    ...(statement.rules ?? []).map(emitRule),
   ];
   return `namespace ${statement.id} {\n${statements.map(indent).join("\n")}\n}`;
 }
@@ -315,6 +316,8 @@ function emitBodyStatement(statement: BodyStatement): string {
       return emitSet(statement);
     case "emit":
       return emitEmit(statement);
+    case "try":
+      return emitTry(statement.calls);
     case "succeed":
       return "succeed;";
     case "fail":
@@ -337,6 +340,10 @@ function emitSetEffect(effect: SetEffect): string {
 
 function emitEmit(statement: EmitStatement): string {
   return `emit ${emitRelationAtom(statement.atom)};`;
+}
+
+function emitTry(calls: readonly RelationAtom[]): string {
+  return `try {\n${calls.map((call) => indent(`${emitRelationAtom(call)};`)).join("\n")}\n}`;
 }
 
 function emitExpression(expression: Expression): string {

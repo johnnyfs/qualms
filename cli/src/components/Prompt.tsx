@@ -9,7 +9,7 @@ import {
 } from "../play/inputReducer.js";
 
 interface Props {
-  readonly mode: "dsl" | "play" | "coauthor";
+  readonly mode: "dsl" | "play" | "adaptive" | "coauthor";
   readonly onSubmit: (text: string) => void;
   readonly onCycleMode: () => void;
   readonly onExit: () => void;
@@ -78,7 +78,9 @@ export function Prompt({ mode, onSubmit, onCycleMode, onExit, pendingQuestion }:
   const modeLabel =
     mode === "coauthor"
       ? "mode: coauthor (shift+tab → dsl)"
-      : "mode: dsl      (shift+tab → play)";
+      : mode === "adaptive"
+        ? "mode: adaptive (shift+tab → coauthor)"
+        : "mode: dsl      (shift+tab → play)";
 
   return (
     <Box flexDirection="column">

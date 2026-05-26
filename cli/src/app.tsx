@@ -12,6 +12,7 @@ import {
   createPlaySession,
   type PlaySession,
 } from "./play/runner.js";
+import type { PlayConfig } from "./play/config.js";
 import {
   MenuController,
   initialPlayUiState,
@@ -27,14 +28,23 @@ import {
   handleCoauthorInput,
   type CoauthorSession,
 } from "./coauthor/runner.js";
+import {
+  cancelAdaptive,
+  createAdaptiveSession,
+  handleAdaptiveInput,
+  openingSceneEntries,
+  setAdaptiveTrace,
+  type AdaptiveSession,
+} from "./play/adaptiveRunner.js";
 import { buildAboutLines } from "./aboutText.js";
 import { defaultSaveTarget, saveStoryModel } from "./persistence.js";
 
-type Mode = "dsl" | "play" | "coauthor";
+type Mode = "dsl" | "play" | "adaptive" | "coauthor";
 
 interface AppProps {
   readonly initialModel: language.StoryModel;
   readonly storyPaths: readonly string[];
+  readonly playConfig: PlayConfig;
   readonly coauthorConfig?: CoauthorConfigResult;
 }
 
@@ -47,13 +57,24 @@ const DSL_HELP_LINES: readonly string[] = [
   "  /revert      restore the last saved model in memory",
   "  /show        print the current model counts",
   "  /reload      re-load the original story file(s)",
-  "  /mode <m>    switch mode (play | coauthor | dsl); shift-tab also cycles",
+  "  /mode <m>    switch mode (play | adaptive | coauthor | dsl); shift-tab also cycles",
   "  /quit        leave the app (Ctrl+C also works)",
 ];
 
 const PLAY_HELP_LINES: readonly string[] = [
   "Play mode — use the story's declared mockup start call.",
   "  Up/Down      navigate options",
+  "  /mode adaptive    switch to adaptive play mode (shift-tab also cycles)",
+];
+
+const ADAPTIVE_HELP_LINES: readonly string[] = [
+  "Adaptive mode — type what you want to do. The narrator maps your",
+  "intent to declared story actions and reports the result as game text.",
+  "  /look        show the current scene",
+  "  /trace       toggle inline DSL/query/action trace",
+  "  /trace on    show inline DSL/query/action trace",
+  "  /trace off   hide inline DSL/query/action trace",
+  "  /cancel      abort an in-flight narrator turn",
   "  /mode coauthor    switch to coauthor mode (shift-tab also cycles)",
 ];
 
@@ -65,6 +86,7 @@ const COAUTHOR_HELP_LINES: readonly string[] = [
   "  /revert      restore the last saved model in memory",
   "  /cancel      abort an in-flight agent turn or pending question",
   "  /about       explain what Qualms is for",
+  "  /mode adaptive    switch to adaptive play mode",
   "  /mode dsl    switch back to DSL mode (shift-tab also cycles)",
   "Configure provider/model via .env (see .env.template).",
 ];
@@ -72,6 +94,7 @@ const COAUTHOR_HELP_LINES: readonly string[] = [
 export function App({
   initialModel,
   storyPaths,
+  playConfig,
   coauthorConfig,
 }: AppProps) {
   const { exit } = useApp();
@@ -81,6 +104,7 @@ export function App({
   const [mode, setMode] = useState<Mode>(storyPaths.length === 0 ? "coauthor" : "play");
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [playUiState, setPlayUiState] = useState<PlayUiState>(initialPlayUiState);
+  const [adaptiveTrace, setAdaptiveTraceState] = useState(false);
 
   const session = useMemo<PlaySession>(
     () => createPlaySession(model),
@@ -88,6 +112,7 @@ export function App({
   );
 
   const coauthorSessionRef = useRef<CoauthorSession | null>(null);
+  const adaptiveSessionRef = useRef<AdaptiveSession | null>(null);
   const getCoauthorSession = useCallback((): CoauthorSession | null => {
     if (!coauthorConfig || isCoauthorConfigError(coauthorConfig)) return null;
     if (
@@ -98,6 +123,20 @@ export function App({
     }
     return coauthorSessionRef.current;
   }, [coauthorConfig, model]);
+  const getAdaptiveSession = useCallback((): AdaptiveSession | null => {
+    if (!coauthorConfig || isCoauthorConfigError(coauthorConfig)) return null;
+    if (
+      !adaptiveSessionRef.current ||
+      adaptiveSessionRef.current.model !== model ||
+      adaptiveSessionRef.current.playConfig !== playConfig
+    ) {
+      adaptiveSessionRef.current = createAdaptiveSession(model, coauthorConfig, playConfig, {
+        showTrace: adaptiveTrace,
+      });
+    }
+    setAdaptiveTrace(adaptiveSessionRef.current, adaptiveTrace);
+    return adaptiveSessionRef.current;
+  }, [adaptiveTrace, coauthorConfig, model, playConfig]);
 
   const seqRef = useRef(0);
   const keyed = useCallback(
@@ -121,6 +160,8 @@ export function App({
   const helpLines =
     mode === "play"
       ? PLAY_HELP_LINES
+      : mode === "adaptive"
+        ? ADAPTIVE_HELP_LINES
       : mode === "coauthor"
         ? COAUTHOR_HELP_LINES
         : DSL_HELP_LINES;
@@ -137,9 +178,6 @@ export function App({
         case "/help":
           return helpLines.map((text) => ({ kind: "info", text }) as TranscriptEntry);
         case "/about":
-          if (mode === "play") {
-            return [{ kind: "error", text: "/about is only available in DSL and coauthor modes" }];
-          }
           return buildAboutLines(mode).map((line) => ({
             kind: "info",
             text: line.text,
@@ -166,6 +204,7 @@ export function App({
           setPlayUiState(initialPlayUiState);
           setPendingQuestion(null);
           coauthorSessionRef.current = null;
+          adaptiveSessionRef.current = null;
           return [{ kind: "info", text: "reverted to the last saved model" }];
         }
         case "/show":
@@ -185,6 +224,7 @@ export function App({
             savedModelRef.current = reloaded.model.clone();
             saveTargetRef.current = defaultSaveTarget(reloaded.resolvedPaths);
             setPlayUiState(initialPlayUiState);
+            adaptiveSessionRef.current = null;
             return [{ kind: "info", text: `reloaded ${storyPaths.length} story file(s)` }];
           } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
@@ -193,9 +233,9 @@ export function App({
         }
         case "/mode": {
           const target = parts[1]?.toLowerCase();
-          if (target !== "dsl" && target !== "play" && target !== "coauthor") {
+          if (target !== "dsl" && target !== "play" && target !== "adaptive" && target !== "coauthor") {
             return [
-              { kind: "error", text: "usage: /mode play | /mode coauthor | /mode dsl" },
+              { kind: "error", text: "usage: /mode play | /mode adaptive | /mode coauthor | /mode dsl" },
             ];
           }
           if (target === mode) {
@@ -204,8 +244,19 @@ export function App({
           return cycleTo(target);
         }
         case "/look": {
+          if (mode === "adaptive") {
+            const adaptive = getAdaptiveSession();
+            if (!adaptive) {
+              const reason =
+                coauthorConfig && isCoauthorConfigError(coauthorConfig)
+                  ? coauthorConfig.error
+                  : "adaptive mode is not configured (missing .env)";
+              return [{ kind: "error", text: `error: ${reason}` }];
+            }
+            return openingSceneEntries(adaptive);
+          }
           if (mode !== "play") {
-            return [{ kind: "error", text: "/look is only available in play mode" }];
+            return [{ kind: "error", text: "/look is only available in play and adaptive modes" }];
           }
           return [
             {
@@ -215,8 +266,14 @@ export function App({
           ];
         }
         case "/cancel": {
+          if (mode === "adaptive") {
+            const adaptive = adaptiveSessionRef.current;
+            if (!adaptive || !adaptive.running) return [{ kind: "info", text: "nothing to cancel" }];
+            cancelAdaptive(adaptive);
+            return [{ kind: "info", text: "cancel requested" }];
+          }
           if (mode !== "coauthor") {
-            return [{ kind: "error", text: "/cancel is only available in coauthor mode" }];
+            return [{ kind: "error", text: "/cancel is only available in coauthor and adaptive modes" }];
           }
           const cs = coauthorSessionRef.current;
           if (!cs || (!cs.running && !cs.pending)) {
@@ -225,11 +282,28 @@ export function App({
           cancelCoauthor(cs, { append, setPendingQuestion });
           return [{ kind: "info", text: "cancel requested" }];
         }
+        case "/trace": {
+          if (mode !== "adaptive") {
+            return [{ kind: "error", text: "/trace is only available in adaptive mode" }];
+          }
+          const value = parts[1]?.toLowerCase();
+          const next =
+            value === "on" ? true :
+            value === "off" ? false :
+            value === undefined ? !adaptiveTrace :
+            undefined;
+          if (next === undefined) {
+            return [{ kind: "error", text: "usage: /trace | /trace on | /trace off" }];
+          }
+          setAdaptiveTraceState(next);
+          if (adaptiveSessionRef.current) setAdaptiveTrace(adaptiveSessionRef.current, next);
+          return [{ kind: "info", text: `trace: ${next ? "on" : "off"}` }];
+        }
         default:
           return [{ kind: "error", text: `error: unknown command '${head}'` }];
       }
     },
-    [exit, helpLines, mode, model, storyPaths],
+    [adaptiveTrace, coauthorConfig, exit, getAdaptiveSession, helpLines, mode, model, storyPaths],
   );
 
   const cycleTo = useCallback(
@@ -243,15 +317,22 @@ export function App({
       ];
       if (next === "coauthor") {
         entries.push(...coauthorModeWarnings(coauthorConfig));
+      } else if (next === "adaptive") {
+        const adaptive = getAdaptiveSession();
+        if (!adaptive) {
+          entries.push(...adaptiveModeWarnings(coauthorConfig));
+        } else {
+          entries.push(...openingSceneEntries(adaptive));
+        }
       }
       return entries;
     },
-    [coauthorConfig],
+    [coauthorConfig, getAdaptiveSession],
   );
 
   const onCycleMode = useCallback(() => {
     const next: Mode =
-      mode === "play" ? "coauthor" : mode === "coauthor" ? "dsl" : "play";
+      mode === "play" ? "adaptive" : mode === "adaptive" ? "coauthor" : mode === "coauthor" ? "dsl" : "play";
     append(cycleTo(next));
   }, [append, cycleTo, mode]);
 
@@ -267,6 +348,20 @@ export function App({
       if (mode === "play") {
         // Play mode is menu-driven; text input is impossible (this branch
         // is unreachable since MenuController replaces the prompt).
+        return;
+      }
+      if (mode === "adaptive") {
+        append([echo]);
+        const adaptive = getAdaptiveSession();
+        if (!adaptive) {
+          const reason =
+            coauthorConfig && isCoauthorConfigError(coauthorConfig)
+              ? coauthorConfig.error
+              : "adaptive mode is not configured (missing .env)";
+          append([{ kind: "error", text: `error: ${reason}` }]);
+          return;
+        }
+        void handleAdaptiveInput(adaptive, text, { append });
         return;
       }
       if (mode === "coauthor") {
@@ -286,7 +381,7 @@ export function App({
       const entries = handleInput(model, text);
       append([echo, ...entries]);
     },
-    [append, coauthorConfig, getCoauthorSession, mode, model, runSlash],
+    [append, coauthorConfig, getAdaptiveSession, getCoauthorSession, mode, model, runSlash],
   );
 
   if (mode === "play") {
@@ -325,6 +420,18 @@ function coauthorModeWarnings(
   }
   if (!coauthorConfig) {
     return [{ kind: "error", text: "error: coauthor mode is not configured (missing .env)" }];
+  }
+  return [];
+}
+
+function adaptiveModeWarnings(
+  coauthorConfig: CoauthorConfigResult | undefined,
+): readonly TranscriptEntry[] {
+  if (coauthorConfig && isCoauthorConfigError(coauthorConfig)) {
+    return [{ kind: "error", text: `error: ${coauthorConfig.error}` }];
+  }
+  if (!coauthorConfig) {
+    return [{ kind: "error", text: "error: adaptive mode is not configured (missing .env)" }];
   }
   return [];
 }

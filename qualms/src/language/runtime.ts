@@ -700,10 +700,36 @@ function executeBodyStatement(
     case "emit":
       applyEmit(model, statement.atom, env, events);
       return { status: "passed", env, reasons: [] };
+    case "try":
+      executeTry(model, statement.calls, env, effects, events, options);
+      return { status: "passed", env, reasons: [] };
     case "succeed":
       return { status: "passed", env, reasons: [], terminal: "succeed" };
     case "fail":
       return { status: "failed", env, reasons: ["fail"], terminal: "fail" };
+  }
+}
+
+function executeTry(
+  model: StoryModel,
+  calls: readonly RelationAtom[],
+  env: Env,
+  effects: Effect[],
+  events: LanguageEvent[],
+  options: LanguageRuntimeOptions,
+): void {
+  for (const call of calls) {
+    const atom = groundAtom(model, call, env);
+    const callable = model.actions.get(atom.relation);
+    if (!callable) continue;
+    const args = atom.args.map((arg) => model.groundTermFromTerm(arg));
+    const actionEffects: Effect[] = [];
+    const actionEvents: LanguageEvent[] = [];
+    const result = executeCallable(model, callable, args, "action", actionEffects, actionEvents, options);
+    if (result.status !== "passed") continue;
+    commitEffects(model, actionEffects);
+    effects.push(...actionEffects);
+    events.push(...actionEvents);
   }
 }
 

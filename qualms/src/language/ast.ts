@@ -157,6 +157,7 @@ export interface NamespaceStatement {
   readonly entities: readonly EntityStatement[];
   readonly extends?: readonly ExtendStatement[];
   readonly sets: readonly SetStatement[];
+  readonly rules?: readonly RuleStatement[];
 }
 
 export interface EntityStatement {
@@ -213,7 +214,7 @@ export interface Block {
   readonly statements: readonly BodyStatement[];
 }
 
-export type BodyStatement = WhenStatement | SetStatement | EmitStatement | SucceedStatement | FailStatement;
+export type BodyStatement = WhenStatement | SetStatement | EmitStatement | TryStatement | SucceedStatement | FailStatement;
 
 export interface WhenStatement {
   readonly kind: "when";
@@ -237,6 +238,11 @@ export interface SetEffect {
 export interface EmitStatement {
   readonly kind: "emit";
   readonly atom: RelationAtom;
+}
+
+export interface TryStatement {
+  readonly kind: "try";
+  readonly calls: readonly RelationAtom[];
 }
 
 export interface ParameterPattern {

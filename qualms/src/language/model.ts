@@ -86,6 +86,7 @@ const RESERVED_LOCAL_NAMES = new Set([
   "set",
   "succeed",
   "trait",
+  "try",
   "undef",
   "unique",
   "validation",
@@ -355,6 +356,109 @@ export class StoryModel {
     for (const entity of statement.entities) this.addEntity(entity, statement.id);
     for (const extend of statement.extends ?? []) this.extendEntity(extend, statement.id);
     for (const set of statement.sets) this.applySet(set.effects, sink, statement.id);
+    for (const rule of statement.rules ?? []) {
+      const scopedRule = this.scopeRule(rule, statement.id);
+      this.validateRule(scopedRule);
+      this.validateRulePurity(scopedRule);
+      this.rules.push(scopedRule);
+    }
+  }
+
+  private scopeRule(statement: RuleStatement, namespace: string): RuleStatement {
+    return {
+      ...statement,
+      parameters: statement.parameters.map((parameter) => ({
+        ...parameter,
+        ...(parameter.type ? { type: this.scopeTypeExpr(parameter.type, namespace) } : {}),
+        constraints: parameter.constraints.map((constraint) => this.scopeExpression(constraint, namespace)),
+      })),
+      body: this.scopeBlock(statement.body, namespace),
+    };
+  }
+
+  private scopeBlock(block: Block, namespace: string): Block {
+    return {
+      statements: block.statements.map((bodyStatement) => {
+        switch (bodyStatement.kind) {
+          case "when":
+            return {
+              ...bodyStatement,
+              condition: this.scopeExpression(bodyStatement.condition, namespace),
+              body: this.scopeBlock(bodyStatement.body, namespace),
+            };
+          case "set":
+            return {
+              ...bodyStatement,
+              effects: bodyStatement.effects.map((effect) => ({
+                ...effect,
+                atom: this.scopeAtom(effect.atom, namespace),
+              })),
+            };
+          case "emit":
+            return { ...bodyStatement, atom: this.scopeAtom(bodyStatement.atom, namespace) };
+          case "try":
+            return { ...bodyStatement, calls: bodyStatement.calls.map((call) => this.scopeAtom(call, namespace)) };
+          case "succeed":
+          case "fail":
+            return bodyStatement;
+        }
+      }),
+    };
+  }
+
+  private scopeExpression(expression: Expression, namespace: string): Expression {
+    switch (expression.kind) {
+      case "relation":
+        return { ...expression, atom: this.scopeAtom(expression.atom, namespace) };
+      case "not":
+        return { ...expression, operand: this.scopeExpression(expression.operand, namespace) };
+      case "binary":
+        return {
+          ...expression,
+          left: this.scopeExpression(expression.left, namespace),
+          right: this.scopeExpression(expression.right, namespace),
+        };
+      case "equal":
+        return {
+          ...expression,
+          left: this.scopeTerm(expression.left, namespace),
+          right: this.scopeTerm(expression.right, namespace),
+        };
+    }
+  }
+
+  private scopeAtom(atom: RelationAtom, namespace: string): RelationAtom {
+    return {
+      relation: atom.relation,
+      args: atom.args.map((term) => this.scopeTerm(term, namespace)),
+    };
+  }
+
+  private scopeTerm(term: Term, namespace: string): Term {
+    switch (term.kind) {
+      case "identifier":
+        return { ...term, id: this.scopedEntityId(term.id, namespace) };
+      case "relationInstance":
+        return {
+          ...term,
+          atom: {
+            relation: term.atom.relation,
+            args: term.atom.args.map((arg) => this.scopeTerm(arg, namespace)),
+          },
+        };
+      case "variable":
+      case "wildcard":
+      case "string":
+      case "number":
+        return term;
+    }
+  }
+
+  private scopeTypeExpr(type: TypeExpr, namespace: string): TypeExpr {
+    if (type.kind === "intersection") {
+      return { ...type, types: type.types.map((inner) => this.scopeTypeExpr(inner, namespace)) };
+    }
+    return { ...type, id: this.scopedEntityId(type.id, namespace) };
   }
 
   private addEntity(statement: EntityStatement, namespace?: string): void {
@@ -412,8 +516,9 @@ export class StoryModel {
     validateModelName(statement.id, kind);
     validateCallableScope(statement);
     this.validateCallableTypes(statement);
+    this.validateBlockActionCalls(statement.body, `${kind} '${statement.id}' body`);
     if (kind === "predicate" && blockContainsImpureStatement(statement.body)) {
-      throw new LanguageModelError(`predicate '${statement.id}' cannot contain set or emit effects`);
+      throw new LanguageModelError(`predicate '${statement.id}' cannot contain set, emit, or try effects`);
     }
     if (statement.replace) {
       if (!map.has(statement.id)) {
@@ -521,7 +626,7 @@ export class StoryModel {
     if (!this.predicates.has(statement.target)) return;
     if (blockContainsImpureStatement(statement.body)) {
       throw new LanguageModelError(
-        `rule for predicate '${statement.target}' cannot contain set or emit effects`,
+        `rule for predicate '${statement.target}' cannot contain set, emit, or try effects`,
       );
     }
   }
@@ -612,6 +717,7 @@ export class StoryModel {
       if (parameter.type) this.validateTypeExpr(parameter.type);
     }
     validateRuleScope(statement);
+    this.validateBlockActionCalls(statement.body, `${statement.phase} rule '${statement.target}' body`);
   }
 
   private validateActionCase(statement: StoredActionCaseStatement): void {
@@ -626,6 +732,26 @@ export class StoryModel {
       if (parameter.type) this.validateTypeExpr(parameter.type);
     }
     validateActionCaseScope(statement);
+    this.validateBlockActionCalls(statement.body, `case '${statement.id}' body`);
+  }
+
+  private validateBlockActionCalls(block: Block, label: string): void {
+    for (const statement of block.statements) {
+      if (statement.kind === "when") {
+        this.validateBlockActionCalls(statement.body, `${label} when`);
+        continue;
+      }
+      if (statement.kind !== "try") continue;
+      for (const call of statement.calls) {
+        const action = this.actions.get(call.relation);
+        if (!action) throw new LanguageModelError(`${label} try references unknown action '${call.relation}'`);
+        if (action.parameters.length !== call.args.length) {
+          throw new LanguageModelError(
+            `${label} try action '${call.relation}' expects ${action.parameters.length} args, got ${call.args.length}`,
+          );
+        }
+      }
+    }
   }
 
   private validateTypeExpr(type: TypeExpr): void {
@@ -930,6 +1056,9 @@ function validateBlock(block: Block, locals: Set<string>, label: string): ScopeV
       case "emit":
         validateAtomReferences(statement.atom, current, `${label} emit`);
         break;
+      case "try":
+        for (const call of statement.calls) validateAtomReferences(call, current, `${label} try`);
+        break;
       case "succeed":
       case "fail":
         break;
@@ -1033,7 +1162,7 @@ function blockContainsImpureStatement(block: Block): boolean {
 }
 
 function statementContainsImpureStatement(statement: BodyStatement): boolean {
-  if (statement.kind === "set" || statement.kind === "emit") return true;
+  if (statement.kind === "set" || statement.kind === "emit" || statement.kind === "try") return true;
   if (statement.kind === "when") return blockContainsImpureStatement(statement.body);
   return false;
 }

@@ -6,6 +6,13 @@ import { App } from "./app.js";
 import { loadStories } from "./story.js";
 import { language } from "@quealm/qualms";
 import { loadCoauthorConfig } from "./coauthor/config.js";
+import {
+  defaultPlayConfig,
+  discoverPlayConfigPath,
+  loadPlayConfig,
+  validatePlayConfig,
+  type PlayConfig,
+} from "./play/config.js";
 
 interface ParsedArgs {
   storyPaths: string[];
@@ -55,10 +62,16 @@ function main(): void {
 
   let initialModel: language.StoryModel;
   let resolvedPaths: readonly string[];
+  let playConfig: PlayConfig;
   try {
     const loaded = loadStories(args.storyPaths);
     initialModel = loaded.model;
     resolvedPaths = loaded.resolvedPaths;
+    const configPath = resolvedPaths.map(discoverPlayConfigPath).find(Boolean);
+    playConfig = configPath ? loadPlayConfig(configPath) : defaultPlayConfig();
+    for (const warning of validatePlayConfig(playConfig, initialModel)) {
+      process.stderr.write(`qualms-cli: ${warning}\n`);
+    }
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     process.stderr.write(`qualms-cli: failed to load stories: ${message}\n`);
@@ -71,6 +84,7 @@ function main(): void {
     React.createElement(App, {
       initialModel,
       storyPaths: resolvedPaths,
+      playConfig,
       coauthorConfig,
     }),
   );

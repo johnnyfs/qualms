@@ -22,12 +22,12 @@ describe("tutorial language model", () => {
     const source = readFileSync(TUTORIAL_PATH, "utf-8");
     const model = loadStoryProgram(source);
 
-    expect(model.traits.size).toBe(10);
-    expect(model.relations.size).toBe(13);
+    expect(model.traits.size).toBe(11);
+    expect(model.relations.size).toBe(14);
     expect(model.predicates.size).toBe(5);
-    expect(model.actions.size).toBe(12);
+    expect(model.actions.size).toBe(13);
     expect(model.actionCases.map((actionCase) => actionCase.id)).toEqual([]);
-    expect(model.rules).toHaveLength(9);
+    expect(model.rules).toHaveLength(11);
     expect(model.startingMockup).toMatchObject({ relation: "MainMenu" });
     expect(model.validations.size).toBe(1);
     expect(model.entities.size).toBe(20);

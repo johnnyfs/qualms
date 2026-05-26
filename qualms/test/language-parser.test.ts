@@ -14,15 +14,15 @@ describe("tutorial language parser", () => {
     const source = readFileSync(TUTORIAL_PATH, "utf-8");
     const program = parseProgram(source);
 
-    expect(program.statements.filter((s) => s.kind === "trait")).toHaveLength(10);
-    expect(program.statements.filter((s) => s.kind === "relation")).toHaveLength(13);
+    expect(program.statements.filter((s) => s.kind === "trait")).toHaveLength(11);
+    expect(program.statements.filter((s) => s.kind === "relation")).toHaveLength(14);
     expect(program.statements.filter((s) => s.kind === "predicate")).toHaveLength(5);
-    expect(program.statements.filter((s) => s.kind === "action")).toHaveLength(15);
+    expect(program.statements.filter((s) => s.kind === "action")).toHaveLength(16);
     expect(program.statements.filter((s) => s.kind === "case")).toHaveLength(0);
     expect(program.statements.filter((s) => s.kind === "mockupStart")).toHaveLength(1);
-    expect(program.statements.filter((s) => s.kind === "mockup")).toHaveLength(14);
+    expect(program.statements.filter((s) => s.kind === "mockup")).toHaveLength(15);
     expect(program.statements.filter((s) => s.kind === "rule")).toHaveLength(9);
-    expect(program.statements.filter((s) => s.kind === "namespace")).toHaveLength(4);
+    expect(program.statements.filter((s) => s.kind === "namespace")).toHaveLength(5);
     expect(program.statements.filter((s) => s.kind === "entity")).toHaveLength(15);
     expect(program.statements.filter((s) => s.kind === "extend")).toHaveLength(2);
     expect(program.statements.filter((s) => s.kind === "set")).toHaveLength(5);
@@ -111,9 +111,33 @@ describe("tutorial language parser", () => {
     ]);
   });
 
+  it("parses before and after rules inside namespace blocks", () => {
+    const program = parseProgram(`
+      trait Actor
+      action Wave(actor: Actor, target: Actor) { succeed; }
+      namespace ActOne {
+        before Wave(Player, Guard) { fail; }
+        after Wave(Player, Guard) {
+          try {
+            Wave(Guard, Player);
+          }
+        }
+      }
+    `);
+    const namespace = program.statements.find((s) => s.kind === "namespace");
+    expect(namespace).toMatchObject({
+      kind: "namespace",
+      id: "ActOne",
+      rules: [
+        { kind: "rule", phase: "before", target: "Wave" },
+        { kind: "rule", phase: "after", target: "Wave" },
+      ],
+    });
+  });
+
   it("rejects unsupported declarations inside namespace blocks", () => {
     expect(() => parseProgram("namespace ActOne { trait Location }")).toThrow(
-      "namespace 'ActOne' can only contain entity, extend, or set declarations",
+      "namespace 'ActOne' can only contain entity, extend, set, before, or after declarations",
     );
   });
 

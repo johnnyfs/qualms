@@ -17,6 +17,10 @@ query GetExits(actor: Actor) {
   At(actor, ?here) & Path(here, ?target)
 }
 
+query Adjacent(actor: Actor) {
+  At(actor, ?here) & Path(here, ?target)
+}
+
 entity Player { Actor, Locatable }
 
 namespace ActOne {
@@ -66,6 +70,10 @@ trait Portable
 relation Carrying(Actor, item: Portable) unique(item)
 
 query GetInventory(actor: Actor) {
+  Carrying(actor, ?item)
+}
+
+query Inventory(actor: Actor) {
   Carrying(actor, ?item)
 }
 
@@ -247,6 +255,16 @@ query GetVisibles(actor: Actor) {
      & !(Gated(Path(here, location), ?door) & !Transparent(door) & !Opened(door)))
 }
 
+query Visible(actor: Actor) {
+  At(actor, ?target)
+  | (At(actor, ?here) & At(?target, here))
+  | Carrying(actor, ?target)
+  | (At(actor, ?here) & Gated(Path(here, _), ?target))
+  | (At(actor, ?here) & At(?target, ?location) & Path(here, location)
+     & ConveysVisibility(Path(here, location))
+     & !(Gated(Path(here, location), ?door) & !Transparent(door) & !Opened(door)))
+}
+
 entity Guard { Actor, Locatable, Describable }
 entity Closet { Location, Describable }
 entity ClosetDoor { Openable, Locatable, Describable }
@@ -267,10 +285,6 @@ set {
 }
 
 -- (7) Simple conversation.
--- Introduces: actions with multiple typed arguments. Conversation reach is
--- decided by IsVisibleTo (section 6) — no separate before-rule needed; the
--- Guard in the Corridor is reachable from the Cell because the Bars are
--- transparent and the Cell↔Corridor path conveys visibility.
 
 trait Speaker
 trait Topic
@@ -292,14 +306,6 @@ set {
 }
 
 -- (8) Extend to conversation trees.
--- Introduces: an explicit unique(actor, speaker) state relation
--- (InConversation) tracking the current conversation topic per (Actor,
--- Speaker), a `LeadsTo` adjacency over topics, and a predicate WillTalkAbout
--- that holds when the actor can reach the topic either as a top-level entry
--- (TalksAbout) or as a sub-topic of the current conversation (InConversation
--- + LeadsTo). The (7) TalkAbout action is replaced to consult WillTalkAbout,
--- and a single after-rule advances InConversation uniformly on every
--- successful talk.
 
 relation InConversation(actor: Actor, speaker: Speaker, topic: Topic) unique(actor, speaker)
 relation LeadsTo(Speaker, Topic, Topic)
@@ -393,10 +399,6 @@ set {
 }
 
 -- (9) Reactions to conversation.
--- Introduces: entity-literal sugar for parameter slots (`Guard`,
--- `OfferMoney`) and after-rules that either preempt the action by failing or
--- commit consequences. Because actions are atomic, a failing after-rule rolls
--- back the TalkAbout action and any earlier after-rule effects.
 
 entity Money { Portable, Locatable }
 
@@ -407,7 +409,6 @@ after TalkAbout(actor: Actor, Guard, OfferMoney) {
   }
 }
 
--- Offering a favor moves the master key from the guard to the actor.
 after TalkAbout(actor: Actor, Guard, OfferAFavor) {
   set {
     !Carrying(Guard, MasterKey);
@@ -417,14 +418,41 @@ after TalkAbout(actor: Actor, Guard, OfferAFavor) {
 }
 
 set {
-  -- The guard now starts carrying the master key; the player must walk
-  -- Whatever → Bribery → OfferAFavor to get it. Money is never placed in
-  -- the world, so offering it fails.
   !At(MasterKey, Cell);
   Carrying(Guard, MasterKey);
 }
 
--- (10) Regression validations.
+-- (10) Combat
+
+trait Combatant
+
+relation EngagedInCombat(Combatant, Combatant)
+
+action Fight(actor: (Actor & Combatant), target: (Actor & Combatant)) {
+  when (IsReachable(actor, target) & !EngagedInCombat(actor, target)) {
+    set EngagedInCombat(actor, target)
+  }
+}
+
+namespace ActOne {
+  extend Player { Combatant }
+  extend Guard { Combatant }
+  before Fight(Player, Guard) {
+    when (!Opened(Bars) & At(Player, Cell) & !At(Guard, Cell)) {
+      fail;
+    }
+  }
+  after TalkAbout(Player, Guard, BriberyIsWrong) {
+    try {
+      Unlock(Guard, Bars, MasterKey);
+      Open(Guard, Bars);
+      Go(Guard, Cell);
+      Fight(Guard, Player);
+    }
+  }
+}
+
+-- (11) Regression validations.
 -- Introduces: first-class validation declarations. These assertions are meant
 -- to be run before committing authored mutations so that core story guarantees
 -- remain intact.
@@ -433,10 +461,13 @@ validation TutorialSmoke {
   assert fact At(Player, Cell);
   assert not fact At(Player, Outside);
   assert query Locked(Bars);
+  assert query Carrying(Guard, MasterKey);
+  assert not query EngagedInCombat(Guard, Player);
   assert play Go(Player, Outside) => failed;
+  assert play Fight(Player, Guard) => failed reasons { !Opened(Bars) & At(Player, Cell) & !At(Guard, Cell); };
 }
 
--- (11) Playable mockup.
+-- (12) Playable mockup.
 -- Introduces: mockup menus. Play mode starts at the declared mockup start call.
 -- intentionally raw: titles, details, option labels, successes, and failures
 -- come straight from ids and relation/action results so coauthoring agents can
@@ -461,6 +492,7 @@ mockup MainMenu(cursor: Actor { At(cursor, ?here) }) {
     "unlock" -> UnlockMenu(cursor)
     "lock" -> LockMenu(cursor)
     "talk" -> TalkToMenu(cursor)
+    "fight" -> FightMenu(cursor)
   }
 }
 
@@ -576,5 +608,13 @@ mockup TalkMenu(cursor: Actor, speaker: Speaker) {
     when (InConversation(cursor, speaker, Whatever)) {
       "leave" -> StopTalking(cursor, speaker) -> MainMenu(cursor)
     }
+  }
+}
+
+mockup FightMenu(cursor: Actor) {
+  title { "Fight..." }
+  options {
+    target: GetVisibles(cursor) -> Fight(cursor, target)
+    "never mind" -> MainMenu(cursor)
   }
 }

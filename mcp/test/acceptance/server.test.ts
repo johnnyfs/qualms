@@ -71,8 +71,8 @@ describe("MCP server for the current Qualms DSL", () => {
     };
     expect(content.sessionId).toMatch(/[0-9a-f-]+/);
     expect(content.loaded.storyPaths).toEqual([TUTORIAL_PATH]);
-    expect(content.loaded.counts.traits).toBe(10);
-    expect(content.loaded.counts.actions).toBe(12);
+    expect(content.loaded.counts.traits).toBe(11);
+    expect(content.loaded.counts.actions).toBe(13);
   });
 
   it("queries using the current DSL expression syntax", async () => {
